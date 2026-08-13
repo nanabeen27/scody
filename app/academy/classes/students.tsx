@@ -1,0 +1,296 @@
+import { useMemo, useState } from 'react';
+import { useRouter } from 'expo-router';
+import {
+  Screen,
+  AppText,
+  SegmentedControl,
+  Field,
+  Icon,
+  Pager,
+  Table,
+  useTableSort,
+  type Column,
+  type SegmentedOption,
+} from '@/components';
+import { useCurrentAccount, useSession } from '@/session';
+import { useProgress } from '@/features/progress';
+import { useAcademyStaff } from '@/features/academy';
+import { scopedAssignments, studentSummaries, type StudentSummary } from '@/features/academyStats';
+import { formatDate } from '@/features/learning';
+import type { Account } from '@/data';
+import { colors } from '@/theme/tokens';
+
+/** 한 페이지에 보여 줄 학생 수. `app/admin/users.tsx`와 같은 20명씩. */
+const PAGE = 20;
+/** 반 필터를 칩으로 둘 수 있는 최대 개수. 그보다 많으면 이름 검색으로 좁힌다. */
+const SEGMENT_MAX = 6;
+
+/** 목록 한 줄. */
+interface StudentRow {
+  account: Account;
+  classes: { id: string; name: string }[];
+  stat: StudentSummary;
+}
+
+/**
+ * 학원 전체 학생.
+ *
+ * 반 상세는 그 반 학생만 보여 준다. 이름만 아는 학생이 어느 반인지 찾을 길이 없어서
+ * 이 화면을 둔다. 탭에는 넣지 않는다(학원 메뉴 6개는 4절 고정) — `반·학생`과 대시보드에서 들어온다.
+ *
+ * **행을 누르면 그 학생 상세로 간다.** 예전에는 그 학생의 첫 번째 반으로 보냈다 — 학생을 찾아
+ * 눌렀는데 반 화면이 열려서, 두 반에 속한 학생은 반쪽만 보였다.
+ *
+ * 권한: **원장은 우리 학원 학생 전체**(반이 없는 학생도 찾을 수 있어야 반에 넣을 수 있다),
+ * **선생님은 담당 반 학생만**이다(`classesFor`와 같은 경계).
+ */
+export default function AcademyStudents() {
+  const router = useRouter();
+  const account = useCurrentAccount();
+  const { academyStudents } = useSession();
+  const isDirector = account.academyRole === 'director';
+  const { classesFor } = useAcademyStaff();
+  const { assignments } = useProgress();
+  const [query, setQuery] = useState('');
+  const [classFilter, setClassFilter] = useState('all');
+  const [classQuery, setClassQuery] = useState('');
+  const [page, setPage] = useState(0);
+
+  const classes = useMemo(() => classesFor(account), [classesFor, account]);
+
+  /** 학생 → 속한 반(내가 볼 수 있는 반만). 반 이름과 갈 곳을 함께 들고 간다. */
+  const classesByStudent = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }[]>();
+    for (const c of classes) {
+      for (const studentId of c.studentIds) {
+        const list = map.get(studentId) ?? [];
+        list.push({ id: c.id, name: c.name });
+        map.set(studentId, list);
+      }
+    }
+    return map;
+  }, [classes]);
+
+  /** 학생별 요약. 내가 볼 수 있는 반의 배정만 센다. 한 번만 훑는다. */
+  const statBy = useMemo(
+    () => studentSummaries(scopedAssignments(classes, assignments)),
+    [assignments, classes],
+  );
+
+  /**
+   * 검색 대상. 원장은 우리 학원 학생 계정 전체, 선생님은 담당 반 학생만이다.
+   * 반이 없는 학생은 원장 화면에만 나타난다 — 반에 넣는 것이 원장의 일이다(3절).
+   */
+  const pool = useMemo<Account[]>(() => {
+    if (!account.academyName) return [];
+    const all = academyStudents;
+    if (isDirector) return all;
+    return all.filter((s) => classesByStudent.has(s.userId));
+  }, [account.academyName, isDirector, classesByStudent, academyStudents]);
+
+  const classOptions = useMemo<SegmentedOption<string>[]>(
+    () => [
+      { value: 'all', label: '모든 반' },
+      ...classes.map((c) => ({ value: c.id, label: c.name, count: c.studentIds.length })),
+    ],
+    [classes],
+  );
+  const useSegments = classes.length <= SEGMENT_MAX;
+
+  const rows = useMemo<StudentRow[]>(() => {
+    const q = query.trim();
+    const cq = classQuery.trim();
+    return pool
+      .filter((s) => !q || s.name.includes(q) || s.scodyId.includes(q))
+      .filter((s) => {
+        const mine = classesByStudent.get(s.userId) ?? [];
+        if (useSegments && classFilter !== 'all') return mine.some((c) => c.id === classFilter);
+        if (!useSegments && cq) return mine.some((c) => c.name.includes(cq));
+        return true;
+      })
+      .map((s) => ({
+        account: s,
+        classes: classesByStudent.get(s.userId) ?? [],
+        stat: statBy.get(s.userId) ?? EMPTY,
+      }));
+  }, [pool, query, classQuery, classFilter, useSegments, classesByStudent, statBy]);
+
+
+  const columns: Column<StudentRow>[] = [
+    { key: 'name', header: '이름', cell: (r) => r.account.name, sort: COMPARE.name },
+    /*
+      **`반`은 390에서도 접지 않는다.** 이 화면이 있는 이유가 "이름만 아는 학생이 어느 반인지"라서
+      그 열이 접히면 화면의 목적이 사라진다(위 주석). 접을 순서는 `안 낸 과제`로 내렸다 —
+      기본 정렬이 안 낸 과제 순이라는 사실은 표 위 캡션이 이미 말한다.
+    */
+    {
+      key: 'class',
+      header: '반',
+      cell: (r) => (r.classes.length ? r.classes.map((c) => c.name).join(' · ') : '아직 반이 없어요'),
+    },
+    {
+      key: 'assigned',
+      header: '배정',
+      width: 68,
+      align: 'right',
+      priority: 3,
+      cell: (r) => `${r.stat.assigned.toLocaleString('en-US')}건`,
+      sort: COMPARE.assigned,
+    },
+    {
+      key: 'rate',
+      header: '제출률',
+      width: 76,
+      align: 'right',
+      priority: 2,
+      cell: (r) => (r.stat.rate != null ? `${r.stat.rate}%` : '배정 없음'),
+      sort: COMPARE.rate,
+    },
+    {
+      key: 'accuracy',
+      header: '평균 정답률',
+      width: 92,
+      align: 'right',
+      priority: 3,
+      cell: (r) => (r.stat.accuracy != null ? `${r.stat.accuracy}%` : '—'),
+      sort: COMPARE.accuracy,
+    },
+    {
+      key: 'pending',
+      header: '안 낸 과제',
+      width: 88,
+      align: 'right',
+      // 기본 정렬 기준이라 390에서도 남긴다. `이름 + 반 + 안 낸 과제 + 이동`은 312px로
+      // 모바일 컬럼(358px) 안에 들어간다(실측) — 정렬 기준이 안 보이면 캡션이 거짓이 된다.
+      cell: (r) => (r.stat.pending > 0 ? `${r.stat.pending}건` : '없음'),
+      sort: COMPARE.pending,
+    },
+    {
+      key: 'last',
+      header: '최근 제출',
+      width: 92,
+      align: 'right',
+      priority: 3,
+      cell: (r) => (r.stat.lastSubmittedAt ? formatDate(r.stat.lastSubmittedAt) : '기록 없음'),
+      sort: COMPARE.last,
+    },
+    /* 눌리는 표라는 표시. 반 목록·대시보드 반별 현황과 같은 열이다. */
+    {
+      key: 'go',
+      header: '',
+      width: 24,
+      cell: () => <Icon name="chevron-right" size={18} color={colors.inkTertiary} />,
+    },
+  ];
+
+  /**
+   * 정렬은 **화면이 쥔다** — 표에 페이지 슬라이스를 넘기기 때문이다(A-050).
+   * 기본은 안 낸 과제가 많은 순이라 여기서 한 번 세워 두고, 열 헤더는 그 위에서 다시 세운다.
+   */
+  const ordered = useMemo(() => [...rows].sort(COMPARE.pending).reverse(), [rows]);
+  const sorted = useTableSort(ordered, COMPARE, () => setPage(0));
+  const visible = sorted.rows.slice(page * PAGE, (page + 1) * PAGE);
+
+  return (
+    <Screen
+      wide
+      testID="academy-students"
+      backFallback="/academy/classes"
+      title="학생"
+      scrollResetKey={page}
+    >
+      {/* 로스터 3,000명은 규모 확인용 개발 데이터다(마스터 플랜 5절). */}
+      <AppText variant="caption" tone="tertiary">
+        프로토타입 테스트 계정입니다. 로스터 계정은 비밀번호가 없어 로그인할 수 없어요.
+      </AppText>
+      <AppText variant="caption" tone="secondary">
+        {isDirector ? '우리 학원 학생' : '담당 반 학생'} {pool.length.toLocaleString('en-US')}명
+      </AppText>
+
+      <Field
+        label="이름·아이디로 찾기"
+        testID="student-search"
+        value={query}
+        onChangeText={(v) => {
+          setQuery(v);
+          setPage(0);
+        }}
+        placeholder="예: 정예린 또는 hanbit.s0001"
+      />
+
+      {classes.length === 0 ? null : useSegments ? (
+        <SegmentedControl
+          testID="student-class"
+          options={classOptions}
+          value={classFilter}
+          onChange={(v) => {
+            setClassFilter(v);
+            setPage(0);
+          }}
+        />
+      ) : (
+        <Field
+          label="반 이름으로 좁히기"
+          testID="student-class-search"
+          value={classQuery}
+          onChangeText={(v) => {
+            setClassQuery(v);
+            setPage(0);
+          }}
+          placeholder="예: 고1 국어 3반"
+        />
+      )}
+
+      <AppText variant="caption" tone="secondary">
+        안 낸 과제가 많은 학생부터예요. 열 이름을 누르면 학생 전체를 다시 줄 세워요. 행을 누르면 그
+        학생의 학원 학습 기록을 봐요.
+      </AppText>
+
+      <Table
+        testID="academy-student-table"
+        columns={columns}
+        rows={visible}
+        {...sorted.props}
+        rowKey={(r) => r.account.userId}
+        onRowPress={(r) => router.push(`/academy/classes/student/${r.account.userId}` as never)}
+        rowLabel={(r) =>
+          [
+            r.account.name,
+            r.classes.length ? r.classes.map((c) => c.name).join(' · ') : '아직 반이 없어요',
+            `배정 ${r.stat.assigned}건`,
+            r.stat.rate != null ? `제출률 ${r.stat.rate}%` : '배정 없음',
+            r.stat.pending > 0 ? `안 낸 과제 ${r.stat.pending}건` : '안 낸 과제 없음',
+          ].join(', ')
+        }
+        empty={{ title: '찾는 학생이 없어요', subtitle: '이름이나 아이디를 다시 확인해 주세요' }}
+      />
+
+      {sorted.rows.length > PAGE ? (
+        <Pager
+          testID="student-pager"
+          total={sorted.rows.length}
+          page={page}
+          pageSize={PAGE}
+          unit="명"
+          onChange={setPage}
+        />
+      ) : null}
+    </Screen>
+  );
+}
+
+const EMPTY: StudentSummary = { assigned: 0, submitted: 0, pending: 0, rate: null, accuracy: null };
+
+/** 열 정렬. **오름차순으로 정의한다** — 내림차순은 표가 뒤집는다. */
+const COMPARE: Record<string, (a: StudentRow, b: StudentRow) => number> = {
+  name: (a, b) => a.account.name.localeCompare(b.account.name),
+  assigned: (a, b) => a.stat.assigned - b.stat.assigned,
+  rate: (a, b) => nullLast(a.stat.rate) - nullLast(b.stat.rate),
+  accuracy: (a, b) => nullLast(a.stat.accuracy) - nullLast(b.stat.accuracy),
+  pending: (a, b) => a.stat.pending - b.stat.pending || b.account.name.localeCompare(a.account.name),
+  last: (a, b) => (a.stat.lastSubmittedAt ?? '').localeCompare(b.stat.lastSubmittedAt ?? ''),
+};
+
+function nullLast(v: number | null): number {
+  return v == null ? Number.POSITIVE_INFINITY : v;
+}

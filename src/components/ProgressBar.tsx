@@ -8,7 +8,9 @@ export function ProgressBar({ value }: { value: number }) {
     <View
       style={styles.track}
       accessibilityRole="progressbar"
-      accessibilityValue={{ now: pct, min: 0, max: 100 }}
+      aria-valuenow={pct}
+      aria-valuemin={0}
+      aria-valuemax={100}
     >
       <View style={[styles.fill, { width: `${pct}%` }]} />
     </View>

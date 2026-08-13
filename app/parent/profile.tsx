@@ -1,13 +1,13 @@
 import { View } from 'react-native';
 import { Screen, Section, Group, Row, AppText, AccountSettings } from '@/components';
-import { useCurrentAccount } from '@/session';
-import { getChildren } from '@/data';
+import { useCurrentAccount, useSession } from '@/session';
 import { spacing } from '@/theme/tokens';
 
 /** 내 정보: 구독 상태(자녀별 결제)와 계정. */
 export default function ParentProfile() {
   const account = useCurrentAccount();
-  const children = getChildren(account.userId);
+  const { childrenOf } = useSession();
+  const children = childrenOf(account.userId);
   const paid = children.flatMap((c) =>
     c.entitlements
       .filter((e) => e.payer === 'parent')

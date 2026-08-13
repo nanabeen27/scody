@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Animated, Platform, View, type ViewStyle } from 'react-native';
+import { useReduceMotion } from '@/theme/useReduceMotion';
+import { motion } from '@/theme/motion';
 
 interface Props {
   children: ReactNode;
@@ -19,6 +21,7 @@ interface Props {
  */
 export function Reveal({ children, delay = 0, offset = 20, onVisible, style }: Props) {
   const isWeb = Platform.OS === 'web';
+  const reduced = useReduceMotion();
   const [opacity] = useState(() => new Animated.Value(isWeb ? 0 : 1));
   const [translateY] = useState(() => new Animated.Value(isWeb ? offset : 0));
   const outerRef = useRef<View | null>(null);
@@ -49,12 +52,18 @@ export function Reveal({ children, delay = 0, offset = 20, onVisible, style }: P
   useEffect(() => {
     if (!visible) return;
     onVisible?.();
+    // 모션 줄이기: 올라오지 않고 그 자리에 그대로 있다. 내용은 똑같이 보인다.
+    if (reduced) {
+      opacity.setValue(1);
+      translateY.setValue(0);
+      return;
+    }
     Animated.parallel([
-      Animated.timing(opacity, { toValue: 1, duration: 620, delay, useNativeDriver: false }),
-      Animated.timing(translateY, { toValue: 0, duration: 620, delay, useNativeDriver: false }),
+      Animated.timing(opacity, { toValue: 1, duration: motion.duration.slow, delay, useNativeDriver: false }),
+      Animated.timing(translateY, { toValue: 0, duration: motion.duration.slow, delay, useNativeDriver: false }),
     ]).start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
+  }, [visible, reduced]);
 
   // 레이아웃(style: flex·정렬·너비)은 바깥 View에 둔다 — 이 View가 부모(행/그리드)의
   // 실제 플렉스 자식이라서, 여기에 flex를 줘야 절반 컬럼이 제대로 늘어난다.

@@ -16,14 +16,30 @@ export type IconName =
   | 'settings'
   | 'chevron-right'
   | 'chevron-left'
+  | 'chevron-down'
   | 'arrow-up'
+  | 'arrow-down'
+  | 'arrow-right'
+  | 'refresh-cw'
+  | 'eye'
   | 'check'
+  | 'check-circle'
+  | 'check-square'
+  | 'minus-circle'
   | 'plus'
+  | 'star'
   | 'file-text'
+  | 'file-plus'
   | 'credit-card'
   | 'alert-circle'
   | 'activity'
-  | 'list';
+  | 'list'
+  | 'smartphone'
+  | 'message-circle'
+  | 'bookmark'
+  | 'copy'
+  | 'link'
+  | 'trash-2';
 
 export function Icon({
   name,

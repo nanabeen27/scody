@@ -1,9 +1,14 @@
 import { View, StyleSheet } from 'react-native';
 import { AppText } from './AppText';
-import { ProgressBar } from './ProgressBar';
 import { colors, spacing, radius, typeface } from '@/theme/tokens';
 
-/** 정답률 지표. 거대 숫자·강한 색 대신 중립 지표 + 얇은 막대(Stripe 지표 감성). */
+/**
+ * 정답률 지표.
+ *
+ * **막대를 두지 않는다.** 숫자가 `80%`라고 말하고 아래 줄이 `10문항 중 8문항 정답`이라고
+ * 또 말하는데, 같은 비율을 막대로 한 번 더 그리면 같은 말이 세 번이 된다
+ * (§13 `의미 없는 배지·수치·그래프`). 막대는 **여러 값을 나란히 비교할 때만** 쓴다(`BarRow`).
+ */
 export function ScoreCard({ rate, detail }: { rate: number; detail: string }) {
   return (
     <View style={styles.card}>
@@ -16,7 +21,6 @@ export function ScoreCard({ rate, detail }: { rate: number; detail: string }) {
           %
         </AppText>
       </View>
-      <ProgressBar value={rate} />
       <AppText variant="caption" tone="tertiary">
         {detail}
       </AppText>

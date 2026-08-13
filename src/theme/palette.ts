@@ -22,7 +22,9 @@ export type ColorName =
   | 'personal'
   | 'academy'
   | 'danger'
-  | 'success';
+  | 'success'
+  /** 떠 있는 면의 그림자. 다크에서 검정 그림자는 보이지 않아 값을 갈라 둔다. */
+  | 'shadow';
 
 export const PALETTE_LIGHT: Record<ColorName, string> = {
   // 종이 느낌의 옅은 베이지. 순백은 눈이 부시고 카드와 배경이 구분되지 않는다.
@@ -45,6 +47,7 @@ export const PALETTE_LIGHT: Record<ColorName, string> = {
   academy: '#a84b2f', // Terra Cotta (학원)
   danger: '#b3402f',
   success: '#2f7d5b',
+  shadow: '#091717',
 };
 
 export const PALETTE_DARK: Record<ColorName, string> = {
@@ -66,6 +69,7 @@ export const PALETTE_DARK: Record<ColorName, string> = {
   academy: '#d98a63',
   danger: '#e0715a',
   success: '#5cbf90',
+  shadow: '#000000',
 };
 
 const NAMES = Object.keys(PALETTE_LIGHT) as ColorName[];
@@ -73,6 +77,16 @@ const NAMES = Object.keys(PALETTE_LIGHT) as ColorName[];
 function vars(p: Record<ColorName, string>): string {
   return NAMES.map((n) => `--sc-${n}:${p[n]};`).join('');
 }
+
+/**
+ * 키보드 포커스 링. **한곳에서만 정한다** — 컴포넌트마다 그리면 모양이 갈리고,
+ * 브라우저 기본 링은 팔레트와 맞지 않고 `borderRadius`를 따르지 않는다.
+ * `:focus-visible`이라 마우스 클릭에는 뜨지 않는다.
+ */
+export const FOCUS_CSS = `
+:focus-visible{outline:2px solid var(--sc-accent);outline-offset:2px;border-radius:inherit}
+:focus:not(:focus-visible){outline:none}
+`;
 
 export const THEME_CSS = `
 :root{${vars(PALETTE_LIGHT)}}

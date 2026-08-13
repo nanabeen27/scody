@@ -1,4 +1,6 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from './_fixtures';
+import { sid } from './_ids';
+import { type Page } from '@playwright/test';
 import { loginHere } from './_auth';
 
 async function login(page: Page, scodyId: string) {
@@ -13,7 +15,9 @@ test.describe('M5 이용권·소속 경계', () => {
   test('학원이 등록한 문제는 다른 학생의 개인 학습에 공개되지 않는다', async ({ page }) => {
     await page.goto('/login');
     await loginHere(page, 'hanbit.teacher');
-    await page.getByRole('link', { name: '문제 등록' }).click();
+    // `문제 등록` 탭을 내리고 `문제`(우리 학원 콘텐츠) 화면 안 행동으로 옮겼다(D-064).
+    await page.getByRole('link', { name: '문제' }).click();
+    await page.getByTestId('academy-content-new').click();
 
     await page.getByTestId('new-kind-grammar').click();
     await page.getByTestId('new-title').fill(ACADEMY_CONTENT);
@@ -21,8 +25,9 @@ test.describe('M5 이용권·소속 경계', () => {
     for (let ci = 0; ci < 4; ci++) await page.getByTestId(`new-q0-c${ci}`).fill(`보기 ${ci + 1}`);
     await page.getByTestId('new-save').click();
     await expect(page.getByText('문제를 등록했어요')).toBeVisible();
+    // 등록을 마치면 방금 만든 학습이 실려 배정으로 이어진다(D-064).
     await page.getByTestId('composer-done').click();
-    // 배정 목록에서는 고를 수 있다
+    await page.getByTestId(`assign-class-${sid('c_kor1')}`).click();
     await expect(page.getByText(ACADEMY_CONTENT).first()).toBeVisible();
 
     await page.getByRole('link', { name: '학원 관리' }).click();
@@ -32,6 +37,7 @@ test.describe('M5 이용권·소속 경계', () => {
     await page.getByRole('link', { name: '학습' }).click();
     await expect(page.getByText('개인 학습').first()).toBeVisible();
     // 어느 학년·영역으로 들어가도 학원 전용 콘텐츠는 없다
+    await page.getByTestId('learn-pick').click();
     await page.getByTestId('learn-grade-1').click();
     await page.getByTestId('learn-area-문법').click();
     await expect(page.getByText(ACADEMY_CONTENT)).toHaveCount(0);
@@ -52,7 +58,9 @@ test.describe('M5 이용권·소속 경계', () => {
     await page.getByText(/학원 공간/).click();
     await expect(page).toHaveURL(/\/academy/);
 
-    await page.getByRole('link', { name: '문제 등록' }).click();
+    // `문제 등록` 탭을 내리고 `문제`(우리 학원 콘텐츠) 화면 안 행동으로 옮겼다(D-064).
+    await page.getByRole('link', { name: '문제' }).click();
+    await page.getByTestId('academy-content-new').click();
     await page.getByTestId('new-kind-grammar').click();
     await page.getByTestId('new-title').fill(OTHER_ACADEMY_CONTENT);
     await page.getByTestId('new-q0-prompt').fill('다음 중 띄어쓰기가 옳은 것은?');
@@ -65,9 +73,16 @@ test.describe('M5 이용권·소속 경계', () => {
     await loginHere(page, 'hanbit.director');
 
     await page.getByRole('link', { name: '학습 배정' }).click();
+    await page.getByTestId(`assign-class-${sid('c_kor1')}`).click();
     // 운영자 공개 콘텐츠는 배정할 수 있다
+    await page.getByTestId('assign-content-search').fill('정보의 홍수');
     await expect(page.getByText('정보의 홍수와 비판적 읽기').first()).toBeVisible();
-    // 다른 학원 전용 콘텐츠는 보이지 않는다
+    /*
+      다른 학원 전용 콘텐츠는 검색해도 나오지 않는다.
+      예전에는 첫 화면에 전체 목록이 있어 "안 보인다"가 우연히 통과했다 —
+      이제는 이름으로 직접 찾아도 없다는 것을 확인한다.
+    */
+    await page.getByTestId('assign-content-search').fill(OTHER_ACADEMY_CONTENT);
     await expect(page.getByText(OTHER_ACADEMY_CONTENT)).toHaveCount(0);
   });
 

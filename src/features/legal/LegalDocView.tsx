@@ -75,7 +75,7 @@ export function LegalDocView({ doc }: { doc: LegalDoc }) {
       <Button
         testID="legal-home"
         variant="secondary"
-        fullWidth
+        hug
         label="소개 페이지로 돌아가기"
         onPress={() => router.push('/introduce' as never)}
       />

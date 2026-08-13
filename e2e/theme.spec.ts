@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './_fixtures';
 
 test.describe('테마', () => {
   test('테마 토글이 라이트/다크를 전환한다', async ({ page }) => {

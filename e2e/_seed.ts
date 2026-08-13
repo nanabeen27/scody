@@ -1,0 +1,62 @@
+import { readFileSync } from 'node:fs';
+import { Client } from 'pg';
+
+/**
+ * 테스트 사이에 DB를 seed 상태로 되돌린다.
+ *
+ * ## 왜 필요해졌나
+ *
+ * 프로토타입은 상태가 메모리에 있어서 **페이지를 새로 열면 초기화**됐다. 그래서 각 테스트가
+ * 서로에게 영향을 주지 않았다. 지금은 서버에 남는다 — 한 테스트가 선생님을 제외하거나 반을
+ * 폐강하면 뒤 테스트가 그 상태를 물려받는다(실측: 학원 흐름 15건이 이 때문에 갈렸다).
+ *
+ * `supabase/seed.sql`은 앞머리에서 앱 표를 비우고 다시 넣으므로 그대로 다시 실행하면 된다.
+ * 연결은 프로세스당 한 번만 만든다 — 매번 새로 열면 왕복이 테스트 시간을 지배한다.
+ */
+
+let client: Client | null = null;
+let sql: string | null = null;
+
+function env(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of readFileSync('.env', 'utf8').split('\n')) {
+    const at = line.indexOf('=');
+    if (at > 0 && !line.trimStart().startsWith('#')) {
+      out[line.slice(0, at).trim()] = line
+        .slice(at + 1)
+        .trim()
+        .replace(/^(['"])(.*)\1$/, '$2');
+    }
+  }
+  return out;
+}
+
+async function connect(): Promise<Client> {
+  if (client) return client;
+  const vars = env();
+  const url = new URL(readFileSync('supabase/.temp/pooler-url', 'utf8').trim());
+  const next = new Client({
+    host: url.hostname,
+    port: Number(url.port || 5432),
+    user: decodeURIComponent(url.username),
+    database: url.pathname.replace(/^\//, '') || 'postgres',
+    // 풀러 주소에는 비밀번호가 없다. CLI와 같은 값을 넣는다.
+    password: vars.SUPABASE_DB_PASSWORD,
+    ssl: { rejectUnauthorized: false },
+  });
+  await next.connect();
+  client = next;
+  return next;
+}
+
+/** seed를 다시 넣는다. 파일 전체를 한 번에 보내 하나의 트랜잭션이 되게 한다. */
+export async function reseed(): Promise<void> {
+  sql ??= readFileSync('supabase/seed.sql', 'utf8');
+  const db = await connect();
+  await db.query(sql);
+}
+
+export async function closeSeedConnection(): Promise<void> {
+  await client?.end();
+  client = null;
+}

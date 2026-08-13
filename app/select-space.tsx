@@ -12,8 +12,9 @@ const ROLE_DESC: Record<string, string> = {
 /** 다역할 계정의 공간 선택. 한 계정으로 학생/학부모/학원을 오간다. */
 export default function SelectSpace() {
   const router = useRouter();
-  const { account } = useSession();
+  const { account, loading } = useSession();
   // 직접 URL 진입이나 새로고침으로 세션이 없으면 흰 화면 대신 로그인으로 보낸다.
+  if (loading) return null;
   if (!account) return <Redirect href={'/login' as never} />;
 
   return (

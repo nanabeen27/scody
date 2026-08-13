@@ -12,11 +12,19 @@ type Variant =
   | 'caption'
   | 'eyebrow';
 
-type Tone = 'default' | 'secondary' | 'tertiary' | 'accent';
+type Tone = 'default' | 'secondary' | 'tertiary' | 'accent' | 'danger' | 'success';
+type Weight = 'regular' | 'medium' | 'semibold' | 'bold';
 
 interface Props extends TextProps {
   variant?: Variant;
   tone?: Tone;
+  /**
+   * 변형이 정한 무게를 덮어쓴다. **크기·행간은 그대로 둔다** — 크기를 바꾸려면 변형을 바꾼다.
+   * 이것이 없어서 화면들이 `style={{ fontFamily: typeface.semibold }}`를 50곳에 손으로 적었다.
+   */
+  weight?: Weight;
+  /** 등폭 숫자. 자릿수 선이 맞아야 위아래로 훑으며 비교된다. */
+  numeric?: boolean;
 }
 
 const TONE: Record<Tone, string> = {
@@ -24,10 +32,37 @@ const TONE: Record<Tone, string> = {
   secondary: colors.inkSecondary,
   tertiary: colors.inkTertiary,
   accent: colors.accent,
+  danger: colors.danger,
+  success: colors.success,
 };
 
-export function AppText({ variant = 'body', tone = 'default', style, ...rest }: Props) {
-  return <Text {...rest} style={[styles[variant], { color: TONE[tone] }, style]} />;
+const WEIGHT: Record<Weight, string> = {
+  regular: typeface.regular,
+  medium: typeface.medium,
+  semibold: typeface.semibold,
+  bold: typeface.bold,
+};
+
+export function AppText({
+  variant = 'body',
+  tone = 'default',
+  weight,
+  numeric,
+  style,
+  ...rest
+}: Props) {
+  return (
+    <Text
+      {...rest}
+      style={[
+        styles[variant],
+        { color: TONE[tone] },
+        weight ? { fontFamily: WEIGHT[weight] } : null,
+        numeric ? styles.numeric : null,
+        style,
+      ]}
+    />
+  );
 }
 
 const styles = StyleSheet.create({
@@ -82,4 +117,5 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     lineHeight: font.size.xs * font.lineHeight.normal,
   },
+  numeric: { fontVariant: ['tabular-nums'] },
 });

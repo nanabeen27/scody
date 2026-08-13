@@ -1,4 +1,4 @@
-import type { Account, AcademyClass } from './types';
+import type { Account, AcademyClass, Grade } from './types';
 
 /**
  * 규모가 있는 학원을 보여주기 위한 개발용 로스터.
@@ -34,10 +34,30 @@ function nameFor(i: number): string {
 
 /** 고1~고3 × 반 번호. 120개 반을 학년별로 40개씩 나눈다. */
 function classLabel(i: number): string {
-  const grade = 1 + Math.floor(i / 40);
-  const room = (i % 40) + 1;
-  return `고${grade} 국어 ${room}반`;
+  return `고${gradeOf(i)} 국어 ${(i % 40) + 1}반`;
 }
+
+/** 반 인덱스 → 학년. 이름과 같은 규칙이지만 이름을 파싱하지 않는다(`AcademyClass.grade`). */
+function gradeOf(i: number): Grade {
+  return (1 + Math.floor(i / 40)) as Grade;
+}
+
+/**
+ * 테스트 선생님 계정이 실제로 맡는 반.
+ *
+ * 담당 반이 하나뿐이면(학생 9명·배정 1건) 선생님 대시보드의 추이·분포·영역별 그래프가
+ * 전부 빈 상태로 남는다. 실제 학원 선생님의 담당 규모(3~4반)에 맞춰 로스터 반을 나눠 준다.
+ * **학년을 갈라 주는 이유**: `u_teacher_kor`은 `c_kor1`(고1 국어), `u_teacher_kor2`는
+ * `c_kor2`(고2 국어)를 이미 맡고 있어 담당 학년이 섞이면 화면이 설명하기 어려워진다.
+ */
+const TEACHER_OVERRIDE: Readonly<Record<number, string>> = {
+  2: 'u_academy_teacher',
+  5: 'u_academy_teacher',
+  8: 'u_academy_teacher',
+  42: 'u_teacher_parent',
+  45: 'u_teacher_parent',
+  48: 'u_teacher_parent',
+};
 
 export const ROSTER_TEACHERS: readonly Account[] = Array.from(
   { length: TEACHER_COUNT },
@@ -70,7 +90,8 @@ export const ROSTER_CLASSES: readonly AcademyClass[] = Array.from(
     id: `c_hanbit_${String(i + 1).padStart(2, '0')}`,
     academyName: ROSTER_ACADEMY,
     name: classLabel(i),
-    teacherId: ROSTER_TEACHERS[i % TEACHER_COUNT].userId,
+    grade: gradeOf(i),
+    teacherId: TEACHER_OVERRIDE[i] ?? ROSTER_TEACHERS[i % TEACHER_COUNT].userId,
     studentIds: ROSTER_STUDENTS.slice(i * STUDENTS_PER_CLASS, (i + 1) * STUDENTS_PER_CLASS).map(
       (s) => s.userId,
     ),

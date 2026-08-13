@@ -73,7 +73,6 @@ function Step({
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
@@ -104,7 +103,10 @@ const styles = StyleSheet.create({
   step: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 2,
+    // 손가락으로 넘기는 주 조작이라 44px을 맞춘다(DESIGN.md §10). 운영자 표에도 같이 이득이다.
+    minHeight: 44,
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.md,
     borderRadius: radius.pill,

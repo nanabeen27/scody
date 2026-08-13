@@ -10,7 +10,8 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "lang": "ko"
+      "lang": "ko",
+      "name": "Scody - 가장 효율적인 학습 플랫폼"
     },
     "plugins": [
       "expo-router",

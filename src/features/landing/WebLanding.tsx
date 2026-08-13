@@ -2,12 +2,12 @@ import { useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import { useRouter } from 'expo-router';
 import Svg, { Circle, Line, Path, Polyline } from 'react-native-svg';
-import { AppText, Brand, Button, Group, Icon, ProgressBar, Row, ThemeToggle } from '@/components';
-import { colors, spacing, radius, typeface, font } from '@/theme/tokens';
+import { AppText, Brand, Button, Group, Icon, ProgressBar, Row, ThemeToggle, SegmentedControl } from '@/components';
+import { colors, control, spacing, radius, typeface } from '@/theme/tokens';
 import { useResponsive } from '@/theme/useResponsive';
 import { useSession } from '@/session';
 import { homeHrefFor, ROLE_LABEL } from '@/session/routing';
-import { ACCOUNTS, DEMO_PHONE_CODE, type Account } from '@/data';
+import { DEV_ACCOUNTS } from '@/session/devAccounts';
 import { LEGAL_DOCS } from '@/features/legal/documents';
 import { Reveal } from './Reveal';
 
@@ -53,15 +53,18 @@ function Hi({ children }: { children: React.ReactNode }) {
 export function WebLanding() {
   const { isMobile, isDesktop } = useResponsive();
   const router = useRouter();
-  const { account, signIn } = useSession();
+  const { account, signInWithTestAccount } = useSession();
   const [visitor, setVisitor] = useState<Visitor>('student');
   // 목업이 440px 고정폭이라 태블릿(820)에서 2단으로 두면 본문 컬럼이 짜부라진다.
   const heroTwoCol = isDesktop;
   const view = VISITOR_VIEW[visitor];
 
-  function enterDemo(acc: Account) {
-    signIn(acc);
-    router.replace(homeHrefFor(acc) as never);
+  /** 개발용 계정으로 바로 들어간다. 실제 로그인 수단은 `/login`에 있다. */
+  async function enterDemo(scodyId: string) {
+    const result = await signInWithTestAccount(scodyId);
+    if (result.ok && result.account) {
+      router.replace(homeHrefFor(result.account) as never);
+    }
   }
 
   return (
@@ -83,14 +86,20 @@ export function WebLanding() {
               />
             ) : (
               <>
+                {/*
+                  히어로 CTA가 이 화면의 primary다. 상단 바까지 채운 버튼을 두면 같은 화면에
+                  주인공이 둘이 된다 — 무게로 갈라 둔다(§8).
+                */}
                 <Button
                   testID="landing-login"
-                  variant="secondary"
+                  variant="ghost"
                   label="로그인"
                   onPress={() => router.push('/login' as never)}
                 />
                 <Button
                   testID="landing-signup"
+                  variant="secondary"
+                  tone="accent"
                   label="회원가입"
                   onPress={() => router.push('/signup' as never)}
                 />
@@ -228,7 +237,7 @@ export function WebLanding() {
           <View style={styles.footerTools}>
             <ThemeToggle />
           </View>
-          <DemoAccounts onEnter={enterDemo} />
+          <DemoAccounts onEnter={(id) => void enterDemo(id)} />
         </View>
       </View>
     </ScrollView>
@@ -301,38 +310,9 @@ const VISITOR_VIEW: Record<Visitor, VisitorView> = {
   },
 };
 
+/** 방문자 유형 토글. 모양·동작은 공통 `SegmentedControl`에 있다(같은 것을 두 벌 두지 않는다). */
 function VisitorToggle({ value, onChange }: { value: Visitor; onChange: (v: Visitor) => void }) {
-  return (
-    <View style={styles.toggleWrap}>
-      {VISITOR_TABS.map((t) => {
-        const on = t.value === value;
-        return (
-          <Pressable
-            key={t.value}
-            testID={`visitor-${t.value}`}
-            accessibilityRole="button"
-            accessibilityState={{ selected: on }}
-            onPress={() => onChange(t.value)}
-            style={({ pressed }) => [
-              styles.toggleItem,
-              on && styles.toggleItemOn,
-              pressed && !on && { backgroundColor: colors.hover },
-            ]}
-          >
-            <AppText
-              style={{
-                fontFamily: on ? typeface.semibold : typeface.medium,
-                fontSize: font.size.sm,
-                color: on ? colors.accent : colors.inkSecondary,
-              }}
-            >
-              {t.label}
-            </AppText>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
+  return <SegmentedControl testID="visitor" options={VISITOR_TABS} value={value} onChange={onChange} />;
 }
 
 /* ---------- 유형별 본문 ---------- */
@@ -788,7 +768,7 @@ function PickMock() {
       <MockHead title="문제 고르기" />
       <View style={styles.pickRow}>
         {GRADES.map((g, i) => (
-          <View key={g} style={[styles.pickChip, i === 0 && styles.pickChipOn]}>
+          <View key={g} style={[styles.pickSegment, i === 0 && styles.pickSegmentOn]}>
             <AppText
               variant="caption"
               tone={i === 0 ? 'accent' : 'secondary'}
@@ -1154,10 +1134,10 @@ function CompareSection() {
 
 /* ---------- 테스트 계정 ---------- */
 
-function DemoAccounts({ onEnter }: { onEnter: (acc: Account) => void }) {
+function DemoAccounts({ onEnter }: { onEnter: (scodyId: string) => void }) {
   const [show, setShow] = useState(false);
-  // 번호가 있는 계정만 로그인할 수 있다(로스터 계정은 규모용 데이터).
-  const accounts = ACCOUNTS.filter((a) => a.phone);
+  // seed가 만든 개발용 계정. 로그인 전에는 DB에서 아무것도 읽을 수 없어 목록이 클라이언트에 있다.
+  const accounts = DEV_ACCOUNTS;
   return (
     <View style={styles.demoBox}>
       <Pressable onPress={() => setShow((v) => !v)} accessibilityRole="button">
@@ -1173,10 +1153,10 @@ function DemoAccounts({ onEnter }: { onEnter: (acc: Account) => void }) {
           <Group>
             {accounts.map((a) => (
               <Row
-                key={a.userId}
+                key={a.scodyId}
                 title={`${a.name} · ${a.roles.map((r) => ROLE_LABEL[r]).join('/')}`}
-                subtitle={`${a.phone} · 인증번호 ${DEMO_PHONE_CODE}`}
-                onPress={() => onEnter(a)}
+                subtitle={a.note}
+                onPress={() => onEnter(a.scodyId)}
                 showChevron
               />
             ))}
@@ -1224,21 +1204,6 @@ const styles = StyleSheet.create({
   introBlock: { gap: spacing.md, maxWidth: 760 },
   introTitle: { ...keepAll, fontSize: 42, lineHeight: 58, letterSpacing: -0.2, marginTop: spacing.xs },
   introTitleMobile: { fontSize: 30, lineHeight: 42 },
-
-  toggleWrap: {
-    flexDirection: 'row',
-    alignSelf: 'flex-start',
-    backgroundColor: colors.offset,
-    borderRadius: radius.pill,
-    padding: 3,
-    gap: 3,
-  },
-  toggleItem: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.pill,
-  },
-  toggleItemOn: { backgroundColor: colors.surface },
 
   // 히어로 — 제목·본문·행동 사이 간격을 서로 다르게 준다.
   hero: { gap: spacing.xxl, marginTop: spacing.xxl },
@@ -1372,15 +1337,22 @@ const styles = StyleSheet.create({
   explainTag: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.pill },
   itemFlex: { flex: 1 },
 
-  pickRow: { flexDirection: 'row', gap: spacing.sm },
-  pickChip: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
+  // 소개 페이지의 정지 화면 미리보기. 실제 `SegmentedControl`과 같은 모양이어야
+  // 소개가 앱과 어긋나지 않는다(누를 수 없으므로 컴포넌트를 쓰지는 않는다).
+  pickRow: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.offset,
+    borderRadius: control.trackRadius,
+    padding: control.trackPadding,
+    gap: control.gap,
   },
-  pickChipOn: { backgroundColor: colors.accentSoft, borderColor: colors.accent },
+  pickSegment: {
+    paddingVertical: control.paddingY,
+    paddingHorizontal: control.paddingX,
+    borderRadius: control.itemRadius,
+  },
+  pickSegmentOn: { backgroundColor: colors.surface },
 
   weakList: { gap: spacing.md, marginVertical: spacing.xs },
   weakItem: { gap: spacing.xs },

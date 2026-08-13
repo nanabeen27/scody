@@ -12,6 +12,18 @@ export interface Entitlement {
   /** 결제 주체. 개인 이용권과 학원 이용권은 동시에 존재할 수 있다. */
   payer: 'student' | 'parent' | 'academy';
   label: string;
+  /**
+   * 구독을 시작한 날. 구독자 수 추이와 신규 구독을 세려면 필요하다.
+   * 없으면 계정 가입일로 본다(`startedAtOf`).
+   */
+  startedAt?: string;
+  /** 해지한 날. 있으면 `status`는 `canceled`다. */
+  canceledAt?: string;
+  /**
+   * 지금 살아 있는 구독인지. **만료일(`endsAt`)은 두지 않는다** — 결제 주기가 없어
+   * 만료를 발명하는 일이 된다(마스터 플랜 5절).
+   */
+  status?: 'active' | 'canceled';
 }
 
 export interface Account {
@@ -29,10 +41,26 @@ export interface Account {
   /** 카카오 계정과 연결되어 '카카오로 계속하기'로 로그인 가능한지. */
   kakaoLinked?: boolean;
   /**
+   * 계정을 만든 날(YYYY-MM-DD).
+   *
+   * 코호트 Day 0 · 신규 유입 · Activation 분모 · 계정 수 추이가 전부 여기서 나온다.
+   * **로스터 계정에는 넣지 않는다** — 3천 개에 날짜를 박는 대신 활동 데이터와 **같은 해시**에서
+   * 파생한다(`joinDateOf`). 따로 만들면 "가입 전에 활동한 학생"이 생겨 코호트가 깨진다.
+   */
+  createdAt?: string;
+  /** 학년. 검색 결과에서 동명이인을 가르는 근거 중 하나다(A-023이 요청한 값). */
+  grade?: Grade;
+  /**
    * 인증·복구·알림용 휴대폰 번호. 식별자가 아니다(기록은 `userId`에 붙는다).
    * 프로토타입에서는 '휴대폰 번호로 로그인'의 조회 키로만 쓴다. 번호가 없는 계정은 번호로 로그인할 수 없다.
    */
   phone?: string;
+  /**
+   * 고객지원 코드(`XXX-XXX`). 사용자가 문의에서 말할 수 있는 짧은 값이다.
+   * **이 코드로는 로그인할 수 없다** — 화면에서 그 사실을 밝힌다.
+   * 프로토타입은 `userId` 해시로 파생했지만 지금은 계정을 만들 때 정해 저장한 값이다.
+   */
+  supportCode?: string;
 }
 
 /** 초대 링크가 가리키는 대상. 휴대폰이 아니라 토큰으로 확인한다. */
@@ -112,6 +140,12 @@ export interface AcademyClass {
   name: string;
   teacherId: string;
   studentIds: string[];
+  /**
+   * 반의 학년. **반 이름(`고2 국어 3반`)을 파싱하지 않으려고 둔다** — 원장이 `renameClass`로
+   * 이름을 바꾸는 순간 파싱이 깨진다. 화면에서 만든 반은 값이 없고, 학년별 집계는 그런 반을
+   * `학년 미정`으로 따로 센다.
+   */
+  grade?: Grade;
 }
 
 export interface Submission {
@@ -119,6 +153,11 @@ export interface Submission {
   submitted: boolean;
   accuracy?: number; // 제출한 경우 0-100
   timeSec?: number; // 푸는 데 걸린 시간(초)
+  /**
+   * 제출한 날(YYYY-MM-DD). **마감일(`Assignment.dueDate`)과 다른 값이다.**
+   * 없으면 화면에서 `제출일 기록 없음`이라고 말한다 — 마감일을 제출일 자리에 넣지 않는다.
+   */
+  submittedAt?: string;
   /**
    * 틀린 문항 id. 학부모·학원이 상세 리포트에서 문항별 정오를 볼 수 있게 한다.
    * 이 세션에서 직접 푼 기록(Attempt)이 있으면 그쪽이 우선한다.
@@ -133,6 +172,13 @@ export interface Assignment {
   title: string;
   questionCount: number;
   dueDate?: string;
+  /**
+   * 처음 배정할 때의 마감일. 재배정(`reassign`)으로 `dueDate`를 미루면 여기에 원래 값이 남는다.
+   *
+   * 학부모 월간 리포트는 **이 값으로** 그 달 배정을 판정한다(D-056). 마감일을 미룰 때마다
+   * 이미 낸 학생의 지난달 기록이 다른 달로 옮겨 가면 확정된 리포트가 뒤바뀐다.
+   */
+  originalDueDate?: string;
   /** 배정된 학습 콘텐츠. 학생이 실제로 이 문항을 푼다. */
   contentId?: string;
   submissions: Submission[];
