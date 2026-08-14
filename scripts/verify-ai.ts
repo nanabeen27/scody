@@ -6,15 +6,9 @@
  * **비밀키가 클라이언트에 없어도 동작하는지**가 핵심이다(A-088·M9-02). 로그인한 사용자의 JWT로
  * Edge Function을 부르고, 로그인하지 않은 호출이 거부되는지 함께 본다.
  */
-import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
-
-for (const line of readFileSync('.env', 'utf8').split('\n')) {
-  const at = line.indexOf('=');
-  if (at > 0 && !line.trimStart().startsWith('#')) {
-    process.env[line.slice(0, at).trim()] ??= line.slice(at + 1).trim();
-  }
-}
+// `.env`를 `process.env`로 올린다. 규칙은 `scripts/env.ts` 한곳에 있다.
+import './env';
 const URL_ = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 

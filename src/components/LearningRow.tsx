@@ -39,11 +39,12 @@ export function LearningRow({ item, onPress, leading, trailing, note, testID }: 
    * `마감이 지났어요`가 되어 **할 일이 남은 것처럼** 보였다. 낸 과제에게 마감일은 지난 일이라,
    * 날짜만 적고 그 줄이 알릴 것(정답률)을 남긴다(지금 모습은 `docs/evidence/learn-due-done-*`).
    */
-  const due = item.status === 'done' ? null : dueLabel(item.dueDate);
+  const done = item.status === 'done';
+  const due = done ? null : dueLabel(item.dueDate);
   /** 마감 뒤에 붙는 나머지 메타. 순서(문항 → 마감 → 상태)는 그대로 둔다. */
   const tail = [
-    item.status === 'done' && item.dueDate ? `${formatDate(item.dueDate)} 마감` : null,
-    item.status === 'done' && item.accuracy != null ? `정답률 ${item.accuracy}%` : null,
+    done && item.dueDate ? `${formatDate(item.dueDate)} 마감` : null,
+    done && item.accuracy != null ? `정답률 ${item.accuracy}%` : null,
     item.status === 'in_progress' ? '이어서 하기' : null,
   ]
     .filter(Boolean)
@@ -63,7 +64,7 @@ export function LearningRow({ item, onPress, leading, trailing, note, testID }: 
           `${item.subject} ${item.title}`,
           `${item.questionCount}문항`,
           due?.text,
-          tail || null,
+          tail,
           note,
         ]
           .filter(Boolean)

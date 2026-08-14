@@ -47,6 +47,15 @@ interface ContentValue {
   /** 첫 조회가 끝나기 전에는 참이다. 화면이 `콘텐츠가 없어요`라고 말하지 않게. */
   loading: boolean;
   /**
+   * **이 계정의 첫 조회가 끝났는지**(성공이든 실패든). 다시 읽는 동안에도 참으로 남는다.
+   *
+   * `loading`은 재조회마다 다시 참이 되므로, 화면이 그것으로 하위 컴포넌트의 **마운트**를
+   * 결정하면 쓰기 실패가 부른 `reload()` 한 번에 그 화면의 상태가 초기화된다(D-160이 겪은 일).
+   * 그때 필요한 것은 `첫 조회가 끝났는가`이고, 그 사실은 provider가 이미 계산해 두고 있다 —
+   * 데이터가 비었는지로 추측하지 않게 값으로 내보낸다.
+   */
+  loaded: boolean;
+  /**
    * 마지막 조회가 실패한 이유. 성공하면 `null`이다.
    *
    * **화면이 실패와 빈 계정을 가르는 데 쓴다**(M-DB-16). 예전에는 실패를 `console.warn`으로만
@@ -75,7 +84,7 @@ const ContentContext = createContext<ContentValue | null>(null);
 
 export function ContentProvider({ children }: { children: ReactNode }) {
   const { account, academy, readOnly } = useSession();
-  // 옵셔널 체이닝을 의존성에 두면 React Compiler가 메모를 보존하지 못한다.
+  // 옵셔널 체이닝을 의존성에 두면 `react-hooks` 린트가 메모 보존을 보장하지 못한다.
   const academyId = academy?.id;
   const [sets, setSets] = useState<ContentSet[]>([]);
   const [reading, setReading] = useState(true);
@@ -192,10 +201,12 @@ export function ContentProvider({ children }: { children: ReactNode }) {
   );
 
   /** 조회 중이거나, 얹힌 값이 다른 계정의 것이면 아직 읽는 중이다. */
-  const loading = reading || loadedFor !== accountKey;
-  const value = useMemo(() => ({ sets, loading, error, addContent, reload }), [
+  const loaded = loadedFor === accountKey;
+  const loading = reading || !loaded;
+  const value = useMemo(() => ({ sets, loading, loaded, error, addContent, reload }), [
     sets,
     loading,
+    loaded,
     error,
     addContent,
     reload,

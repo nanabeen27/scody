@@ -5385,3 +5385,83 @@ D-153이 `loading`으로 `ReviewDeck`의 마운트를 결정했는데, `loading`
 
 A-117(운영 빌드에 개발 로그인이 켜지는 것을 빌드가 막지 않는다) · A-118(wasm 출처가 전이 의존성) ·
 A-119(뷰에 `security_barrier` 없음).
+
+---
+
+## 2026-08-15 — /simplify: 재사용·단순화·효율·고도 (D-163)
+
+네 관점(재사용·단순화·효율·고도)을 같은 범위(`c5fce2f..HEAD`)로 동시에 돌리고, 겹치는 발견을
+합쳐 우선순위대로 고쳤다. **버그 사냥이 아니라 품질 정리**다.
+
+### 두 검토가 독립적으로 "지금 깨져 있는 명령"을 찾았다
+
+`npx tsx scripts/gen-seed.ts`가 실패했다 — `.env`에 값이 있는데도. 로더가 없어
+`package.json`의 `set -a && . ./.env`(셸 소싱)에만 의존했기 때문이다. 그런데 **그 스크립트가
+만드는 `supabase/seed.sql`의 머리 주석이 바로 그 명령을 안내한다.**
+
+그리고 `.env` 읽기가 **네 갈래**였다: `run-sql.ts`는 감싼 따옴표를 벗기고, `verify-rls.ts`·
+`verify-ai.ts`는 벗기지 않고, `gen-seed.ts`는 로더가 없었다. `.env.example`이 "특수문자가 든 값은
+작은따옴표로 감싸라"고 안내하므로 — 비밀번호를 감싸면 seed는 벗긴 값으로 해시를 만들고 검증은
+따옴표가 붙은 값으로 로그인한다. **seed 비밀번호와 검증 비밀번호가 갈리고** 증상은
+`db:verify`의 `✗ 로그인` 한 줄이다. D-157이 세 스크립트를 같은 값에 묶은 뒤로 도달 가능해졌다.
+
+`scripts/env.ts` 하나로 모았다(따옴표 벗기는 판본). 셸 소싱은 `supabase` CLI를 부르는 npm
+스크립트에만 남겼다. **실측**: `npx tsx scripts/gen-seed.ts`·`npm run db:seed` 둘 다 동작한다.
+
+### provider가 이미 계산해 두고 버리던 값을 값으로 내보낸다 (D-163)
+
+D-160의 게이트가 "첫 조회가 끝났는가"를 **`wrongNotes.length === 0`으로 추측**했다. 그런데 그
+사실은 두 provider가 `loadedFor === accountKey`로 이미 계산해 두고 `reading`과 OR 해서 버리고
+있었다. 빈 상태를 프록시로 쓰면 두 가지가 틀린다:
+
+- 정당하게 비어 있는 계정에서는 재조회마다 게이트가 다시 걸린다(D-160이 막으려던 그 사고).
+- 손에 노트가 있는 동안의 조회 실패가 이 화면에서 **어디에도 나타나지 않는다.**
+
+`loading`·`error` 옆에 `loaded`를 뒀다(두 provider, 각 +9줄). 카드 복습이 그것을 쓰고, 겉이
+`area`·`onlyStarred`·`title`을 prop으로 내려 파라미터 파싱과 제목 계산이 한 번이 됐다.
+
+### 죽은 중간 단계 · 3중 복제
+
+- **`app/student/index.tsx`**: D-140 뒤로 `all`·`items`·`todo`는 `academyTodo`를 만들기 위해서만
+  존재했다 — 공개 카탈로그 전체를 복사·정렬한 다음 버렸다. `academy`에서 바로 시작한다(3줄 → 1줄).
+- **`maskDig` 헬퍼**: 같은 마스크 식이 `wrongNotes`·`wrongNotesOf`·`academyNotesOf` 세 곳에
+  있었다. **D-159가 고친 결함이 정확히 "그중 하나에 빠져 있었다"**였다. 한곳으로 모았다.
+- **`academyNotesOf`**: 호출마다 배열을 새로 만들던 것을 데이터가 바뀔 때 한 번만 가리게 했다.
+  이 함수는 렌더 루프에서 불린다(`classes/[id].tsx`가 학생마다 `.length`만 읽는다).
+- **`scopeForLog` 삭제**: 화면이 이미 들고 있는 배열을 다시 만들어 join하는 단일 사용 export였다.
+  `scope.join(' · ')`이 "화면과 로그가 같은 문장"을 더 강하게 보장한다.
+
+### 검증 스크립트: 직렬 6왕복 → 배치
+
+좌석 뷰 검사가 왕복 6회를 직렬로 돌았고 그중 하나는 같은 질의의 중복이었다(왕복 약 80ms 실측).
+독립 읽기 다섯을 `Promise.all`로 묶고 원장 질의를 `select('*')` 하나로 합쳤다 —
+`check()` 순서와 단정 개수는 그대로다. `db:verify` **166 통과 / 0 실패** 유지.
+
+### 존재하지 않는 빌드를 근거로 든 주석 셋
+
+`src/features/content.tsx`·`pricing.tsx`·`app/student/review.tsx`가 **React Compiler**를 근거로
+설계를 설명했다. 그런데 `babel.config.js`에는 `babel-preset-expo`뿐이고 `app.json`의
+`experiments`에는 `typedRoutes`만 있다 — dev와 `expo export` 모두 컴파일러 없이 나간다. 실제로
+강제하는 것은 `react-hooks` 린트다. 주석을 그 사실로 고쳤다(컴파일러를 켜는 결정은 A-120).
+
+### E2E: 드릴다운 6번째 사본을 헬퍼로
+
+`_solve.ts`에 `pickTopic({ grade, area, topic })`을 두고 `openFirstPersonal`이 그 위에 얹힌다.
+이번에 내가 더한 사본과 `pickSpellingSet`이 한 줄이 됐다.
+
+### 문장이 아니라 벽을 시험하는 단정을 더했다
+
+D-149의 학부모 테스트는 화면이 `메모 본문은 가려요`라고 **말하는지**만 봤다 — 마스크를 지워도
+통과한다. 자녀 리포트에서 `자녀가 정리한 메모`가 0건임을 단정하게 더했다.
+**이가 있는지 확인했다**: `maskDig`를 무력화하면 이 단정이 깨지고(`Received: 1`), 되돌리면 통과한다.
+
+### 고치지 않고 남긴 것
+
+| 항목 | 왜 |
+|---|---|
+| `LoadFailed` 컴포넌트 + `useStudentLoad` (5~8화면) | 고도 검토가 "따로 하지 말고 A-116을 닫는 커밋에서 함께"라고 명시했다. 지금 뽑고 기존 다섯 곳을 남기면 여섯 번째 표현이 생긴다 |
+| `ReassignDuePanel` 추출(약 45줄 중복) | 상태 소유를 화면 → 패널로 옮기는 일이라 `academy-flow` 재검증이 필요하다. A-120으로 남겼다 |
+| `TodayHero` 추출 | 검토 스스로 "props 10개라 순이익이 작다"고 판단했다 |
+| `accountMeta`로 `isDirector` 모으기(9곳) | 대부분 이번 diff 밖이다. A-120 |
+| `AcademyMemoNotice` 컴포넌트화 | 문장은 세 곳이 정확히 같고, 실제로 어긋난 것은 톤(`tertiary` vs `secondary`)이다 — UI 판단이라 남겼다 |
+| React Compiler 켜기 | 런타임 동작을 넓게 바꾸는 결정이다. 주석만 사실로 고쳤다 |

@@ -39,11 +39,12 @@ import { ATTEMPTS_SEED, WRONG_NOTES_SEED } from '../src/data/attempts';
 import { ACADEMY_CLASSES, ASSIGNMENTS_SEED } from '../src/data/fixtures';
 import { ROSTER_STUDENTS } from '../src/data/roster';
 import type { Account, ContentSet, Grade, Role } from '../src/data/types';
+// `.env`를 `process.env`로 올린다(비밀번호를 여기서 읽는다). 규칙은 `scripts/env.ts`에.
+import './env';
 
 /** 원본 시드가 '오늘'로 삼았던 날. 여기서부터의 간격만 DB로 옮긴다. */
 const ANCHOR = '2026-07-28';
 
-/** 프로토타입 공용 비밀번호. **개발용 로그인 전용**이고 운영에서는 쓰지 않는다. */
 /**
  * 개발용 계정 공용 비밀번호. **리터럴로 두지 않는다.**
  *

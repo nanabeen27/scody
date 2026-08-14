@@ -53,46 +53,31 @@ function deckTitle(area: string | undefined, onlyStarred: boolean): string {
  * **`복습할 오답이 없어요.`가 그 화면의 영구 상태가 됐다** — 오답 8개를 담은 학생이 이 주소에서
  * 새로고침하면 3초 뒤에도 그 문장이 남았다(실측).
  *
- * effect에서 덱을 다시 세우는 방법은 쓰지 않는다(React Compiler가 effect 안의 `setState`를
+ * effect에서 덱을 다시 세우는 방법은 쓰지 않는다(`react-hooks` 린트가 effect 안의 `setState`를
  * 막고, 연쇄 렌더가 된다). 대신 **조회가 끝난 뒤에 덱 화면을 마운트한다** — 그러면 첫 렌더의
  * 스냅샷이 처음부터 옳고, 고칠 상태가 없다.
  */
 export default function Review() {
   const params = useLocalSearchParams<{ area?: string; starred?: string }>();
-  const {
-    wrongNotes,
-    loading: progressLoading,
-    error: progressError,
-    reload: reloadProgress,
-  } = useProgress();
-  const {
-    sets,
-    loading: contentLoading,
-    error: contentError,
-    reload: reloadContent,
-  } = useContent();
-  const title = deckTitle(params.area, params.starred === '1');
+  const { loaded: progressLoaded, error: progressError, reload: reloadProgress } = useProgress();
+  const { loaded: contentLoaded, error: contentError, reload: reloadContent } = useContent();
+  const onlyStarred = params.starred === '1';
+  const title = deckTitle(params.area, onlyStarred);
 
   /*
     **게이트는 첫 조회에만 걸린다.** `loading`은 다시 읽을 때마다 참이 되는데(`runRead`가
     `setReading(true)`), 쓰기가 실패하면 `patchNote`·`write`가 `reload()`를 부른다. 그때
     `ReviewDeck`을 언마운트하면 덱·고른 답·대화가 전부 초기화된다 — 별표 한 번이 실패하면
     5번째 카드에서 만든 대화가 사라지고 화면은 `별표를 달지 못했어요`만 말한다.
-    다시 읽는 동안 이전 데이터는 지워지지 않으므로(`notesByUser`는 새 값이 올 때 교체된다)
-    **손에 있는 것이 있으면 덱을 그대로 둔다.**
+
+    그래서 `loading`이 아니라 **`loaded`**(첫 조회가 끝났는지)를 본다(D-163). 예전에는 그 사실을
+    `wrongNotes.length === 0`으로 추측했는데, 정당하게 비어 있는 계정에서는 재조회마다 게이트가
+    다시 걸리고, 손에 노트가 있는 동안의 조회 실패는 이 화면에서 어디에도 나타나지 않았다.
 
     콘텐츠 조회도 함께 본다 — 지문(`findContent`)이 그쪽에서 오고, 실패하면 독서·문학 카드가
     지문 없이 그려진다(다른 학생 화면도 두 조회를 함께 본다).
   */
-  const noNotes = wrongNotes.length === 0;
-  const noContent = sets.length === 0;
-  const firstRead = (progressLoading && noNotes) || (contentLoading && noContent);
-  /** 첫 조회가 실패했을 때만 실패 면을 세운다. 다시 읽는 중에는 감춘다. */
-  const firstError = firstRead
-    ? null
-    : ((noNotes ? progressError : null) ?? (noContent ? contentError : null));
-
-  if (firstRead) {
+  if (!progressLoaded || !contentLoaded) {
     return (
       <Screen testID="student-review" backFallback="/student/learn" title={title}>
         <Group>
@@ -103,12 +88,13 @@ export default function Review() {
   }
 
   /* 실패는 빈 목록과 다르게 말한다(M-DB-16). 다시 시도가 이 화면의 유일한 다음 행동이다. */
-  if (firstError) {
+  const loadError = progressError ?? contentError;
+  if (loadError) {
     return (
       <Screen testID="student-review" backFallback="/student/learn" title={title}>
         <View style={{ gap: spacing.sm, alignItems: 'flex-start' }} testID="review-load-failed">
           <AppText variant="caption" tone="danger">
-            오답을 불러오지 못했어요. {firstError}
+            오답을 불러오지 못했어요. {loadError}
           </AppText>
           <Button
             testID="review-load-retry"
@@ -122,7 +108,7 @@ export default function Review() {
     );
   }
 
-  return <ReviewDeck />;
+  return <ReviewDeck area={params.area} onlyStarred={onlyStarred} title={title} />;
 }
 
 /**
@@ -130,16 +116,21 @@ export default function Review() {
  * 카드 한 장에 문항 하나. 다시 풀어 보고 → 정답·해설·내 메모를 확인하고 → 필요하면 더 물어본다.
  * 별표한 문항만 모아 집중 복습할 수 있고, 이해가 끝난 문항은 완료로 표시한다.
  */
-function ReviewDeck() {
+function ReviewDeck({
+  area,
+  onlyStarred,
+  title,
+}: {
+  area?: string;
+  onlyStarred: boolean;
+  /** 겉에서 이미 계산했다 — 같은 규칙(D-150)을 두 자리에서 다시 쓰지 않는다. */
+  title: string;
+}) {
   const router = useRouter();
-  const params = useLocalSearchParams<{ area?: string; starred?: string }>();
   const { wrongNotes, toggleStar, setMastered, setDig } = useProgress();
   const { sets } = useContent();
   const { readOnly } = useSession();
   const { show } = useToast();
-
-  const onlyStarred = params.starred === '1';
-  const area = params.area;
 
   /** 지금 조건에 맞는 오답 전체. 세션 덱을 뽑는 원본이다. */
   const pool = useMemo(
@@ -340,7 +331,6 @@ function ReviewDeck() {
     show('이해 완료로 표시했어요');
   }
 
-  const title = deckTitle(area, onlyStarred);
 
   if (total === 0) {
     return (

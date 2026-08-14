@@ -124,7 +124,7 @@ export function PricingProvider({ children }: { children: ReactNode }) {
     setPolicy(next);
   }, []);
 
-  // 옵셔널 체이닝을 의존성에 두면 React Compiler가 메모를 보존하지 못한다.
+  // 옵셔널 체이닝을 의존성에 두면 `react-hooks` 린트가 메모 보존을 보장하지 못한다.
   const viewerId = account?.userId;
   const isAdmin = !!account?.roles.includes('admin');
   const isParent = !!account?.roles.includes('parent');

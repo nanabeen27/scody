@@ -134,6 +134,15 @@ interface ProgressValue {
   /** 첫 조회가 끝나기 전에는 참이다. */
   loading: boolean;
   /**
+   * **이 계정의 첫 조회가 끝났는지**(성공이든 실패든). 다시 읽는 동안에도 참으로 남는다.
+   *
+   * `loading`은 재조회마다 다시 참이 되므로, 화면이 그것으로 하위 컴포넌트의 **마운트**를
+   * 결정하면 쓰기 실패가 부른 `reload()` 한 번에 그 화면의 상태가 초기화된다(D-160이 겪은 일).
+   * 그때 필요한 것은 `첫 조회가 끝났는가`이고, 그 사실은 provider가 이미 계산해 두고 있다 —
+   * 데이터가 비었는지로 추측하지 않게 값으로 내보낸다.
+   */
+  loaded: boolean;
+  /**
    * 마지막 조회가 실패한 이유. 성공하면 `null`이다.
    *
    * **화면이 실패와 빈 계정을 가르는 데 쓴다**(M-DB-16). 예전에는 실패를 `console.warn`으로만
@@ -223,6 +232,17 @@ interface ProgressValue {
 }
 
 const ProgressContext = createContext<ProgressValue | null>(null);
+
+/**
+ * 대리 보기에서 가리는 필드를 지운다(D-071).
+ *
+ * **한곳에 둔다.** 예전에는 같은 식이 `wrongNotes`·`wrongNotesOf`·`academyNotesOf` 세 곳에
+ * 복제돼 있었고, 그중 하나(`academyNotesOf`)에 빠진 것이 D-159가 고친 결함이었다. 가리는 필드가
+ * 하나 늘거나 조건이 넓어질 때 세 자리를 다 찾지 않아도 되게 한다.
+ */
+function maskDig<T extends { dig?: string }>(notes: T[], hide: boolean): T[] {
+  return hide ? notes.map((n) => ({ ...n, dig: undefined })) : notes;
+}
 
 const NO_ATTEMPTS: Record<string, Attempt> = {};
 const NO_NOTES: WrongNote[] = [];
@@ -438,10 +458,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     필요하지만 메모는 학생이 자기 말로 쓴 사적인 글이다. 학원에도 열지 않는 것을 운영자가 전부
     읽으면 안 된다. 값 자체를 지워 어느 화면에서도 보이지 않게 한다.
   */
-  const wrongNotes = useMemo(
-    () => (readOnly ? rawNotes.map((n) => ({ ...n, dig: undefined })) : rawNotes),
-    [rawNotes, readOnly],
-  );
+  const wrongNotes = useMemo(() => maskDig(rawNotes, readOnly), [rawNotes, readOnly]);
 
   const attemptsOf = useCallback(
     (studentId: string) => attemptsByUser[studentId] ?? NO_ATTEMPTS,
@@ -453,10 +470,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     `academy/classes/student/[id]`). 운영자가 대리 보기로 들어오면 그 경로도 열린다.
   */
   const wrongNotesOf = useCallback(
-    (studentId: string) => {
-      const notes = notesByUser[studentId] ?? NO_NOTES;
-      return readOnly ? notes.map((n) => ({ ...n, dig: undefined })) : notes;
-    },
+    (studentId: string) => maskDig(notesByUser[studentId] ?? NO_NOTES, readOnly),
     [notesByUser, readOnly],
   );
   const retryOf = useCallback(
@@ -469,12 +483,20 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     A-048의 토큰 분리가 들어오는 날 학원 화면들이 학생 메모 본문을 운영자에게 그린다.
     막는 벽을 서버 한 겹에만 두지 않는다.
   */
+  /*
+    **가리기를 호출마다 하지 않는다.** 이 함수는 렌더 루프 안에서 불린다
+    (`academy/classes/[id].tsx`가 학생마다 `.length`만 읽는다) — 호출마다 배열을 새로 만들면
+    학생 수에 비례해 낭비가 자라고 참조도 매번 달라진다. 데이터가 바뀔 때 한 번만 가린다.
+  */
+  const visibleAcademyNotes = useMemo(() => {
+    if (!readOnly) return academyNotes;
+    const out: typeof academyNotes = {};
+    for (const [id, notes] of Object.entries(academyNotes)) out[id] = maskDig(notes, true);
+    return out;
+  }, [academyNotes, readOnly]);
   const academyNotesOf = useCallback(
-    (studentId: string) => {
-      const notes = academyNotes[studentId] ?? NO_ACADEMY_NOTES;
-      return readOnly ? notes.map((n) => ({ ...n, dig: undefined })) : notes;
-    },
-    [academyNotes, readOnly],
+    (studentId: string) => visibleAcademyNotes[studentId] ?? NO_ACADEMY_NOTES,
+    [visibleAcademyNotes],
   );
   const comparisonsOf = useCallback(
     (studentId: string) => comparisons[studentId] ?? NO_COMPARISONS,
@@ -802,11 +824,13 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   );
 
   /** 조회 중이거나, 얹힌 기록이 다른 계정의 것이면 아직 읽는 중이다. */
-  const loading = reading || loadedFor !== accountKey;
+  const loaded = loadedFor === accountKey;
+  const loading = reading || !loaded;
 
   const value = useMemo<ProgressValue>(
     () => ({
       loading,
+      loaded,
       error,
       attempts,
       attemptsOf,
@@ -845,6 +869,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     }),
     [
       loading,
+      loaded,
       error,
       attempts,
       attemptsOf,

@@ -39,7 +39,7 @@ const PREVIEW = 5;
 export default function StudentHome() {
   const router = useRouter();
   const account = useCurrentAccount();
-  const { all, academy, hasPersonal } = useStudentItems();
+  const { academy, hasPersonal } = useStudentItems();
   const queued = useQueuedItems();
   const [ask, setAsk] = useState('');
   const [showAllAcademy, setShowAllAcademy] = useState(false);
@@ -100,10 +100,14 @@ export default function StudentHome() {
     await Promise.all([reloadProgress(), reloadContent()]);
   }
 
-  // 마감이 이른 과제부터. 학습 탭도 같은 정렬을 쓴다(`byTodoThenDue`).
-  const items = [...all].sort(byDue);
-  const todo = items.filter((i) => i.status !== 'done');
-  const academyTodo = todo.filter((i) => i.source === 'academy');
+  /*
+    마감이 이른 과제부터. 학습 탭도 같은 정렬을 쓴다(`byTodoThenDue`).
+
+    **`all`을 거치지 않는다.** D-140이 히어로 후보를 학원 과제로 좁힌 뒤로 `all`(= 학원 배정 +
+    공개 개인 학습 전부)을 정렬하고 걸러 낸 결과에서 학원 것만 다시 남기고 있었다 — 카탈로그
+    전체를 복사·정렬한 다음 버리는 셈이었다. `academy`가 이미 학원 항목만이므로 거기서 시작한다.
+  */
+  const academyTodo = academy.filter((i) => i.status !== 'done').sort(byDue);
   // 학원 학습이 아예 없는 학생에게는 학원 얘기를 하지 않는다.
   const hasAcademy = academy.length > 0;
 

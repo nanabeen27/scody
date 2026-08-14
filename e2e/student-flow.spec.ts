@@ -2,7 +2,7 @@ import { test, expect } from './_fixtures';
 import { type Page } from '@playwright/test';
 import { loginHere } from './_auth';
 import { actThenToast, waitForQuietToast } from './_toast';
-import { answerAll, keepWrongNotes, openFirstPersonal } from './_solve';
+import { answerAll, keepWrongNotes, openFirstPersonal, pickTopic } from './_solve';
 import { assignLearning, expectAssigned } from './_assign';
 import { dayFromToday, sid } from './_ids';
 
@@ -13,13 +13,8 @@ async function loginAs(page: Page, scodyId: string) {
 }
 
 /** 학습 탭 → 고르기 페이지에서 고1 → 문법 → 맞춤법 유형까지 뎁스를 타고 들어간다. */
-async function pickSpellingSet(page: Page) {
-  await page.getByRole('link', { name: '학습' }).click();
-  await page.getByTestId('learn-pick').click();
-  await page.getByTestId('learn-grade-1').click();
-  await page.getByTestId('learn-area-문법').click();
-  await page.getByTestId('learn-topic-어문 규정 - 맞춤법').click();
-}
+const pickSpellingSet = (page: Page) =>
+  pickTopic(page, { grade: 1, area: '문법', topic: '어문 규정 - 맞춤법' });
 
 test.describe('M2 학생 국어 학습 흐름', () => {
   test('지문형 학습: 지문을 읽고 풀어 제출한다', async ({ page }) => {
@@ -641,11 +636,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await page.getByText('로그아웃').click();
     await loginHere(page, 'yerin');
 
-    await page.getByRole('link', { name: '학습' }).click();
-    await page.getByTestId('learn-pick').click();
-    await page.getByTestId('learn-grade-2').click();
-    await page.getByTestId('learn-area-독서').click();
-    await page.getByTestId('learn-topic-과학').click();
+    await pickTopic(page, { grade: 2, area: '독서', topic: '과학' });
     await page.getByRole('checkbox', { name: '담아 두기' }).first().click();
 
     await page.getByTestId('brand-home').click();
@@ -680,11 +671,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await expect(page.getByText('새 학습을 골라볼까요?')).toBeVisible();
     await expect(page.getByTestId('home-empty-start')).toBeVisible();
 
-    await page.getByRole('link', { name: '학습' }).click();
-    await page.getByTestId('learn-pick').click();
-    await page.getByTestId('learn-grade-2').click();
-    await page.getByTestId('learn-area-독서').click();
-    await page.getByTestId('learn-topic-과학').click();
+    await pickTopic(page, { grade: 2, area: '독서', topic: '과학' });
     await page.getByRole('checkbox', { name: '담아 두기' }).first().click();
     await page.getByTestId('brand-home').click();
 

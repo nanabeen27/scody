@@ -43,12 +43,13 @@ function opensOthers(target: Account): boolean {
  * 특정 문의나 오류 없이 "그냥 보는" 열람을 자녀·학원 기록까지 넓히지 않는다(최소권한).
  */
 export function reasonKindsFor(target: Account): readonly ReasonKind[] {
+  // 학생 대상은 세 유형 그대로다.
+  if (!opensOthers(target)) return ['문의 재현', '오류 확인', '데이터 점검'];
+  // 남의 기록이 함께 열리는 대상: 역할 이름을 쓰고 `데이터 점검`(특정 문의 없는 열람)을 뺀다.
   const kinds: ReasonKind[] = [];
   if (target.roles.includes('parent')) kinds.push('자녀 리포트 문의');
   if (target.roles.includes('academy')) kinds.push('학원 문의 재현');
-  if (!opensOthers(target)) kinds.push('문의 재현');
   kinds.push('오류 확인');
-  if (!opensOthers(target)) kinds.push('데이터 점검');
   return kinds;
 }
 
@@ -87,21 +88,17 @@ export function impersonationScope(target: Account): string[] {
     `academyName`·`academyRole`이 비어 있다. 그때 예전 코드는 `academyRole !== 'teacher'`라는
     이유로 **원장 범위**를 말했다 — 원장이 아니고, 소속이 없고, 실제로는 아무것도 열리지 않는다.
   */
-  if (target.roles.includes('academy') && !target.academyName) {
-    lines.push('학원 소속이 끝난 계정이라 학원 화면에서는 아무것도 열리지 않아요');
-  } else if (target.roles.includes('academy')) {
-    const where = target.academyName;
-    lines.push(
-      target.academyRole === 'teacher'
-        ? `${where} 담당 반 학생의 제출 결과와 배정 학습의 오답 문항`
-        : `${where} 전체의 반·학생·제출 결과와 배정 학습의 오답 문항`,
-    );
+  if (target.roles.includes('academy')) {
+    if (!target.academyName) {
+      lines.push('학원 소속이 끝난 계정이라 학원 화면에서는 아무것도 열리지 않아요');
+    } else {
+      lines.push(
+        target.academyRole === 'teacher'
+          ? `${target.academyName} 담당 반 학생의 제출 결과와 배정 학습의 오답 문항`
+          : `${target.academyName} 전체의 반·학생·제출 결과와 배정 학습의 오답 문항`,
+      );
+    }
   }
   // 역할이 하나도 없는 계정(가입만 한 상태)도 있다. 빈 배열을 그대로 두지 않는다.
   return lines.length > 0 ? lines : ['이 계정의 프로필과 이용권'];
-}
-
-/** 감사 로그 한 줄에 넣는 형태. 줄바꿈 없이 `·`로 잇는다. */
-export function scopeForLog(target: Account): string {
-  return impersonationScope(target).join(' · ');
 }

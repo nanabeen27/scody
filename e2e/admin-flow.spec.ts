@@ -524,6 +524,15 @@ test.describe('총괄관리자 대리 보기', () => {
     await page.getByTestId('impersonate-start').click();
     await expect(page).toHaveURL(/\/parent$/);
 
+    /*
+      **문장이 아니라 벽을 시험한다.** 위 단정은 화면이 `메모 본문은 가려요`라고 **말하는지**만
+      본다 — 마스크(`progress.tsx`의 `maskDig`)를 지워도 통과한다. 그래서 실제로 가려지는지를
+      자녀 리포트에서 확인한다: `ChildReport`는 메모가 있을 때만 그 블록을 그린다.
+    */
+    await page.getByRole('link', { name: '리포트' }).first().click();
+    await expect(page.getByTestId('parent-report')).toBeVisible();
+    await expect(page.getByText('자녀가 정리한 메모')).toHaveCount(0);
+
     // 열람 범위가 운영 기록에 남는다 — 화면이 말한 문장과 같은 문장이다
     await page.getByTestId('impersonation-end').click();
     await expect(page).toHaveURL(/\/admin/);

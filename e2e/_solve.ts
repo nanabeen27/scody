@@ -29,12 +29,25 @@ export async function answerAll(page: Page) {
  * 바뀌면 다른 학습이 열렸다. 이제 테스트가 무엇을 푸는지 이름으로 남는다.
  */
 export async function openFirstPersonal(page: Page) {
+  await pickTopic(page, { grade: 1, area: '독서', topic: '인문(일반)' });
+  await page.getByText('정보의 홍수와 비판적 읽기').first().click();
+}
+
+/**
+ * 학습 탭 → 고르기에서 학년 → 영역 → 세부 유형까지 뎁스를 타고 들어간다.
+ *
+ * 이 다섯 줄이 스펙 여섯 곳에 복제돼 있었다. `learn-*` testID나 분류 이름이 하나 바뀌면
+ * 그만큼을 찾아야 했다.
+ */
+export async function pickTopic(
+  page: Page,
+  { grade, area, topic }: { grade: 1 | 2 | 3; area: string; topic: string },
+) {
   await page.getByRole('link', { name: '학습' }).click();
   await page.getByTestId('learn-pick').click();
-  await page.getByTestId('learn-grade-1').click();
-  await page.getByTestId('learn-area-독서').click();
-  await page.getByTestId('learn-topic-인문(일반)').click();
-  await page.getByText('정보의 홍수와 비판적 읽기').first().click();
+  await page.getByTestId(`learn-grade-${grade}`).click();
+  await page.getByTestId(`learn-area-${area}`).click();
+  await page.getByTestId(`learn-topic-${topic}`).click();
 }
 
 /** 결과 화면에서 아직 담지 않은 오답을 위에서부터 오답노트에 담는다. */

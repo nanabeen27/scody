@@ -696,10 +696,9 @@ export default function AcademyAnalytics() {
                             variant="ghost"
                             tone="accent"
                             hug
+                            /* 라벨과 같은 문장이라 `accessibilityLabel`을 따로 주지 않는다 —
+                               버튼 안 글자에서 접근 가능한 이름이 계산된다. */
                             label={dueOpen ? '접기' : `${target.name} 마감일 다시 정하기`}
-                            accessibilityLabel={
-                              dueOpen ? '접기' : `${target.name} 마감일 다시 정하기`
-                            }
                             leading={
                               <Icon
                                 name={dueOpen ? 'arrow-up' : 'refresh-cw'}

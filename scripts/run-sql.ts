@@ -15,21 +15,13 @@
  */
 import { readFileSync } from 'node:fs';
 import { Client } from 'pg';
+// `.env`를 `process.env`로 올린다. 규칙은 `scripts/env.ts` 한곳에 있다.
+import './env';
 
 const file = process.argv[2];
 if (!file) {
   console.error('사용법: tsx scripts/run-sql.ts <파일.sql>');
   process.exit(1);
-}
-
-// `.env`를 직접 읽는다 — Expo 밖에서 도는 스크립트라 `process.env`에 자동으로 들어오지 않는다.
-for (const line of readFileSync('.env', 'utf8').split('\n')) {
-  const at = line.indexOf('=');
-  if (at > 0 && !line.trimStart().startsWith('#')) {
-    const value = line.slice(at + 1).trim();
-    // `.env`에서 특수문자 때문에 따옴표로 감싼 값이 있다. 감싼 따옴표만 벗긴다.
-    process.env[line.slice(0, at).trim()] ??= value.replace(/^(['"])(.*)\1$/, '$2');
-  }
 }
 
 const url = readFileSync('supabase/.temp/pooler-url', 'utf8').trim();

@@ -30,7 +30,6 @@ import { useAudit, auditTime, type AuditEntry } from '@/features/audit';
 import {
   impersonationScope,
   reasonKindsFor,
-  scopeForLog,
   ticketRequiredFor,
   type ReasonKind,
 } from '@/features/impersonation';
@@ -49,14 +48,6 @@ const PAYER: Record<Entitlement['payer'], string> = {
 };
 
 const ACADEMY_ROLE: Record<string, string> = { director: '원장', teacher: '선생님' };
-
-/**
- * 사유 유형 칩. **대상 역할에 따라 다르다**(D-149) — 자녀·학원 기록이 함께 열리는 대상에서는
- * `데이터 점검`이 없고 문의 번호가 필수다. 판단은 `src/features/impersonation.ts` 한곳에 있다.
- */
-function reasonOptions(target: Account): readonly SegmentedOption<ReasonKind | ''>[] {
-  return reasonKindsFor(target).map((k) => ({ value: k, label: k }));
-}
 
 /** 마스킹한 전화번호. 목록에는 두지 않고 상세에서만 가운데를 가려 보여 준다. */
 function maskPhone(phone: string): string {
@@ -192,6 +183,13 @@ export default function AdminUserDetail() {
    * 남의 기록까지 열리는 대상(학부모·학원)에는 문의 번호를 받아야 시작할 수 있다.
    */
   const scope = impersonationScope(account);
+  /**
+   * 사유 유형 칩. **대상 역할에 따라 다르다**(D-149) — 자녀·학원 기록이 함께 열리는 대상에서는
+   * `데이터 점검`이 없고 문의 번호가 필수다. 판단은 `src/features/impersonation.ts` 한곳에 있다.
+   */
+  const reasonOptions: readonly SegmentedOption<ReasonKind | ''>[] = reasonKindsFor(account).map(
+    (k) => ({ value: k, label: k }),
+  );
   const needsTicket = ticketRequiredFor(account);
   const canStart =
     !blocked &&
@@ -230,7 +228,7 @@ export default function AdminUserDetail() {
       */
       detail: `대리 보기 시작 · ${account.name}(${account.userId}) · ${reason}${
         ticketNo ? ` · 문의 ${ticketNo}` : ''
-      } · 열람 범위: ${scopeForLog(account)}`,
+      } · 열람 범위: ${scope.join(' · ')}`,
     });
     router.replace(homeHrefFor(account) as never);
   }
@@ -391,7 +389,7 @@ export default function AdminUserDetail() {
               </AppText>
               <SegmentedControl
                 testID="impersonate-kind"
-                options={reasonOptions(account)}
+                options={reasonOptions}
                 value={kind}
                 onChange={(k) => setKind(k)}
               />

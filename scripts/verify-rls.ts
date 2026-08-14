@@ -32,14 +32,9 @@
 import { readFileSync } from 'node:fs';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
+// `.env`를 `process.env`로 올린다. 규칙은 `scripts/env.ts` 한곳에 있다.
+import './env';
 
-// `.env`를 직접 읽는다 — Expo 밖에서 도는 스크립트라 `process.env`에 자동으로 들어오지 않는다.
-for (const line of readFileSync('.env', 'utf8').split('\n')) {
-  const at = line.indexOf('=');
-  if (at > 0 && !line.trimStart().startsWith('#')) {
-    process.env[line.slice(0, at).trim()] ??= line.slice(at + 1).trim();
-  }
-}
 
 const URL_ = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
@@ -663,33 +658,37 @@ async function verify(anon: SupabaseClient) {
       `is_director()`로 좁히므로 선생님·학생에게는 0행이다 — 여기서 그 대칭을 실측한다.
     */
     const seat = 'v_academy_seat_pricing';
-    const { data: dirSeat, error: dirErr } = await director
-      .from(seat)
-      .select('academy_seat, seat_discount_pct, seat_discount_from');
+    /*
+      **다섯 계정을 배치로 묻는다.** 서로 독립인 읽기라 직렬로 두면 왕복만 5회(약 400ms)다.
+      `check()` 호출 순서는 그대로 둬서 출력과 단정 개수는 바뀌지 않는다.
+
+      원장 질의는 `select('*')` 하나로 값 검사와 컬럼 검사를 함께 쓴다 — 컬럼 목록을 나열해
+      받으면 자기가 나열한 키를 다시 세는 셈이라 컬럼 검사가 **실패할 수 없다.**
+    */
+    const [dirAll, teacherN, seojunN, minjiN, anonN] = await Promise.all([
+      director.from(seat).select('*'),
+      count(teacher, seat),
+      count(seojun, seat),
+      count(minji, seat),
+      count(anon, seat),
+    ]);
+    const dirRow = dirAll.data?.[0] as Record<string, unknown> | undefined;
     check(
       '원장은 좌석 단가를 뷰로 읽는다',
-      !dirErr && (dirSeat?.length ?? 0) === 1 && (dirSeat?.[0]?.academy_seat ?? 0) > 0,
-      dirErr?.message,
+      !dirAll.error && (dirAll.data?.length ?? 0) === 1 && Number(dirRow?.academy_seat ?? 0) > 0,
+      dirAll.error?.message,
     );
-    check('선생님에게 좌석 단가 뷰가 0행', (await count(teacher, seat)) === 0);
-    check('학생에게 좌석 단가 뷰가 0행', (await count(seojun, seat)) === 0);
-    check('학부모에게 좌석 단가 뷰가 0행', (await count(minji, seat)) === 0);
+    check('선생님에게 좌석 단가 뷰가 0행', teacherN === 0);
+    check('학생에게 좌석 단가 뷰가 0행', seojunN === 0);
+    check('학부모에게 좌석 단가 뷰가 0행', minjiN === 0);
     /*
       **익명은 권한 자체가 없다**(0035). 0034는 `authenticated`에게만 grant했는데 Supabase의
       기본 권한 때문에 `anon`이 select를 그대로 갖고 있었고, 막는 벽이 뷰 본문의 `is_director()`
-      하나뿐이었다. 지금은 grant가 없어 질의가 권한 오류를 받는다 — `count()`는 오류에 `-1`을
-      돌려주므로 `0행`이 아니라 `읽지 못한다`로 단정한다(0행이면 벽이 한 겹만 남았다는 뜻이다).
+      하나뿐이었다. `count()`는 권한 오류에 `-1`을 돌려주므로 `0행`이 아니라 `읽지 못한다`로
+      단정한다(0행이면 벽이 한 겹만 남았다는 뜻이다).
     */
-    check('익명은 좌석 단가 뷰를 읽지 못한다(권한 없음)', (await count(anon, seat)) === -1);
-    /*
-      개인 요금·연 결제 비율은 이 뷰에 없다 — 있으면 0024가 막은 것이 다시 열린 것이다.
-
-      **`select('*')`로 받아야 한다.** 위 질의처럼 컬럼을 나열해 받은 행의 키를 세면 방금 자기가
-      나열한 것을 다시 확인하는 셈이라 **실패할 수 없는 검사**가 된다(뷰가 `student_paid`를
-      내보내도 통과했다).
-    */
-    const { data: seatAll } = await director.from(seat).select('*');
-    const seatCols = Object.keys(seatAll?.[0] ?? {}).sort();
+    check('익명은 좌석 단가 뷰를 읽지 못한다(권한 없음)', anonN === -1);
+    const seatCols = Object.keys(dirRow ?? {}).sort();
     check(
       '좌석 뷰가 내보내는 컬럼은 넷뿐이다',
       seatCols.join(',') === 'academy_seat,effective_from,seat_discount_from,seat_discount_pct',
