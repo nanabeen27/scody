@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npx expo export -p web --output-dir dist",
+  "buildCommand": "npm run motion:wasm || echo 'WARN dotlottie WASM 복사 실패 — 모션이 정적 대체물로 떨어집니다(LottiePlayer가 처리)'; npx expo export -p web --output-dir dist",
   "outputDirectory": "dist",
   "framework": null,
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
