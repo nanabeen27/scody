@@ -22,6 +22,9 @@ import { useRecommendations } from '@/features/recommend';
 import { useToast } from '@/features/toast';
 import { findContent, type LearningItem } from '@/data';
 
+/** 한 화면 목록 상한(§8). 그 이상은 섹션 제목 옆 `N개 더 보기`로 펼친다. */
+const PREVIEW = 5;
+
 function fmtTime(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
@@ -58,6 +61,7 @@ export default function ResultScreen() {
   // 오답노트에 담은 문항을 근거로 다음에 풀 학습을 고른다. 담긴 오답이 없으면 비어 있다.
   const recommendations = useRecommendations(2);
   const [scope, setScope] = useState<'wrong' | 'all'>('wrong');
+  const [showAllQuestions, setShowAllQuestions] = useState(false);
   const { show } = useToast();
 
   const item = all.find((i) => i.id === id);
@@ -126,6 +130,15 @@ export default function ResultScreen() {
   // 다 맞았으면 고를 것이 없으니 전체를 보여준다.
   const effectiveScope = wrong.length === 0 ? 'all' : scope;
   const listed = effectiveScope === 'wrong' ? wrong : indexed;
+  /**
+   * 문항 리뷰도 §8의 5줄 상한을 지킨다(M9-11 ③ → D-144).
+   *
+   * `QuestionReview`는 발문 + 내 답 + 정답 + 해설이 든 큰 덩어리라 다섯 개만으로도
+   * 화면 몇 개 길이가 된다. 상한이 없을 때는 이 섹션이 길어질수록 **아래 두 섹션이
+   * 함께 밀려서**, 방금 담을 오답과 `오답노트 하러 가기`가 화면 밖으로 나갔다(A-086).
+   * 필터를 바꿔도 접힘 상태는 그대로 둔다 — 학생이 펼친 선택을 되감지 않는다.
+   */
+  const visibleListed = showAllQuestions ? listed : listed.slice(0, PREVIEW);
 
   /**
    * 추천 학습 담기/빼기. 오답노트 문항 담기와 문구를 구분한다.
@@ -210,7 +223,23 @@ export default function ResultScreen() {
         <Row title="영역" meta={`국어 · ${item.area}`} />
       </Group>
 
-      <Section title="문항별로 확인해요">
+      <Section
+        title="문항별로 확인해요"
+        /* `N개 더 보기`는 섹션 제목 옆 R2 한 벌이다(§8) — 리포트의 `report-more`와 같은 모양. */
+        action={
+          listed.length > PREVIEW ? (
+            <Button
+              testID="result-review-more"
+              variant="secondary"
+              size="sm"
+              tone="accent"
+              hug
+              label={showAllQuestions ? '접기' : `${listed.length - PREVIEW}개 더 보기`}
+              onPress={() => setShowAllQuestions((v) => !v)}
+            />
+          ) : null
+        }
+      >
         {wrong.length > 0 ? (
           <SegmentedControl
             testID="result-scope"
@@ -227,7 +256,7 @@ export default function ResultScreen() {
           </AppText>
         )}
         <Group>
-          {listed.map(({ q, i }) => (
+          {visibleListed.map(({ q, i }) => (
             <QuestionReview
               key={q.qId}
               index={i}

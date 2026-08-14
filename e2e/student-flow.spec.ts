@@ -141,6 +141,36 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await expect(toast).toHaveCount(0, { timeout: 6000 });
   });
 
+  test('결과의 문항 리뷰는 다섯 개까지 보여주고 나머지는 펼쳐서 본다', async ({ page }) => {
+    await loginAs(page, 'seojun');
+    await openFirstPersonal(page);
+    await page.getByTestId('detail-start').click();
+    await answerAll(page);
+    await page.getByTestId('solve-submit').click();
+    await expect(page).toHaveURL(/\/student\/result\//);
+
+    // 리뷰 카드는 `N번` 머리글로 센다(문항 하나에 하나).
+    const cards = page.getByText(/^\d+번$/);
+    // 기본은 틀린 문항이고(D-030) 이 세트는 다섯 개를 넘지 않아 접을 것이 없다.
+    const wrongCount = await cards.count();
+    expect(wrongCount).toBeLessThanOrEqual(5);
+    await expect(page.getByTestId('result-review-more')).toHaveCount(0);
+
+    // 전체 10문항으로 넓히면 다섯 개만 남고 나머지는 제목 옆에서 펼친다
+    await page.getByTestId('result-scope-all').click();
+    await expect(cards).toHaveCount(5);
+    const more = page.getByTestId('result-review-more');
+    await expect(more).toHaveText('5개 더 보기');
+
+    await more.click();
+    await expect(cards).toHaveCount(10);
+    await expect(more).toHaveText('접기');
+
+    // 접으면 다시 다섯 개다
+    await more.click();
+    await expect(cards).toHaveCount(5);
+  });
+
   test('제출 후 상세로 돌아오면 결과를 다시 볼 수 있다', async ({ page }) => {
     await loginAs(page, 'seojun');
     await openFirstPersonal(page);
