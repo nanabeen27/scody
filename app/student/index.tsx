@@ -47,6 +47,7 @@ export default function StudentHome() {
     praiseFor,
     dismissPraise,
     wrongNotes,
+    attempts,
     loading: progressLoading,
     error: progressError,
     reload: reloadProgress,
@@ -149,8 +150,18 @@ export default function StudentHome() {
    * D-140이 히어로 후보를 약속한 일로 좁혔으니 `완료` 판정도 같은 집합을 봐야 한다.
    * `goalTotal`(남은 학원 과제 + 담아 둔 학습 + 낸 학원 과제)이 0이면 약속된 일이 애초에
    * 없었다는 뜻이므로 `끝냈다`가 성립하지 않는다.
+   *
+   * **그런데 `goalTotal`만 보면 반대쪽으로 틀린다**(D-154). 개인 학습을 제출하면 서버가 그
+   * 학습을 담아 둔 목록에서 지우고(`rpc_submit_attempt`), 고르기에서 담지 않고 바로 푼 학습은
+   * 애초에 그 목록에 들어오지 않는다. 그래서 **학원 소속이 없는 학생은 공부를 할수록
+   * `goalTotal`이 0으로 돌아온다** — 방금 한 세트를 다 푼 김서준의 홈이
+   * `아직 시작한 학습이 없어요`였다(실측). D-143이 없앤 거짓말의 정확한 반대쪽이다.
+   *
+   * 그래서 **제출 기록이 하나라도 있으면 `아직 시작한 학습이 없어요`라고 하지 않는다.**
+   * 그 학생은 약속된 일이 없을 뿐 시작은 했고, 그때 할 수 있는 일은 아래 캡션(`restCaption`)이
+   * 이미 열린 길만 가리켜 말한다.
    */
-  const nothingYet = goalTotal === 0;
+  const nothingYet = goalTotal === 0 && Object.keys(attempts).length === 0;
   // 히어로에 올린 학습은 아래 목록에서 뺀다. 같은 것이 두 번 보이지 않게.
   const academyList = academyTodo.filter((i) => i.id !== next?.id);
   const queueList = queued.items.filter((i) => i.id !== next?.id);

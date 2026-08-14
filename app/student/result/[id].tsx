@@ -90,6 +90,12 @@ export default function ResultScreen() {
     return (
       <Screen
         testID="student-result"
+        /*
+          **상태가 무엇이든 되돌아갈 길을 둔다**(`CLAUDE.md` 내비게이션 규칙). 성공 경로에만
+          `backFallback`이 있어서, 결과 주소로 바로 들어왔거나 조회가 계속 실패하는 학생은
+          화면 안에서 나가는 장치를 못 봤다 — 같은 URL이 상태에 따라 뒤로가기를 보였다 감췄다 했다.
+        */
+        backFallback="/student"
         title={
           reading
             ? '결과를 불러오고 있어요'

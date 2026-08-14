@@ -18,6 +18,7 @@ import {
   Steps,
   SourceTag,
   MotionAsset,
+  ConfirmStep,
 } from '@/components';
 import { useSession } from '@/session';
 import { useProgress, type WrongNote } from '@/features/progress';
@@ -30,11 +31,76 @@ import { colors, spacing, radius, typeface } from '@/theme/tokens';
 
 
 /**
+ * 화면 이름은 **`카드 복습` 하나**이고 범위를 앞에 붙인다(D-150).
+ *
+ * 예전에는 `오답노트 복습`·`별표 집중 복습`·`{영역} 복습` 세 이름이라 같은 화면이 세 가지로
+ * 불렸고, 마스터 플랜 4절이 쓰는 `카드 복습`은 화면 어디에도 없었다(M9-10). 질문·정리하는 곳
+ * (`오답노트`)과 다시 푸는 곳(`카드 복습`)을 이름으로 가른다.
+ */
+function deckTitle(area: string | undefined, onlyStarred: boolean): string {
+  if (onlyStarred) return '별표 카드 복습';
+  return area ? `${area} 카드 복습` : '카드 복습';
+}
+
+/**
+ * 카드 복습의 겉. **읽는 중 · 실패 · 덱을 셋으로 가른다**(D-133·D-136과 같은 규칙 · D-153).
+ *
+ * ## 왜 컴포넌트를 둘로 갈랐나
+ *
+ * `ReviewDeck`은 덱(카드 순서)을 **첫 렌더에 한 번** 고정한다. 그 스냅샷은 카드 안에서 별표를
+ * 뺄 때 자리와 판정이 어긋나는 것을 막는 장치라 유지해야 한다. 그런데 조회가 끝나기 전에
+ * 마운트되면 원본이 비어 있어 `deck = []`이 되고, 노트가 도착해도 다시 세우는 곳이 없어서
+ * **`복습할 오답이 없어요.`가 그 화면의 영구 상태가 됐다** — 오답 8개를 담은 학생이 이 주소에서
+ * 새로고침하면 3초 뒤에도 그 문장이 남았다(실측).
+ *
+ * effect에서 덱을 다시 세우는 방법은 쓰지 않는다(React Compiler가 effect 안의 `setState`를
+ * 막고, 연쇄 렌더가 된다). 대신 **조회가 끝난 뒤에 덱 화면을 마운트한다** — 그러면 첫 렌더의
+ * 스냅샷이 처음부터 옳고, 고칠 상태가 없다.
+ */
+export default function Review() {
+  const params = useLocalSearchParams<{ area?: string; starred?: string }>();
+  const { loading, error, reload } = useProgress();
+  const title = deckTitle(params.area, params.starred === '1');
+
+  if (loading) {
+    return (
+      <Screen testID="student-review" backFallback="/student/learn" title={title}>
+        <Group>
+          <Row title="오답을 불러오고 있어요" />
+        </Group>
+      </Screen>
+    );
+  }
+
+  /* 실패는 빈 목록과 다르게 말한다(M-DB-16). 다시 시도가 이 화면의 유일한 다음 행동이다. */
+  if (error) {
+    return (
+      <Screen testID="student-review" backFallback="/student/learn" title={title}>
+        <View style={{ gap: spacing.sm, alignItems: 'flex-start' }} testID="review-load-failed">
+          <AppText variant="caption" tone="danger">
+            오답을 불러오지 못했어요. {error}
+          </AppText>
+          <Button
+            testID="review-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void reload()}
+          />
+        </View>
+      </Screen>
+    );
+  }
+
+  return <ReviewDeck />;
+}
+
+/**
  * 오답노트 카드 복습.
  * 카드 한 장에 문항 하나. 다시 풀어 보고 → 정답·해설·내 메모를 확인하고 → 필요하면 더 물어본다.
  * 별표한 문항만 모아 집중 복습할 수 있고, 이해가 끝난 문항은 완료로 표시한다.
  */
-export default function Review() {
+function ReviewDeck() {
   const router = useRouter();
   const params = useLocalSearchParams<{ area?: string; starred?: string }>();
   const { wrongNotes, toggleStar, setMastered, setDig } = useProgress();
@@ -72,6 +138,8 @@ export default function Review() {
   const [busy, setBusy] = useState(false);
   const [askFailed, setAskFailed] = useState(false);
   const [again, setAgain] = useState<Record<string, boolean>>({});
+  /** 메모를 덮어쓰기 전 확인 중인 카드 id. 잃을 것이 있을 때만 세운다. */
+  const [confirmMemo, setConfirmMemo] = useState<string | null>(null);
 
   /**
    * 지금 유효한 호출 회차.
@@ -240,14 +308,7 @@ export default function Review() {
     show('이해 완료로 표시했어요');
   }
 
-  /**
-   * 화면 이름은 **`카드 복습` 하나**이고 범위를 앞에 붙인다(D-150).
-   *
-   * 예전에는 `오답노트 복습`·`별표 집중 복습`·`{영역} 복습` 세 이름이라 같은 화면이 세 가지로
-   * 불렸고, 마스터 플랜 4절이 쓰는 `카드 복습`은 화면 어디에도 없었다(M9-10). 질문·정리하는 곳
-   * (`오답노트`)과 다시 푸는 곳(`카드 복습`)을 이름으로 가른다.
-   */
-  const title = onlyStarred ? '별표 카드 복습' : area ? `${area} 카드 복습` : '카드 복습';
+  const title = deckTitle(area, onlyStarred);
 
   if (total === 0) {
     return (
@@ -450,6 +511,17 @@ export default function Review() {
               </AppText>
             ) : null}
 
+            {/*
+              **무엇이 공개되는지 쓰기 전에 말한다**(D-110·D-054). 이 화면에서도 메모를 저장하는데
+              (`saveMemo`) 고지가 없어서, 학원 오답의 메모를 담당 선생님이 읽는다는 사실을 그 글을
+              쓰는 화면에서 듣지 못했다. 문장은 오답노트·결과 화면과 **한 글자도 다르지 않게** 쓴다.
+            */}
+            {card.source === 'academy' ? (
+              <AppText variant="caption" tone="secondary">
+                학원 과제에서 담은 오답의 메모는 선생님이 볼 수 있어요.
+              </AppText>
+            ) : null}
+
             {card.dig ? (
               <View style={{ gap: 4 }}>
                 <AppText variant="caption" tone="accent" style={{ fontFamily: typeface.semibold }}>
@@ -508,12 +580,41 @@ export default function Review() {
                 size="sm"
                 tone="accent"
                 hug
-                label={card.dig ? '메모 다시 정리하기' : '노트에 정리해 두기'}
-                onPress={saveMemo}
+                /*
+                  **라벨이 결과를 말한다.** `메모 다시 정리하기`는 무엇이 사라지는지 말하지 않았다 —
+                  이 화면의 대화는 카드를 넘길 때마다 비므로(`resetCard`), 오답노트에서 여러 번
+                  물어 만든 긴 메모가 여기서 한 문답의 요약으로 **교체**된다. 학원 오답이면 담당
+                  선생님이 보고 있던 값이다(D-054). §17의 "정리는 전체를 다시 요약해 새로 쓴다"는
+                  대화가 남아 있는 오답노트의 전제이고, 이 화면에는 그 전제가 없다(A-031).
+                */
+                label={card.dig ? '지금 대화로 메모를 새로 쓰기' : '노트에 정리해 두기'}
+                onPress={() => {
+                  // 덮어쓸 것이 없으면 바로 저장한다. 확인 단계는 잃을 것이 있을 때만 둔다.
+                  if (card.dig) setConfirmMemo(card.id);
+                  else void saveMemo();
+                }}
               />
             ) : undefined
           }
         >
+          {/*
+            **되돌릴 수 없는 교체라 확인을 받는다**(오답노트의 `정리와 대화 지우기`와 같은 무게).
+            문장이 무엇이 사라지는지 말한다.
+          */}
+          {confirmMemo === card.id ? (
+            <ConfirmStep
+              message="지금 오답노트에 있는 메모가 이 대화의 요약으로 바뀌어요. 되돌릴 수 없어요."
+              confirmLabel="새로 쓰기"
+              confirmTestID="review-save-memo-confirm"
+              confirmAccessibilityLabel="지금 대화로 메모를 새로 쓰기"
+              destructive
+              onCancel={() => setConfirmMemo(null)}
+              onConfirm={() => {
+                setConfirmMemo(null);
+                void saveMemo();
+              }}
+            />
+          ) : null}
           {convo.map((m, i) => (
             <View key={i} style={{ gap: 6 }}>
               <AppText variant="caption" tone="tertiary">

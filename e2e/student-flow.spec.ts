@@ -171,6 +171,46 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await expect(cards).toHaveCount(5);
   });
 
+  test('개인 학습을 제출하면 홈이 시작하지 않았다고 말하지 않는다', async ({ page }) => {
+    /*
+      D-143이 `다 끝냈어요`의 기준을 약속된 집합으로 좁혔는데, 개인 학습을 제출하면 서버가 그
+      학습을 담아 둔 목록에서 지운다(`rpc_submit_attempt`). 그래서 학원 소속이 없는 학생은
+      **공부를 할수록 그 집합이 0으로 돌아가** 홈이 `아직 시작한 학습이 없어요`라고 말했다(D-154).
+    */
+    await loginAs(page, 'seojun'); // 개인 이용권만 · 학원 소속 없음
+    await openFirstPersonal(page);
+    await page.getByTestId('detail-start').click();
+    await answerAll(page);
+    await page.getByTestId('solve-submit').click();
+    await expect(page).toHaveURL(/\/student\/result\//);
+    await page.getByTestId('result-done').click();
+    await expect(page).toHaveURL(/\/student$/);
+
+    await expect(page.getByText('오늘 할 일을 다 끝냈어요')).toBeVisible();
+    await expect(page.getByText('아직 시작한 학습이 없어요')).toHaveCount(0);
+    // 캡션은 실제로 열린 길만 가리킨다(D-141) — 이 계정은 이용권이 있으니 고르는 길이다.
+    await expect(page.getByText(/학습 탭에서 새 학습을 골라볼 수 있어요/)).toBeVisible();
+  });
+
+  test('카드 복습을 새로고침해도 담아 둔 오답이 사라지지 않는다', async ({ page }) => {
+    /*
+      덱을 첫 렌더에 고정하는데 그때 조회가 끝나지 않으면 덱이 비고, 노트가 도착해도 다시 세우는
+      곳이 없어서 `복습할 오답이 없어요.`가 영구 상태였다(D-153). 조회가 끝난 뒤 덱 화면을
+      마운트하도록 갈랐다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByText('전체 복습하기').first().click();
+    await expect(page).toHaveURL(/\/student\/review/);
+    // 진행 표시(`1 / 8`)는 덱이 실제로 잡혔을 때만 그려진다.
+    await expect(page.getByText(/^\d+ \/ \d+$/)).toBeVisible();
+
+    await page.reload();
+    // 새로고침 뒤에도 카드가 온다. 빈 상태로 떨어지지 않는다.
+    await expect(page.getByText(/^\d+ \/ \d+$/)).toBeVisible();
+    await expect(page.getByText('복습할 오답이 없어요.')).toHaveCount(0);
+  });
+
   test('제출 후 상세로 돌아오면 결과를 다시 볼 수 있다', async ({ page }) => {
     await loginAs(page, 'seojun');
     await openFirstPersonal(page);
