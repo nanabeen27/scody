@@ -17,6 +17,8 @@ export const colors = {
   surface: 'var(--sc-surface)',
   offset: 'var(--sc-offset)',
   hover: 'var(--sc-hover)',
+  /** 상시 고지 면(대리 보기 배너). 오답·오류의 `danger`와 갈라 둔다(D-147). */
+  notice: 'var(--sc-notice)',
 
   border: 'var(--sc-border)',
   borderStrong: 'var(--sc-borderStrong)',

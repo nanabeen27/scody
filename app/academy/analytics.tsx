@@ -31,7 +31,7 @@ import {
   weightedAccuracy,
 } from '@/features/academyStats';
 import type { Assignment } from '@/data';
-import { inset } from '@/theme/styles';
+import { endRow, inset } from '@/theme/styles';
 import { colors, spacing } from '@/theme/tokens';
 
 /** 한 페이지에 두는 배정 수. 반 122개 규모에서도 한 목록에 다 쏟지 않는다. */
@@ -417,12 +417,18 @@ export default function AcademyAnalytics() {
             {dueError}
           </AppText>
         ) : null}
-        <Button
-          testID={`${prefix}-submit-${assignmentId}`}
-          hug
-          label="다시 배정하기"
-          onPress={() => submitReassign(assignmentId)}
-        />
+        {/*
+          패널 안에서도 행동은 줄의 오른쪽 끝이다(§8 규칙 ③ · D-146). 패널 자체에 정렬을 주면
+          위 설명 문장까지 따라오므로 버튼만 감싼다. 학생 상세의 쌍둥이 패널과 같게 맞춘다.
+        */}
+        <View style={endRow.action}>
+          <Button
+            testID={`${prefix}-submit-${assignmentId}`}
+            hug
+            label="다시 배정하기"
+            onPress={() => submitReassign(assignmentId)}
+          />
+        </View>
       </View>
     );
   }
@@ -680,27 +686,32 @@ export default function AcademyAnalytics() {
                           ))
                         : null}
                       {target ? (
-                        <Button
-                          testID={`student-reassign-open-${s.studentId}`}
-                          size="sm"
-                          variant="ghost"
-                          tone="accent"
-                          hug
-                          label={dueOpen ? '접기' : `${target.name} 마감일 다시 정하기`}
-                          accessibilityLabel={
-                            dueOpen ? '접기' : `${target.name} 마감일 다시 정하기`
-                          }
-                          leading={
-                            <Icon
-                              name={dueOpen ? 'arrow-up' : 'refresh-cw'}
-                              size={15}
-                              color={colors.accent}
-                            />
-                          }
-                          onPress={() =>
-                            openReassign('student', s.studentId, target.assignmentId)
-                          }
-                        />
+                        /* 위 과제 목록과 같은 패널 안이라 버튼만 오른쪽으로 뺀다(D-146).
+                           바로 위 과제 섹션의 `reassign-open-*`은 `inset.action`이라 이미
+                           오른쪽인데, 같은 일을 하는 이 버튼만 왼쪽이었다. */
+                        <View style={endRow.action}>
+                          <Button
+                            testID={`student-reassign-open-${s.studentId}`}
+                            size="sm"
+                            variant="ghost"
+                            tone="accent"
+                            hug
+                            label={dueOpen ? '접기' : `${target.name} 마감일 다시 정하기`}
+                            accessibilityLabel={
+                              dueOpen ? '접기' : `${target.name} 마감일 다시 정하기`
+                            }
+                            leading={
+                              <Icon
+                                name={dueOpen ? 'arrow-up' : 'refresh-cw'}
+                                size={15}
+                                color={colors.accent}
+                              />
+                            }
+                            onPress={() =>
+                              openReassign('student', s.studentId, target.assignmentId)
+                            }
+                          />
+                        </View>
                       ) : (
                         <AppText variant="caption" tone="tertiary">
                           마감이 아직 남아 있어요. 마감이 지나면 마감일을 다시 정할 수 있어요.

@@ -115,6 +115,32 @@ test.describe('총괄관리자 운영 화면', () => {
     await expect(page.getByText('현재 ₩12,500')).toBeVisible();
   });
 
+  test('운영자가 올린 좌석 단가를 원장 화면이 그대로 말한다', async ({ page }) => {
+    /*
+      A-098이 있던 자리다. 0024가 `pricing_policies`를 운영자로 좁힌 뒤 원장은 그 값을 읽을 수
+      없어서 학원 관리 화면이 **코드 상수**(`DEFAULT_PRICING`)를 서버 값처럼 말했다 — 단가를
+      올려도 학원 화면만 옛 값을 말한다. 0034의 뷰로 그 길을 열었으니(D-148) 두 화면이 같은
+      값을 말하는지 계정을 바꿔 가며 확인한다.
+    */
+    await login(page, 'admin');
+    await page.getByRole('link', { name: '요금제' }).first().click();
+    await expect(page.getByTestId('billing-academySeat-value')).toHaveText('₩12,000');
+    await page.getByTestId('billing-academySeat-up').click();
+    await expect(page.getByTestId('billing-academySeat-value')).toHaveText('₩12,500');
+
+    await page.getByRole('link', { name: '개요' }).first().click();
+    await page.getByText('로그아웃').first().click();
+    await expect(page).toHaveURL(/\/login/);
+    await loginHere(page, 'hanbit.director');
+
+    await page.getByRole('link', { name: '학원 관리' }).first().click();
+    await expect(page.getByTestId('academy-manage')).toBeVisible();
+    await expect(page.getByText('요금과 이용 인원')).toBeVisible();
+    // 좌석 단가 줄이 방금 올린 값을 말한다(예전에는 ₩12,000에 머물렀다).
+    await expect(page.getByText('₩12,500').first()).toBeVisible();
+    await expect(page.getByText('₩12,000')).toHaveCount(0);
+  });
+
   test('학원 목록에서 학원 상세로 들어간다', async ({ page }) => {
     await login(page, 'admin');
     await page.getByRole('link', { name: '학원' }).first().click();
@@ -295,13 +321,19 @@ test.describe('총괄관리자 문제 등록', () => {
  * 계정 목록에서 한 계정을 찾아 사유를 적고 대리 보기를 시작한다.
  * 사유 유형 칩 + 사유 입력이 모두 있어야 시작 버튼이 렌더된다(D-071).
  */
-/** `oldId`는 seed의 옛 fixture id다(`sid`가 uuid로 바꾼다). */
+/**
+ * `oldId`는 seed의 옛 fixture id다(`sid`가 uuid로 바꾼다).
+ *
+ * 문의 번호는 늘 채운다 — 학부모·학원 계정은 남의 기록까지 열리므로 **필수**이고(D-149),
+ * 학생 계정에서는 선택이라 채워도 흐름이 같다.
+ */
 async function impersonate(page: Page, oldId: string, search: string, why = '문의 재현 확인') {
   await page.getByRole('link', { name: '계정' }).first().click();
   await page.getByTestId('users-search').fill(search);
   await page.getByTestId(`user-row-${sid(oldId)}`).click();
   await page.locator('[data-testid^="impersonate-kind-"]').first().click();
   await page.getByTestId('impersonate-why').fill(why);
+  await page.getByTestId('impersonate-ticket').fill('2026-0814-01');
   await page.getByTestId('impersonate-start').click();
 }
 
@@ -459,6 +491,46 @@ test.describe('총괄관리자 대리 보기', () => {
     // 열람 기록은 서버에서 `subject_id`로 좁혀 오므로 새로고침해도 두 건 그대로다.
     await page.reload();
     await expect(page.locator('[data-testid^="user-audit-"]')).toHaveCount(2);
+  });
+
+  test('학부모 계정은 열리는 범위를 말하고 문의 번호를 받아야 시작한다', async ({ page }) => {
+    /*
+      A-079가 있던 자리다. 학부모를 대리하면 **자녀 기록 전부**(오답노트 메모 본문 포함)가
+      열리는데, 예전에는 화면이 그 사실을 말하지 않고 사유 유형도 학생과 똑같았다.
+      지금은 ①범위를 먼저 말하고 ②`데이터 점검`을 두지 않고 ③문의 번호를 받는다(D-149).
+    */
+    await login(page, 'admin');
+    await page.getByRole('link', { name: '계정' }).first().click();
+    await page.getByTestId('users-search').fill('minji');
+    await page.getByTestId(`user-row-${sid('u_parent')}`).click();
+
+    // ① 무엇이 열리는지 시작 전에 말한다
+    const scope = page.getByTestId('impersonate-scope');
+    await expect(scope).toContainText('연결된 자녀의 학습 기록 전부');
+    await expect(scope).toContainText('오답노트 메모 본문과 별표까지');
+
+    // ② 넓게 여는 대상에는 `데이터 점검`을 두지 않는다
+    await expect(page.getByTestId('impersonate-kind-자녀 리포트 문의')).toBeVisible();
+    await expect(page.getByTestId('impersonate-kind-데이터 점검')).toHaveCount(0);
+
+    // ③ 사유만 적어도 시작할 수 없다 — 문의 번호가 필요하다
+    await page.getByTestId('impersonate-kind-자녀 리포트 문의').click();
+    await page.getByTestId('impersonate-why').fill('자녀 리포트가 비어 있다는 문의');
+    await expect(page.getByTestId('impersonate-start')).toHaveCount(0);
+    await expect(page.getByText(/문의 번호를 적으면 시작할 수 있어요/)).toBeVisible();
+
+    await page.getByTestId('impersonate-ticket').fill('2026-0814-77');
+    await page.getByTestId('impersonate-start').click();
+    await expect(page).toHaveURL(/\/parent$/);
+
+    // 열람 범위가 운영 기록에 남는다 — 화면이 말한 문장과 같은 문장이다
+    await page.getByTestId('impersonation-end').click();
+    await expect(page).toHaveURL(/\/admin/);
+    await page.getByRole('link', { name: '운영 기록' }).first().click();
+    await expect(
+      page.getByText(/열람 범위: 연결된 자녀의 학습 기록 전부/).first(),
+    ).toBeVisible();
+    await expect(page.getByText(/문의 2026-0814-77/).first()).toBeVisible();
   });
 
   test('대리 중에는 학원 문제를 등록할 수 없다', async ({ page }) => {

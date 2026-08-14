@@ -654,6 +654,34 @@ async function verify(anon: SupabaseClient) {
     check('운영자에게는 보인다', (await count(admin, 'pricing_policies')) > 0);
     const { data, error } = await seojun.from('v_public_pricing').select('student_paid, parent_paid');
     check('학생은 개인 요금만 뷰로 읽는다', !error && (data?.length ?? 0) === 1, error?.message);
+
+    /*
+      **원장만 좌석 단가를 읽는다**(0034 · D-148). 0024가 표를 운영자로 좁힌 뒤 원장도 자기
+      청구액을 확인할 길이 없어서 화면이 코드 상수를 서버 값처럼 말했다(A-098). 뷰는
+      `is_director()`로 좁히므로 선생님·학생에게는 0행이다 — 여기서 그 대칭을 실측한다.
+    */
+    const seat = 'v_academy_seat_pricing';
+    const { data: dirSeat, error: dirErr } = await director
+      .from(seat)
+      .select('academy_seat, seat_discount_pct, seat_discount_from');
+    check(
+      '원장은 좌석 단가를 뷰로 읽는다',
+      !dirErr && (dirSeat?.length ?? 0) === 1 && (dirSeat?.[0]?.academy_seat ?? 0) > 0,
+      dirErr?.message,
+    );
+    check('선생님에게 좌석 단가 뷰가 0행', (await count(teacher, seat)) === 0);
+    check('학생에게 좌석 단가 뷰가 0행', (await count(seojun, seat)) === 0);
+    check('학부모에게 좌석 단가 뷰가 0행', (await count(minji, seat)) === 0);
+    check('익명에게 좌석 단가 뷰가 0행', (await count(anon, seat)) === 0);
+    // 개인 요금·연 결제 비율은 이 뷰에 없다 — 있으면 0024가 막은 것이 다시 열린 것이다.
+    const seatCols = Object.keys(dirSeat?.[0] ?? {});
+    check(
+      '좌석 뷰에 개인 요금·연 결제 컬럼이 없다',
+      !['student_paid', 'parent_paid', 'annual_discount_pct', 'annual_share_pct'].some((c) =>
+        seatCols.includes(c),
+      ),
+      seatCols.join(','),
+    );
   }
 
   console.log('\n[쓰기 범위] 칭찬의 보낸 사람을 자녀가 바꿀 수 없다');

@@ -9,6 +9,18 @@ export type ColorName =
   | 'surface'
   | 'offset'
   | 'hover'
+  /**
+   * **상시 고지 면**(D-147). 화면에 계속 떠 있으면서 "이건 본문이 아니다"를 말해야 하는
+   * 자리 — 지금은 대리 보기 배너 하나다.
+   *
+   * `offset`으로는 풀리지 않는다: 본문과 라이트 1.09:1 · 다크 1.21:1이라 면으로는 구분이
+   * 사실상 없었고, 실제 구분을 1px 테두리와 아이콘이 혼자 지고 있었다(A-080). `danger`도
+   * 쓸 수 없다 — 오답·오류의 색이라 상시 배너에 쓰면 그 신호가 죽는다(D-071).
+   *
+   * 그래서 팔레트에 없던 **호박(ochre)** 한 칸을 둔다. 경고로 읽히지만 빨강이 아니고,
+   * 출처색(`academy` 테라코타)·`kakao` 노랑과도 명도·채도가 갈린다.
+   */
+  | 'notice'
   | 'border'
   | 'borderStrong'
   | 'ink'
@@ -32,6 +44,8 @@ export const PALETTE_LIGHT: Record<ColorName, string> = {
   surface: '#fffdf7',
   offset: '#eeeade',
   hover: '#e5dfd0',
+  // 본문(bg)과 1.48:1. ink 11.26:1 · inkSecondary 4.59:1로 어느 글자 톤을 올려도 AA다.
+  notice: '#e6c87a',
   // 경계선은 배경과 충분히 차이 나야 목록·표 구분이 보인다.
   border: '#d9d2be',
   borderStrong: '#bdb49b',
@@ -55,6 +69,8 @@ export const PALETTE_DARK: Record<ColorName, string> = {
   surface: '#0e1f1f',
   offset: '#132a2a',
   hover: '#1a3535',
+  // 본문(bg)과 1.70:1. ink 9.51:1 · inkSecondary 5.01:1.
+  notice: '#4a3c18',
   border: '#213f3f',
   borderStrong: '#315150',
   ink: '#f3f1e8',

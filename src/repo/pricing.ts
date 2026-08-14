@@ -9,11 +9,14 @@ import { errorMessage, supabase } from '@/lib/supabase';
  * 지금 값은 `current_pricing()`이 주는 한 행이고, 바꾸면 새 행이 하나 생긴다. update 정책이
  * 없으므로 지난 값을 고칠 길이 없다.
  *
- * ## 읽는 사람이 둘로 갈린다
+ * ## 읽는 사람이 셋으로 갈린다
  *
  * `pricing_policies_select`가 `is_admin()`이다(0024). 좌석 단가·규모 할인·연 결제 비율은 B2B
  * 계약 조건이라 학생·학부모·선생님에게 열지 않는다. 그 화면들이 실제로 필요한 것은 개인 요금
  * 두 개뿐이고, 그것만 `v_public_pricing` 뷰가 준다.
+ *
+ * **원장은 좌석 세 값을 읽는다**(`v_academy_seat_pricing`, 0034 · D-148). 자기 학원의 청구액을
+ * 확인할 길이 필요한데, 0024 뒤로 그 길이 없어서 화면이 코드 상수를 서버 값처럼 말했다(A-098).
  */
 
 /** 요금 정책 한 벌. 화면이 쓰는 형태. */
@@ -38,6 +41,16 @@ export interface PricingPolicy {
 export interface PublicPricing {
   studentPaid: number;
   parentPaid: number;
+}
+
+/**
+ * 좌석 관련 세 값만. **원장**이 보는 범위다(`v_academy_seat_pricing`, 0034).
+ * 개인 요금·연 결제 비율은 들어 있지 않다 — 학원의 청구액과 무관하다.
+ */
+export interface AcademySeatPricing {
+  academySeat: number;
+  seatDiscountPct: number;
+  seatDiscountFrom: number;
 }
 
 export interface WriteResult {
@@ -83,6 +96,33 @@ export async function loadPublicPricing(): Promise<PublicPricing | null> {
   if (error) throw new Error(errorMessage(error));
   if (!data || data.student_paid === null || data.parent_paid === null) return null;
   return { studentPaid: data.student_paid, parentPaid: data.parent_paid };
+}
+
+/**
+ * 원장이 보는 좌석 단가(0034의 `v_academy_seat_pricing`).
+ *
+ * 뷰가 `is_director()`로 좁히므로 다른 역할에는 0행이 나가고 여기서 `null`이 된다. 한 행도 없을
+ * 때도 `null`이다 — 그때는 부르는 쪽이 기준값을 쓴다(0원으로 그리면 무료처럼 보인다).
+ */
+export async function loadAcademySeatPricing(): Promise<AcademySeatPricing | null> {
+  const { data, error } = await supabase()
+    .from('v_academy_seat_pricing')
+    .select('academy_seat, seat_discount_pct, seat_discount_from')
+    .maybeSingle();
+  if (error) throw new Error(errorMessage(error));
+  if (
+    !data ||
+    data.academy_seat === null ||
+    data.seat_discount_pct === null ||
+    data.seat_discount_from === null
+  ) {
+    return null;
+  }
+  return {
+    academySeat: data.academy_seat,
+    seatDiscountPct: data.seat_discount_pct,
+    seatDiscountFrom: data.seat_discount_from,
+  };
 }
 
 /**

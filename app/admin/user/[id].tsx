@@ -16,7 +16,7 @@ import {
   type SegmentedOption,
   ActionBar,
 } from '@/components';
-import type { Entitlement } from '@/data';
+import type { Account, Entitlement } from '@/data';
 import { isActiveEntitlement } from '@/data/accountMeta';
 import {
   classNamesOf,
@@ -27,6 +27,13 @@ import {
   type WeeklyActivity,
 } from '@/repo/admin';
 import { useAudit, auditTime, type AuditEntry } from '@/features/audit';
+import {
+  impersonationScope,
+  reasonKindsFor,
+  scopeForLog,
+  ticketRequiredFor,
+  type ReasonKind,
+} from '@/features/impersonation';
 import { listAuditLogsFor } from '@/repo/ops';
 import { IMPERSONATION_MINUTES, useCurrentAccount, useSession } from '@/session';
 import { ROLE_LABEL, homeHrefFor } from '@/session/routing';
@@ -43,14 +50,13 @@ const PAYER: Record<Entitlement['payer'], string> = {
 
 const ACADEMY_ROLE: Record<string, string> = { director: '원장', teacher: '선생님' };
 
-/** 대리 보기 사유 유형. 자유 입력과 함께 남겨 감사 로그에서 분류할 수 있게 한다. */
-type ReasonKind = '문의 재현' | '오류 확인' | '데이터 점검';
-
-const REASONS: readonly SegmentedOption<ReasonKind | ''>[] = [
-  { value: '문의 재현', label: '문의 재현' },
-  { value: '오류 확인', label: '오류 확인' },
-  { value: '데이터 점검', label: '데이터 점검' },
-];
+/**
+ * 사유 유형 칩. **대상 역할에 따라 다르다**(D-149) — 자녀·학원 기록이 함께 열리는 대상에서는
+ * `데이터 점검`이 없고 문의 번호가 필수다. 판단은 `src/features/impersonation.ts` 한곳에 있다.
+ */
+function reasonOptions(target: Account): readonly SegmentedOption<ReasonKind | ''>[] {
+  return reasonKindsFor(target).map((k) => ({ value: k, label: k }));
+}
 
 /** 마스킹한 전화번호. 목록에는 두지 않고 상세에서만 가운데를 가려 보여 준다. */
 function maskPhone(phone: string): string {
@@ -181,7 +187,17 @@ export default function AdminUserDetail() {
    */
   const isAdminTarget = account.roles.includes('admin');
   const blocked = isSelf || isAdminTarget;
-  const canStart = !blocked && kind !== '' && why.trim().length > 0;
+  /**
+   * 이 대리 보기가 여는 것(D-149). 시작 전에 화면에 그대로 두고, 같은 문장을 감사 로그에 남긴다.
+   * 남의 기록까지 열리는 대상(학부모·학원)에는 문의 번호를 받아야 시작할 수 있다.
+   */
+  const scope = impersonationScope(account);
+  const needsTicket = ticketRequiredFor(account);
+  const canStart =
+    !blocked &&
+    kind !== '' &&
+    why.trim().length > 0 &&
+    (!needsTicket || ticket.trim().length > 0);
 
   async function start() {
     if (!account || kind === '') return;
@@ -208,9 +224,13 @@ export default function AdminUserDetail() {
       // 대리 보기는 그 자체가 하나의 분류다. `계정`으로 남기면 `대리 보기` 칩이 영구히 0건이 된다.
       action: '대리 보기',
       subjectId: account.userId,
+      /*
+        **열람 범위를 함께 남긴다**(D-149). 사유만 남기면 그 열람이 자녀·학원 기록까지 열었다는
+        사실이 기록에 없다 — 나중에 접속기록을 볼 때 무엇이 열렸는지 역할에서 다시 유추해야 했다.
+      */
       detail: `대리 보기 시작 · ${account.name}(${account.userId}) · ${reason}${
         ticketNo ? ` · 문의 ${ticketNo}` : ''
-      }`,
+      } · 열람 범위: ${scopeForLog(account)}`,
     });
     router.replace(homeHrefFor(account) as never);
   }
@@ -338,8 +358,22 @@ export default function AdminUserDetail() {
             학생 계정이에요. 꼭 필요한 만큼만 보고 바로 끝내 주세요.
           </AppText>
         ) : null}
+        {/*
+          **무엇이 열리는지 시작 전에 말한다**(D-149). 학부모·원장 계정은 대리하는 순간 남의
+          기록까지 열리는데, 예전에는 화면이 그 사실을 한 줄도 말하지 않았다(A-079).
+          여기 적힌 문장이 감사 로그에 남는 문장과 같다(`impersonationScope`).
+        */}
+        <View testID="impersonate-scope" style={{ gap: spacing.xs }}>
+          <AppText variant="caption" tone="secondary">
+            지금 열리는 범위
+          </AppText>
+          {scope.map((line) => (
+            <AppText key={line}>· {line}</AppText>
+          ))}
+        </View>
         <AppText variant="caption" tone="tertiary">
-          {IMPERSONATION_MINUTES}분이 지나면 자동으로 끝나요. 사유는 운영 기록에 남아요.
+          {IMPERSONATION_MINUTES}분이 지나면 자동으로 끝나요. 사유와 열람 범위는 운영 기록에
+          남아요.
         </AppText>
 
         {blocked ? (
@@ -357,7 +391,7 @@ export default function AdminUserDetail() {
               </AppText>
               <SegmentedControl
                 testID="impersonate-kind"
-                options={REASONS}
+                options={reasonOptions(account)}
                 value={kind}
                 onChange={(k) => setKind(k)}
               />
@@ -372,7 +406,7 @@ export default function AdminUserDetail() {
             />
             <Field
               testID="impersonate-ticket"
-              label="문의 번호 (선택)"
+              label={needsTicket ? '문의 번호' : '문의 번호 (선택)'}
               accessibilityLabel="문의 번호"
               value={ticket}
               onChangeText={setTicket}
@@ -393,7 +427,9 @@ export default function AdminUserDetail() {
               </ActionBar>
             ) : (
               <AppText variant="caption" tone="tertiary">
-                사유 유형을 고르고 무엇을 확인하는지 적으면 시작할 수 있어요.
+                {needsTicket
+                  ? '사유 유형을 고르고, 무엇을 확인하는지와 문의 번호를 적으면 시작할 수 있어요.'
+                  : '사유 유형을 고르고 무엇을 확인하는지 적으면 시작할 수 있어요.'}
               </AppText>
             )}
             {error ? (

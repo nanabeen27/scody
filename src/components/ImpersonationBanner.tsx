@@ -61,9 +61,11 @@ export function useFinishImpersonation() {
  *
  * 노치는 배너가 직접 처리한다(`SafeAreaView edges={['top']}`). 루트에 있어 위에 아무것도 없다.
  *
- * **색은 새로 만들지 않는다.** 팔레트에 경고 토큰이 없고 `danger`뿐인데, `danger`는 오답·오류·
- * 파괴적 행동의 색이다. 상시 배너를 그 색으로 두면 오답률 신호가 죽는다. 그래서 `offset` 면 +
- * `borderStrong` 아래 테두리 + `alert-circle` 아이콘으로 "본문이 아님"만 분명히 한다.
+ * **면은 `notice`다**(D-147). `danger`는 쓰지 않는다 — 오답·오류·파괴적 행동의 색이라 상시 배너를
+ * 그 색으로 두면 오답률 신호가 죽는다. 예전에는 `offset`이었는데 본문과 라이트 1.09:1 ·
+ * 다크 1.21:1이라 면으로는 구분이 사실상 없었고, 1px 테두리와 아이콘이 구분을 혼자 지고 있었다
+ * (A-080). `notice`는 본문과 라이트 1.48:1 · 다크 1.70:1이다. 테두리(`borderStrong`)와
+ * `alert-circle` 아이콘은 그대로 둔다 — 면·선·아이콘 셋이 함께 "본문이 아님"을 말한다.
  *
  * 시간이 지나면 스스로 끝낸다 — 열어 둔 채 잊어버리는 것을 막는다.
  */
@@ -148,12 +150,12 @@ export function ImpersonationBanner() {
 }
 
 const styles = StyleSheet.create({
-  safe: { backgroundColor: colors.offset },
+  safe: { backgroundColor: colors.notice },
   bar: {
     gap: 2,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
-    backgroundColor: colors.offset,
+    backgroundColor: colors.notice,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.borderStrong,
   },

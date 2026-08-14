@@ -1335,6 +1335,15 @@ export type Database = {
       }
     }
     Views: {
+      v_academy_seat_pricing: {
+        Row: {
+          academy_seat: number | null
+          effective_from: string | null
+          seat_discount_from: number | null
+          seat_discount_pct: number | null
+        }
+        Relationships: []
+      }
       v_academy_visible_notes: {
         Row: {
           assignment_id: string | null

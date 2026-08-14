@@ -23,7 +23,9 @@ import { useSession } from '@/session';
  *
  * `pricing_policies`는 운영자만 읽는다 — 좌석 단가·규모 할인·연 결제 비율은 B2B 계약 조건이다.
  * 학부모·학생 화면은 `v_public_pricing`에서 **개인 요금 두 개만** 읽는다(`대신 내주기`가 말하는
- * 금액이 그것뿐이다). 그 화면에서 나머지 항목은 `DEFAULT_PRICING` 값 그대로다.
+ * 금액이 그것뿐이다). **원장은 좌석 세 값을** `v_academy_seat_pricing`에서 읽는다(D-148) —
+ * 학원 관리 화면의 `좌석 단가`·`규모 할인`·`한 달 예상 금액`이 그 값으로 계산된다.
+ * 어느 경로에서도 받지 못한 항목은 `DEFAULT_PRICING` 값 그대로다.
  *
  * 실제 결제·정산과는 아직 연결되지 않았다(마스터 플랜 5절). 화면이 그 사실을 함께 밝힌다.
  */
@@ -117,6 +119,8 @@ export function PricingProvider({ children }: { children: ReactNode }) {
   const viewerId = account?.userId;
   const isAdmin = !!account?.roles.includes('admin');
   const isParent = !!account?.roles.includes('parent');
+  // 원장만 좌석 단가를 읽는다(0034의 뷰도 `is_director()`로 좁힌다). 선생님에게는 0행이다.
+  const isDirector = account?.academyRole === 'director';
 
   /*
     로그인한 사람이 바뀌면 다시 읽는다 — 읽을 수 있는 범위가 역할에 따라 다르다.
@@ -139,16 +143,21 @@ export function PricingProvider({ children }: { children: ReactNode }) {
       if (!alive) return;
       setLoading(true);
       try {
-        const [next, offers] = await Promise.all([
+        const [next, seat, offers] = await Promise.all([
           isAdmin ? repo.loadCurrentPricing() : repo.loadPublicPricing(),
+          isDirector && !isAdmin ? repo.loadAcademySeatPricing() : Promise.resolve(null),
           isParent ? repo.loadPaymentOffers(viewerId) : Promise.resolve(NO_OFFERS),
         ]);
         if (!alive) return;
         /*
-          운영자는 한 벌 전체를, 그 외에는 개인 요금 두 개만 받는다. 한 행도 없으면 기준값이다 —
-          비어 있는 것을 0원으로 그리면 요금이 없는 서비스처럼 보인다.
+          운영자는 한 벌 전체를, 원장은 개인 요금 두 개 + 좌석 세 값을, 그 외에는 개인 요금
+          두 개만 받는다. 어느 것도 오지 않으면 기준값이다 — 비어 있는 것을 0원으로 그리면
+          요금이 없는 서비스처럼 보인다.
+
+          운영자에게는 좌석 조회를 걸지 않는다: `loadCurrentPricing`이 같은 행의 좌석 값을
+          이미 담고 있고, 운영자 계정에 `academyRole`이 붙어 있어도 뷰는 0행을 준다.
         */
-        applyPolicy(next ? { ...DEFAULT_PRICING, ...next } : DEFAULT_PRICING);
+        applyPolicy({ ...DEFAULT_PRICING, ...next, ...seat });
         setParentPays(offers);
       } catch (e) {
         console.warn('요금 정책을 읽지 못했어요:', errorMessage(e));
@@ -159,7 +168,7 @@ export function PricingProvider({ children }: { children: ReactNode }) {
     return () => {
       alive = false;
     };
-  }, [applyPolicy, isAdmin, isParent, viewerId]);
+  }, [applyPolicy, isAdmin, isDirector, isParent, viewerId]);
 
   /*
     대리 보기 중에는 아무것도 바꾸지 않는다(D-071). 요금 정책은 총괄관리자만 만지고 대리 대상에

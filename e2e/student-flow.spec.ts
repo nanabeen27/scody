@@ -987,7 +987,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await expect(page.getByText('답을 고르면 정답과 내 메모를 함께 볼 수 있어요.')).toBeVisible();
     await page.getByTestId('review-choice-1').click();
     await expect(page.getByText(/이번엔 맞혔어요|아직 헷갈려요/)).toBeVisible();
-    await expect(page.getByText('더 파고들기')).toBeVisible();
+    await expect(page.getByText('질문하고 메모하기')).toBeVisible();
 
     // 별표를 달면 집중 복습 목록에 들어간다
     await page.getByRole('button', { name: '별표 달기' }).click();
@@ -996,7 +996,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     const starred = page.getByTestId('learn-review-starred');
     await expect(starred).toBeVisible();
     await starred.click();
-    await expect(page.getByText('별표 집중 복습')).toBeVisible();
+    await expect(page.getByText('별표 카드 복습')).toBeVisible();
     await expect(page.getByText(/1 \/ 1/)).toBeVisible();
   });
 

@@ -10,7 +10,7 @@ import {
 } from 'react';
 import type { AcademyClass, Account, Role } from '@/data/types';
 import { errorMessage, hasSupabaseConfig, supabase } from '@/lib/supabase';
-import { DEV_LOGIN_ENABLED, DEV_LOGIN_PASSWORD } from '@/session/devAccounts';
+import { DEV_LOGIN_ENABLED, DEV_LOGIN_PASSWORD, devLoginEmail } from '@/session/devAccounts';
 import {
   loadDirectory,
   loadSelfRoles,
@@ -242,8 +242,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
       setLoading(true);
       const { data, error } = await supabase().auth.signInWithPassword({
-        // seed가 만든 개발용 계정. 실제 서비스에서는 이 경로가 없다.
-        email: `${scodyId.trim().toLowerCase()}@scody.test`,
+        /*
+          seed가 만든 개발용 계정. 실제 서비스에서는 이 경로가 없다.
+          **주소를 여기서 만들지 않는다**(D-145) — 이 파일의 템플릿 리터럴은 스위치를 꺼도
+          운영 번들에 남는다. `devLoginEmail`은 꺼진 빌드에서 상수로 접혀 사라진다.
+        */
+        email: devLoginEmail(scodyId),
         password: DEV_LOGIN_PASSWORD,
       });
       if (error || !data.user) {

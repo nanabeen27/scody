@@ -20,7 +20,7 @@ import { useAcademyStaff } from '@/features/academy';
 import { useToast } from '@/features/toast';
 import { pendingStat, submitStat } from '@/features/academyStats';
 import { dueLabel, formatDate } from '@/features/learning';
-import { inset } from '@/theme/styles';
+import { endRow, inset } from '@/theme/styles';
 import { colors, radius, spacing } from '@/theme/tokens';
 
 /** 배정은 마감 임박순으로 5개씩. 반 하나에 배정이 쌓여도 화면이 길어지지 않게 한다. */
@@ -479,34 +479,42 @@ export default function ClassDetail() {
                       <AppText variant="caption" tone="tertiary">
                         개인 학습 기록은 학원에 공개되지 않아요.
                       </AppText>
-                      {/* 이 반 안에서만 보이는 요약이다. 학생이 두 반에 속하면 반쪽이라 상세로 잇는다. */}
-                      <Button
-                        testID={`class-student-detail-${st.userId}`}
-                        variant="ghost"
-                        tone="accent"
-                        hug
-                        leading={<Icon name="user" size={16} color={colors.accent} />}
-                        label="이 학생 기록 전체 보기"
-                        accessibilityLabel={`${st.name} 학생 기록 전체 보기`}
-                        onPress={() =>
-                          router.push(`/academy/classes/student/${st.userId}` as never)
-                        }
-                      />
+                      {/* 이 반 안에서만 보이는 요약이다. 학생이 두 반에 속하면 반쪽이라 상세로 잇는다.
+                          글자가 함께 든 패널이라 버튼만 오른쪽 끝으로 뺀다(§8 규칙 ③ · D-146). */}
+                      <View style={endRow.action}>
+                        <Button
+                          testID={`class-student-detail-${st.userId}`}
+                          variant="ghost"
+                          tone="accent"
+                          hug
+                          leading={<Icon name="user" size={16} color={colors.accent} />}
+                          label="이 학생 기록 전체 보기"
+                          accessibilityLabel={`${st.name} 학생 기록 전체 보기`}
+                          onPress={() =>
+                            router.push(`/academy/classes/student/${st.userId}` as never)
+                          }
+                        />
+                      </View>
                       {/*
                         빼기는 값 옆이 아니라 펼친 자리에 둔다. `안 낸 과제 없음`(약 95px)과
                         버튼(약 76px)을 `trailing`에 함께 두면 1280에서도 두 줄로 갈리고
                         390에서는 이름 칸이 100px로 눌렸다(실측).
                       */}
                       {isDirector ? (
-                        <Button
-                          testID={`class-student-out-${st.userId}`}
-                          variant="ghost"
-                          hug
-                          leading={<Icon name="minus-circle" size={16} color={colors.inkSecondary} />}
-                          label="이 반에서 빼기"
-                          accessibilityLabel={`${st.name} 학생 반에서 빼기`}
-                          onPress={() => takeOut(st.userId, st.name)}
-                        />
+                        /* 한 줄에 버튼 하나(D-122). 위 버튼과 나란히 두지 않고 각각 오른쪽 끝이다. */
+                        <View style={endRow.action}>
+                          <Button
+                            testID={`class-student-out-${st.userId}`}
+                            variant="ghost"
+                            hug
+                            leading={
+                              <Icon name="minus-circle" size={16} color={colors.inkSecondary} />
+                            }
+                            label="이 반에서 빼기"
+                            accessibilityLabel={`${st.name} 학생 반에서 빼기`}
+                            onPress={() => takeOut(st.userId, st.name)}
+                          />
+                        </View>
                       ) : null}
                     </View>
                   ) : null}

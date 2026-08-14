@@ -39,6 +39,17 @@ export const DEV_LOGIN_ENABLED = process.env.EXPO_PUBLIC_ENABLE_DEV_LOGIN === '1
  */
 export const DEV_LOGIN_PASSWORD = process.env.EXPO_PUBLIC_DEV_LOGIN_PASSWORD ?? '';
 
+/**
+ * 개발용 계정의 로그인 이메일. **꺼져 있으면 빈 문자열이다.**
+ *
+ * 이 자리에서 만드는 이유는 아래 `DEV_ACCOUNTS`와 같다(D-145) — Metro에는 tree shaking이 없지만
+ * `process.env.EXPO_*`는 빌드 때 문자열로 인라인되므로 이 삼항은 상수로 접히고, 꺼진 빌드에서는
+ * `@scody.test` 도메인 문자열까지 번들에서 사라진다. 세션 쪽에 템플릿 리터럴로 두었을 때는
+ * 스위치를 꺼도 **그 문자열이 운영 번들에 남았다**(실측: `expo export` 산출물에 1회).
+ */
+export const devLoginEmail = (scodyId: string): string =>
+  !DEV_LOGIN_ENABLED ? '' : `${scodyId.trim().toLowerCase()}@scody.test`;
+
 export interface DevAccount {
   name: string;
   scodyId: string;

@@ -34,7 +34,7 @@ import {
 import { dueLabel, formatDate, parseDueDate } from '@/features/learning';
 import { findContent } from '@/data';
 import { todayISO } from '@/features/clock';
-import { inset } from '@/theme/styles';
+import { endRow, inset } from '@/theme/styles';
 import { colors, spacing } from '@/theme/tokens';
 
 /**
@@ -187,12 +187,15 @@ export default function AcademyStudentDetail() {
             {dueError}
           </AppText>
         ) : null}
-        <Button
-          testID={`student-reassign-submit-${assignmentId}`}
-          hug
-          label="다시 배정하기"
-          onPress={() => submitReassign(assignmentId)}
-        />
+        {/* 성과 분석의 쌍둥이 패널과 같게 버튼만 오른쪽 끝으로 뺀다(§8 규칙 ③ · D-146). */}
+        <View style={endRow.action}>
+          <Button
+            testID={`student-reassign-submit-${assignmentId}`}
+            hug
+            label="다시 배정하기"
+            onPress={() => submitReassign(assignmentId)}
+          />
+        </View>
       </View>
     );
   }

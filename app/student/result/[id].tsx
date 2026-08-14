@@ -135,7 +135,7 @@ export default function ResultScreen() {
    *
    * `QuestionReview`는 발문 + 내 답 + 정답 + 해설이 든 큰 덩어리라 다섯 개만으로도
    * 화면 몇 개 길이가 된다. 상한이 없을 때는 이 섹션이 길어질수록 **아래 두 섹션이
-   * 함께 밀려서**, 방금 담을 오답과 `오답노트 하러 가기`가 화면 밖으로 나갔다(A-086).
+   * 함께 밀려서**, 방금 담을 오답과 `질문하고 메모하기`가 화면 밖으로 나갔다(A-086).
    * 필터를 바꿔도 접힘 상태는 그대로 둔다 — 학생이 펼친 선택을 되감지 않는다.
    */
   const visibleListed = showAllQuestions ? listed : listed.slice(0, PREVIEW);
@@ -283,7 +283,9 @@ export default function ResultScreen() {
             (`ActionBar` 규칙 3). 화면 아래 행동 줄에 두면 방금 담은 문항들과 멀어져
             무엇을 가지고 가는 것인지 사라진다.
             화살표는 붙이지 않는다 — 담은 것을 어디서 보는지 알려 주는 옆길이지 이 화면을
-            끝내는 행동이 아니다(기록 화면의 `질문하고 메모하기`와 같은 자리·같은 규칙).
+            끝내는 행동이 아니다(학습 탭 오답노트 섹션의 같은 버튼과 같은 자리·같은 규칙).
+            **이름은 `질문하고 메모하기` 하나다**(D-150) — 예전 `오답노트 하러 가기`는 같은
+            목적지로 가는 두 번째 이름이었고, 이 섹션 제목이 이미 `오답노트`를 말한다.
           */
           action={
             <Button
@@ -292,7 +294,8 @@ export default function ResultScreen() {
               size="sm"
               tone="accent"
               hug
-              label="오답노트 하러 가기"
+              label="질문하고 메모하기"
+              accessibilityLabel="오답노트에서 질문하고 메모하기"
               onPress={() => router.push('/student/notebook' as never)}
             />
           }
