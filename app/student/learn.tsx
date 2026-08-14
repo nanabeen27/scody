@@ -27,8 +27,13 @@ export default function StudentLearn() {
   const router = useRouter();
   const { academy, hasPersonal } = useStudentItems();
   const queued = useQueuedItems();
-  const { wrongNotes, loading: progressLoading } = useProgress();
-  const { loading: contentLoading } = useContent();
+  const {
+    wrongNotes,
+    loading: progressLoading,
+    error: progressError,
+    reload: reloadProgress,
+  } = useProgress();
+  const { loading: contentLoading, error: contentError, reload: reloadContent } = useContent();
   const [showAllAcademy, setShowAllAcademy] = useState(false);
   const account = useCurrentAccount();
   const { academyLinked } = useSession();
@@ -42,11 +47,22 @@ export default function StudentLearn() {
   const inAcademy = !!account.academyName;
 
   /*
-    **읽는 중과 없는 것을 가른다.** 배정은 학습 기록 조회에서, 문항 수·영역은 콘텐츠 조회에서
-    온다. 첫 조회가 끝나기 전에는 `academy`가 비어 있어서 소속이 있는 학생에게
-    `아직 학원에서 받은 학습이 없어요.`를 먼저 보여 준다(홈과 같은 규칙 — `app/student/index.tsx`).
+    **읽는 중 · 실패 · 빈 목록을 셋으로 가른다.** 배정은 학습 기록 조회에서, 문항 수·영역은
+    콘텐츠 조회에서 온다. 첫 조회가 끝나기 전에는 `academy`가 비어 있어서 소속이 있는 학생에게
+    `아직 학원에서 받은 학습이 없어요.`를 먼저 보여 준다(D-133).
+
+    조회가 **실패해도** 그 문장이 나왔다 — `loading`이 내려가기 때문이다(M-DB-16).
+    이제 두 provider가 `error`를 내보내므로 실패는 실패라고 말하고 다시 시도할 행동을 둔다.
+    홈과 같은 규칙이다(`app/student/index.tsx`).
   */
   const reading = progressLoading || contentLoading;
+  /** 조회 실패 문장. 다시 읽는 중에는 감춘다(홈과 같다 — 실패와 로딩을 함께 세우지 않는다). */
+  const loadError = reading ? null : (progressError ?? contentError);
+
+  /** 두 조회를 함께 다시 시도한다. */
+  async function retryLoad() {
+    await Promise.all([reloadProgress(), reloadContent()]);
+  }
 
   const hasQueue = queued.items.length > 0;
 
@@ -67,8 +83,34 @@ export default function StudentLearn() {
 
   return (
     <Screen testID="student-learn" title="학습">
-      {/* 학원 과제가 먼저. 내가 고르는 것보다 정해진 일이 앞이다. */}
-      {academy.length > 0 || inAcademy ? (
+      {/*
+        **조회가 실패하면 목록이 비었다고 말하지 않는다**(M-DB-16). 인라인 `danger` 캡션 +
+        다시 시도할 행동이다(`DESIGN.md` §9 · 홈과 같은 모양).
+
+        학원 섹션 안이 아니라 화면 맨 위에 둔다 — 소속이 없는 학생에게는 그 섹션이 아예 없어서
+        실패가 어디에도 남지 않고, 이 화면의 개인 학습·오답노트도 같은 조회에 매달려 있다.
+      */}
+      {loadError ? (
+        <View style={{ gap: spacing.sm, alignItems: 'flex-start' }} testID="learn-load-failed">
+          <AppText variant="caption" tone="danger">
+            학습을 불러오지 못했어요. {loadError}
+          </AppText>
+          <Button
+            testID="learn-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void retryLoad()}
+          />
+        </View>
+      ) : null}
+
+      {/*
+        학원 과제가 먼저. 내가 고르는 것보다 정해진 일이 앞이다.
+        **실패했을 때 빈 안내만 남는 섹션은 그리지 않는다** — 받은 학습이 없다는 말이 사실인지
+        모르는 상태다. 이미 읽어 둔 배정이 있으면 그것은 사실이므로 목록은 그대로 보여 준다.
+      */}
+      {academy.length > 0 || (inAcademy && !loadError) ? (
         <Section title="학원 학습">
           {academy.length > 0 ? (
             <>

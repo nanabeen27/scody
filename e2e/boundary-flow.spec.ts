@@ -45,28 +45,17 @@ test.describe('M5 이용권·소속 경계', () => {
 
 
   test('다른 학원이 등록한 문제는 배정 목록에 보이지 않는다', async ({ page }) => {
-    // 새 학원 원장으로 가입해 그 학원 전용 문제를 등록한다
-    await page.goto('/signup');
-    await page.getByTestId('signup-kakao').click(); // 방법 선택 후 상세 단계로
-    await page.getByTestId('signup-name').fill('새길 원장');
-    await page.getByTestId('signup-id').fill('saegil.director');
-    await page.getByTestId('signup-pw').fill('test1234');
-    await page.getByTestId('signup-role-academy').click();
-    await page.getByTestId('signup-academy-name').fill('새길학원');
-    await page.getByTestId('signup-submit').click();
-    await expect(page).toHaveURL(/\/select-space/);
-    await page.getByText(/학원 공간/).click();
+    /*
+      **두 번째 학원은 seed에 있다**(M-DB-13). 예전에는 이 테스트가 가입 화면으로 새길학원 원장을
+      만들어 시작했는데, 가입은 아직 계정을 만들지 못한다(M-DB-2) — 그래서 첫 단계에서 실패했다.
+      지금은 seed의 새길학원 원장으로 들어가 그 학원이 이미 가진 콘텐츠를 쓴다.
+    */
+    await login(page, 'saegil.director');
     await expect(page).toHaveURL(/\/academy/);
 
-    // `문제 등록` 탭을 내리고 `문제`(우리 학원 콘텐츠) 화면 안 행동으로 옮겼다(D-064).
+    // 자기 학원 콘텐츠는 자기에게 보인다(아래 `안 보인다`가 공허하지 않다는 근거).
     await page.getByRole('link', { name: '문제' }).click();
-    await page.getByTestId('academy-content-new').click();
-    await page.getByTestId('new-kind-grammar').click();
-    await page.getByTestId('new-title').fill(OTHER_ACADEMY_CONTENT);
-    await page.getByTestId('new-q0-prompt').fill('다음 중 띄어쓰기가 옳은 것은?');
-    for (let ci = 0; ci < 4; ci++) await page.getByTestId(`new-q0-c${ci}`).fill(`보기 ${ci + 1}`);
-    await page.getByTestId('new-save').click();
-    await page.getByTestId('composer-done').click();
+    await expect(page.getByText(OTHER_ACADEMY_CONTENT).first()).toBeVisible();
 
     await page.getByRole('link', { name: '학원 관리' }).click();
     await page.getByText('로그아웃').click();

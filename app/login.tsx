@@ -11,7 +11,7 @@ import {
   TextLink,
 } from '@/features/auth/AuthShell';
 import { useSession } from '@/session';
-import { DEV_ACCOUNTS, DEV_KAKAO_SCODY_ID } from '@/session/devAccounts';
+import { DEV_ACCOUNTS, DEV_KAKAO_SCODY_ID, DEV_LOGIN_ENABLED } from '@/session/devAccounts';
 import { homeHrefFor, ROLE_LABEL } from '@/session/routing';
 import { colors, spacing } from '@/theme/tokens';
 
@@ -54,7 +54,16 @@ export default function Login() {
     router.replace((returnTo ?? homeHrefFor(result.account)) as never);
   }
 
+  /*
+    카카오는 아직 연결되지 않았다(M-DB-2). 개발용 로그인이 켜져 있으면 지금까지처럼 데모
+    계정으로 들어가고, 꺼진 빌드에서는 **연결되지 않았다는 사실을 말한다** — 그 빌드에서
+    `enterTest`는 실패만 돌려주므로 오류 문장이 그 자리에 그대로 남는다(D-135).
+  */
   function onKakao() {
+    if (!DEV_LOGIN_ENABLED) {
+      setError('카카오 로그인은 아직 연결되지 않았어요.');
+      return;
+    }
     void enterTest(DEV_KAKAO_SCODY_ID);
   }
 
@@ -66,7 +75,13 @@ export default function Login() {
     **없는 기능을 있는 것처럼 두지 않는다.** 번호를 받는 단계까지는 그대로 두고, 인증번호를
     보낼 수 없다는 사실을 그 자리에서 말한다.
   */
-  const PHONE_PENDING = '휴대폰 인증은 아직 연결되지 않았어요. 아래 테스트 계정으로 들어갈 수 있어요.';
+  /*
+    뒷문장은 **테스트 계정 패널이 있을 때만** 사실이다. 개발용 로그인이 꺼진 빌드에는 그 패널이
+    없으므로(D-135) 가리킬 곳이 없다고 말한다 — 없는 것을 가리키면 그 문장이 거짓이 된다.
+  */
+  const PHONE_PENDING = DEV_LOGIN_ENABLED
+    ? '휴대폰 인증은 아직 연결되지 않았어요. 아래 테스트 계정으로 들어갈 수 있어요.'
+    : '휴대폰 인증은 아직 연결되지 않았어요.';
 
   function onSendCode() {
     if (!phone.trim()) {
@@ -116,6 +131,11 @@ export default function Login() {
         else if (Platform.OS === 'web') router.replace('/introduce' as never);
       }}
       below={
+        /*
+          **개발용 로그인이 꺼진 빌드에는 이 패널을 두지 않는다**(D-135). 눌러도 되지 않는
+          것을 두면 `눌러도 아무 일이 없는 버튼`이 된다(`DESIGN.md` §8).
+        */
+        !DEV_LOGIN_ENABLED ? null : (
         <View style={styles.demoBox}>
           {/*
             글자에 `onPress`만 붙이면 스크린리더에는 그냥 글로 읽히고 누를 영역도 20px이다.
@@ -155,6 +175,7 @@ export default function Login() {
             </>
           ) : null}
         </View>
+        )
       }
     >
       {step === 'choose' ? (
@@ -202,10 +223,14 @@ export default function Login() {
               leading={<Icon name="message-circle" size={18} color={colors.kakaoText} />}
               onPress={onKakao}
             />
-            {/* 눌렀을 때 무엇이 열리는지 휴대폰 안내와 같은 무게로 밝힌다(테스트 계정 안내와 같은 문장). */}
+            {/*
+              눌렀을 때 무엇이 열리는지 휴대폰 안내와 같은 무게로 밝힌다. 개발용 로그인이 꺼진
+              빌드에서는 데모 계정으로 가지 않으므로 그 문장을 두지 않는다(D-135).
+            */}
             <AppText variant="caption" tone="tertiary">
-              프로토타입에서는 카카오로 들어가면 정해진 데모 계정으로 연결돼요. 그 계정의
-              기록은 실제 사용자 데이터가 아니에요.
+              {DEV_LOGIN_ENABLED
+                ? '프로토타입에서는 카카오로 들어가면 정해진 데모 계정으로 연결돼요. 그 계정의 기록은 실제 사용자 데이터가 아니에요.'
+                : '카카오 로그인은 아직 연결되지 않았어요.'}
             </AppText>
           </View>
           <Divider />

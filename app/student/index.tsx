@@ -43,8 +43,14 @@ export default function StudentHome() {
   const queued = useQueuedItems();
   const [ask, setAsk] = useState('');
   const [showAllAcademy, setShowAllAcademy] = useState(false);
-  const { praiseFor, dismissPraise, loading: progressLoading } = useProgress();
-  const { loading: contentLoading } = useContent();
+  const {
+    praiseFor,
+    dismissPraise,
+    loading: progressLoading,
+    error: progressError,
+    reload: reloadProgress,
+  } = useProgress();
+  const { loading: contentLoading, error: contentError, reload: reloadContent } = useContent();
   const { readOnly } = useSession();
   const { show } = useToast();
   // 부모님이 보낸 칭찬 중 아직 확인하지 않은 것만. 확인하면 다시 뜨지 않는다.
@@ -64,17 +70,33 @@ export default function StudentHome() {
   }
 
   /*
-    **읽는 중과 없는 것을 가른다.**
+    **읽는 중 · 실패 · 빈 목록을 셋으로 가른다.**
 
     학습 목록은 콘텐츠 조회와 학습 기록 조회 둘에서 온다(`src/features/learning.ts`). 첫 조회가
     끝나기 전에는 배정도 담아 둔 학습도 비어 있어서, 그 창에 개수나 `없어요`를 그리면 학원 과제
-    4개가 있는 학생에게 `아직 시작한 학습이 없어요`를 먼저 보여 준다. 조회가 실패하면 두 provider가
-    `loading`을 내리기만 하므로 그 화면이 그대로 남아, 학생은 자기 계정이 빈 줄로 믿는다.
+    4개가 있는 학생에게 `아직 시작한 학습이 없어요`를 먼저 보여 준다(D-133).
+
+    조회가 **실패해도** 같은 화면이 나온다 — 그때는 `loading`이 내려가므로 로딩 게이트가 덮지
+    못했다(M-DB-16). 이제 두 provider가 `error`를 값으로 내보내므로, 개수와 `없어요`를 말하는
+    자리마다 실패를 함께 본다. 실패했을 때는 아무것도 단정하지 않고 실패 문장 한 줄과
+    다시 시도할 행동만 둔다.
 
     화면 전체를 기다리게 두지는 않는다 — 개수를 말하는 자리만 기다린다(같은 규칙: `pick.tsx`
     학년 목록 · `result/[id].tsx` `결과를 찾지 못했어요`).
   */
   const reading = progressLoading || contentLoading;
+  /**
+   * 조회가 실패했을 때 보여 줄 문장. 서버가 준 것을 그대로 쓴다(`errorMessage`).
+   *
+   * **다시 읽는 중에는 감춘다** — 다시 시도를 누른 학생에게 실패 문장과 `불러오고 있어요`가
+   * 한 화면에 함께 서면 지금 무슨 일이 일어나는지 알 수 없다.
+   */
+  const loadError = reading ? null : (progressError ?? contentError);
+
+  /** 두 조회를 함께 다시 시도한다. 실패가 어느 쪽에서 왔는지 학생이 고를 일은 아니다. */
+  async function retryLoad() {
+    await Promise.all([reloadProgress(), reloadContent()]);
+  }
 
   // 마감이 이른 과제부터. 학습 탭도 같은 정렬을 쓴다(`byTodoThenDue`).
   const items = [...all].sort(byDue);
@@ -161,6 +183,31 @@ export default function StudentHome() {
         </View>
       ) : null}
 
+      {/*
+        **조회가 실패하면 계정이 비었다고 말하지 않는다**(M-DB-16). 인라인 `danger` 캡션 +
+        다시 시도할 행동 한 줄이다(`DESIGN.md` §9 · `app/academy/manage.tsx`의
+        `초대를 불러오지 못했어요`와 같은 갈래).
+
+        면을 하나만 둔다 — 아래 히어로·진행 상황·학원 과제·담아 둔 학습이 모두 이 조회에
+        매달려 있어서, 자리마다 빨간 줄을 두면 한 번의 실패가 네 번으로 읽힌다.
+        조회가 절반만 성공해도(콘텐츠는 왔고 기록은 못 왔거나 그 반대) 이 줄은 남는다.
+      */}
+      {loadError ? (
+        <View testID="home-load-failed" style={styles.loadFailed}>
+          <AppText variant="caption" tone="danger">
+            학습을 불러오지 못했어요. {loadError}
+          </AppText>
+          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
+          <Button
+            testID="home-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void retryLoad()}
+          />
+        </View>
+      ) : null}
+
       {next ? (
         <View testID="today-primary" style={styles.hero}>
           <View style={styles.heroTop}>
@@ -193,6 +240,13 @@ export default function StudentHome() {
         <AppText variant="caption" tone="secondary">
           학습을 불러오고 있어요.
         </AppText>
+      ) : loadError ? (
+        /*
+          실패했을 때는 히어로를 그리지 않는다. `아직 시작한 학습이 없어요`도
+          `오늘 할 일을 다 끝냈어요`도 모르는 상태에서는 둘 다 거짓말이다 —
+          위의 실패 줄이 그 자리를 대신한다.
+        */
+        null
       ) : nothingYet ? (
         <View style={styles.hero}>
           <AppText variant="caption" tone="secondary" style={styles.heroLabel}>
@@ -239,8 +293,11 @@ export default function StudentHome() {
         그때는 음수 마진이 다음 섹션을 끌어당겨 `남은 학습 13개`와 `Scody AI에게 물어보기`가
         4px 사이로 붙어 한 덩어리로 읽혔다. 이제 바깥 컬럼 간격은 이 덩어리 하나에만 걸린다.
       */}
-      {/* 조회 중에는 세지 않는다 — 절반만 온 목록으로 `남은 학습 2개`라고 말하게 된다. */}
-      {!reading && goalTotal > 0 ? (
+      {/*
+        조회 중에는 세지 않는다 — 절반만 온 목록으로 `남은 학습 2개`라고 말하게 된다.
+        실패했을 때도 세지 않는다: 못 읽은 목록으로 센 숫자는 로딩 중에 센 숫자와 똑같이 거짓이다.
+      */}
+      {!reading && !loadError && goalTotal > 0 ? (
         <View style={styles.progressBlock}>
           <View testID="home-progress" style={styles.progress}>
             <View style={styles.progressText}>
@@ -286,10 +343,11 @@ export default function StudentHome() {
       </View>
 
       {/*
-        학원 과제. 조회 중에는 이 면을 두지 않는다 — 배정을 아직 못 읽은 상태에서
-        `학원에서 내준 과제물을 모두 마쳤어요.`가 나오면 마치지 않은 과제를 마쳤다고 말한다.
+        학원 과제. 조회 중에도, 조회가 실패했을 때도 이 면을 두지 않는다 — 배정을 못 읽은
+        상태에서 `학원에서 내준 과제물을 모두 마쳤어요.`가 나오면 마치지 않은 과제를 마쳤다고
+        말한다. 실패는 위 한 줄이 이미 말했다.
       */}
-      {!reading && hasAcademy ? (
+      {!reading && !loadError && hasAcademy ? (
         academyTodo.length > 0 ? (
           <Section
             title="학원에서 내준 과제가 있어요"
@@ -366,8 +424,9 @@ export default function StudentHome() {
         담아 둔 개인 학습. `hasPersonal`은 이용권이라 조회를 기다리지 않고 참이 되는데,
         담아 둔 목록은 두 조회가 끝나야 채워진다(담긴 값은 개인 학습에서 찾는다). 그 창에
         이 면을 두면 담아 둔 학습이 있는 학생에게 `담아 둔 학습이 없어요.`를 보여 준다.
+        실패했을 때도 같다 — 못 읽은 목록을 없는 목록으로 말하지 않는다.
       */}
-      {!reading && (hasPersonal || queued.items.length > 0) ? (
+      {!reading && !loadError && (hasPersonal || queued.items.length > 0) ? (
         <Section
           title="담아 둔 학습"
           action={
@@ -445,6 +504,11 @@ const styles = StyleSheet.create({
     lineHeight: font.size.xxl * 1.2,
     letterSpacing: -0.4,
   },
+  /*
+    실패 문장 + 다시 시도. 카드로 만들지 않는다 — 실패는 알려야 하지만 화면에서 가장
+    무거운 것이 될 이유는 없다. 버튼이 `hug`이라 줄을 왼쪽으로 모은다.
+  */
+  loadFailed: { gap: spacing.sm, alignItems: 'flex-start' },
   // 조용한 한 줄. 카드가 아니다 — 오늘 할 일보다 무거워지면 안 된다.
   praise: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   praiseClose: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },

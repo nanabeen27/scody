@@ -47,6 +47,17 @@ interface ContentValue {
   /** 첫 조회가 끝나기 전에는 참이다. 화면이 `콘텐츠가 없어요`라고 말하지 않게. */
   loading: boolean;
   /**
+   * 마지막 조회가 실패한 이유. 성공하면 `null`이다.
+   *
+   * **화면이 실패와 빈 계정을 가르는 데 쓴다**(M-DB-16). 예전에는 실패를 `console.warn`으로만
+   * 남기고 `loading`을 내렸다 — 그래서 조회가 500으로 끊긴 학생에게 `아직 시작한 학습이 없어요`가
+   * 영구 상태로 남았고, 화면에는 오류도 재시도도 없었다.
+   *
+   * 값은 사람에게 그대로 보여 줄 문장이다(`errorMessage`). 실패해도 `sets`는 비우지 않는다 —
+   * 이미 읽어 둔 것이 있으면 그것은 여전히 사실이다.
+   */
+  error: string | null;
+  /**
    * 콘텐츠를 등록한다.
    *
    * **거부와 실패를 구분해서 돌려준다.** 예전에는 둘 다 `null`이어서 화면이 서버 오류를
@@ -68,6 +79,8 @@ export function ContentProvider({ children }: { children: ReactNode }) {
   const academyId = academy?.id;
   const [sets, setSets] = useState<ContentSet[]>([]);
   const [reading, setReading] = useState(true);
+  /** 마지막 조회가 실패한 이유. 다음 조회가 성공하면 `null`로 돌아간다. */
+  const [error, setError] = useState<string | null>(null);
   /**
    * 지금 화면에 얹힌 `sets`가 **누구의 것인지**. 아래 효과가 조회를 끝낼 때만 채운다.
    *
@@ -93,14 +106,20 @@ export function ContentProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let alive = true;
     const key = account?.userId ?? null;
-    /** 이 조회가 끝났다고 표시한다. 성공·실패 모두 여기를 지난다. */
-    const done = (rows: ContentSet[] | null) => {
+    /**
+     * 이 조회가 끝났다고 표시한다. 성공·실패 모두 여기를 지난다.
+     *
+     * `failure`가 곧 화면이 볼 `error`다 — 성공하면 `null`로 되돌려, 한 번 실패한 화면이
+     * 다음 조회가 성공한 뒤에도 빨간 줄을 들고 있지 않게 한다.
+     */
+    const done = (rows: ContentSet[] | null, failure: string | null) => {
       if (!alive) return;
       if (rows) setSets(rows);
+      setError(failure);
       /*
         **실패도 끝으로 본다.** 실패한 계정 키를 비워 두면 화면이 `불러오고 있어요`에서 영구히
-        멈춘다 — 지금 이 provider는 오류를 내보내지 않으므로 화면이 다시 시도할 방법도 없다
-        (오류·재시도는 M-DB-16으로 남겼다).
+        멈춘다. 실패했다는 사실은 `error`가 들고 있으므로, 화면은 그것을 보고 실패를 말하고
+        `reload()`로 다시 시도한다.
       */
       setLoadedFor(key);
       setReading(false);
@@ -122,15 +141,17 @@ export function ContentProvider({ children }: { children: ReactNode }) {
         setReading(true);
 
         try {
-          done(await listContent());
+          done(await listContent(), null);
         } catch (e) {
-          console.warn('콘텐츠를 읽지 못했어요:', errorMessage(e));
-          done(null);
+          const message = errorMessage(e);
+          console.warn('콘텐츠를 읽지 못했어요:', message);
+          // 읽어 둔 목록은 그대로 두고 실패만 얹는다. 화면이 빈 목록을 사실로 그리지 않게.
+          done(null, message);
         }
         return;
       }
       // 로그아웃하면 비운다.
-      done([]);
+      done([], null);
     })();
     return () => {
       alive = false;
@@ -172,9 +193,10 @@ export function ContentProvider({ children }: { children: ReactNode }) {
 
   /** 조회 중이거나, 얹힌 값이 다른 계정의 것이면 아직 읽는 중이다. */
   const loading = reading || loadedFor !== accountKey;
-  const value = useMemo(() => ({ sets, loading, addContent, reload }), [
+  const value = useMemo(() => ({ sets, loading, error, addContent, reload }), [
     sets,
     loading,
+    error,
     addContent,
     reload,
   ]);

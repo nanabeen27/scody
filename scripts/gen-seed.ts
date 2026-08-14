@@ -19,6 +19,9 @@
  * 남기는 것은 콘텐츠 12세트 · 로그인 테스트 계정 9종 · 한빛학원 1곳 · 반 2개 ·
  * 반 평균과 순위를 계산할 반 친구 15명 · 배정 4건 · 풀이 6건 · 오답노트 12건이다.
  *
+ * **학원은 그 뒤에 하나 늘었다**(M-DB-13): 새길학원 1곳 · 교직원 2명 · 학생 2명 · 반 1개 ·
+ * 콘텐츠 1세트 · 배정 1건 · 초대 1건. 학원 간 격리를 실측하려면 비교할 상대가 있어야 한다.
+ *
  * ## 날짜
  *
  * 원본 시드는 `2026-07-28`(`DATA_ANCHOR`)을 '오늘'로 보고 고정 날짜를 박아 두었다. DB에는
@@ -91,6 +94,23 @@ function day(iso: string): string {
   return `current_date ${diff > 0 ? '+' : '-'} ${Math.abs(diff)}`;
 }
 
+// ── 학원 ─────────────────────────────────────────────────────────────────────
+//
+// **학원이 둘이다.** 한빛학원은 화면과 E2E가 근거로 쓰는 학원이고, 새길학원은 **학원 간 격리를
+// 실측하기 위해** 있다(M-DB-13). 학원이 한 곳뿐일 때는 `owner_academy_id`·`my_academy_id()`로
+// 좁힌 정책이 실제로 좁히는지 확인할 방법이 없었다 — 비교할 상대가 없으면 모든 조회가 "내 것"이라
+// 정책을 지워도 같은 결과가 나온다.
+//
+// 새길학원 데이터는 **최소 구성**이다(원장 1 · 선생 1 · 반 1 · 학생 2 · 콘텐츠 1세트 · 배정 1건 ·
+// 초대 1건). 한빛학원 쪽 값은 하나도 바꾸지 않는다 — 화면·E2E·`verify-rls`의 단정이 전부 그 값에
+// 걸려 있다.
+
+const ACADEMY_NAME = '한빛학원';
+const ACADEMY_KEY = 'ac_hanbit';
+
+const ACADEMY2_NAME = '새길학원';
+const ACADEMY2_KEY = 'ac_saegil';
+
 // ── 계정 ─────────────────────────────────────────────────────────────────────
 
 interface SeedAccount {
@@ -101,16 +121,20 @@ interface SeedAccount {
   roles: Role[];
   grade?: Grade;
   kakaoLinked?: boolean;
-  /** 한빛학원 안에서의 자리. 학생도 소속이 있다. */
+  /** 학원 안에서의 자리. 학생도 소속이 있다. */
   academyRole?: 'director' | 'teacher' | 'student';
+  /** 어느 학원인지. 비우면 한빛학원이다. */
+  academyKey?: string;
   entitlements: { kind: 'personal' | 'academy'; payer: 'student' | 'parent' | 'academy'; label: string }[];
 }
 
 /**
- * 로그인 가능한 테스트 계정 9종.
+ * 로그인 가능한 테스트 계정 11종.
  *
  * `src/data/fixtures.ts`의 `LOGIN_ACCOUNTS`와 같은 사람들이다. 그 상수는 export되지 않아
  * 여기 다시 적는다 — 대신 **이메일과 uuid가 새로 필요해서** 어차피 이 자리에서 정해야 한다.
+ *
+ * 마지막 둘(새길학원 교직원)은 격리 검증용이다. 학습 기록이 없고 한빛학원과 겹치는 것도 없다.
  */
 const ACCOUNTS: readonly SeedAccount[] = [
   {
@@ -199,6 +223,27 @@ const ACCOUNTS: readonly SeedAccount[] = [
     roles: ['admin'],
     entitlements: [],
   },
+  // 다른 학원. 이 둘로 격리를 실측한다(`scripts/verify-rls.ts`의 `[학원 격리]`).
+  {
+    key: 'u_saegil_director',
+    name: '새길 원장',
+    scodyId: 'saegil.director',
+    phone: '010-4000-0001',
+    roles: ['academy'],
+    academyRole: 'director',
+    academyKey: ACADEMY2_KEY,
+    entitlements: [],
+  },
+  {
+    key: 'u_saegil_teacher',
+    name: '새길 선생',
+    scodyId: 'saegil.teacher',
+    phone: '010-4000-0002',
+    roles: ['academy'],
+    academyRole: 'teacher',
+    academyKey: ACADEMY2_KEY,
+    entitlements: [],
+  },
 ];
 
 /** 학부모 → 자녀. 자녀의 학습 기록은 학생 계정에 남는다. */
@@ -207,11 +252,68 @@ const PARENT_CHILDREN: Record<string, readonly string[]> = {
   u_teacher_parent: ['u_student_academy'],
 };
 
-const ACADEMY_NAME = '한빛학원';
-const ACADEMY_KEY = 'ac_hanbit';
-
 /** 테스트 계정이 속한 반. 규모용 로스터 반은 옮기지 않는다. */
 const CLASS_KEYS = ['c_kor1', 'c_kor2'] as const;
+
+/**
+ * 새길학원 학생 둘. **로그인할 수 없다**(반 친구와 같은 방식 — 비밀번호를 만들지 않는다).
+ *
+ * 격리 검증이 필요한 것은 "한빛학원 교직원에게 이 두 사람이 보이지 않는다"는 사실이고, 그것은
+ * 프로필과 소속만 있으면 확인된다. 로그인까지 열면 개발용 로그인 패널이 두 줄 늘고 E2E의 인증
+ * 왕복도 늘어난다(M-DB-15의 rate limit).
+ */
+const ACADEMY2_STUDENTS = [
+  { key: 'u_sg_student_1', name: '강은우', scodyId: 'saegil.student1', grade: 1 },
+  { key: 'u_sg_student_2', name: '문서아', scodyId: 'saegil.student2', grade: 1 },
+] as const;
+
+/**
+ * 새길학원의 반 하나. 이름을 한빛학원과 다르게 둔다 — 격리가 깨졌을 때 화면·검증 결과에서
+ * 어느 학원의 반인지 이름만 보고 알 수 있어야 한다.
+ */
+const ACADEMY2_CLASS = { key: 'c_saegil_1', name: '새길 고1 국어', grade: 1 } as const;
+
+/**
+ * 새길학원 소유 콘텐츠 1세트.
+ *
+ * **여기서 직접 적는다** — `src/data/content.ts`는 한빛학원 소유 세트만 담고 있고, 그 픽스처는
+ * 화면·단위 테스트가 함께 쓰는 자리라 격리 검증용 데이터를 섞지 않는다.
+ *
+ * 제목은 `e2e/boundary-flow.spec.ts`가 `OTHER_ACADEMY_CONTENT`로 쓰는 값과 같다.
+ */
+const ACADEMY2_CONTENT = {
+  key: 'ct_saegil_1',
+  title: '새길 전용 자료',
+  area: '문법',
+  topic: '어문 규정 - 맞춤법',
+  grade: 1,
+  questions: [
+    {
+      key: 'ct_saegil_1_q1',
+      prompt: '다음 중 맞춤법이 바른 것은?',
+      choices: ['깨끗이', '깨끗히', '깨끝이', '깨끝히'],
+      answerIndex: 0,
+      explanation: '`깨끗하다`의 부사형은 `깨끗이`로 적어요.',
+    },
+    {
+      key: 'ct_saegil_1_q2',
+      prompt: '띄어쓰기가 옳은 것은?',
+      choices: ['할 수있다', '할수 있다', '할 수 있다', '할수있다'],
+      answerIndex: 2,
+      explanation: '`수`는 의존 명사라 앞말과 띄어 써요.',
+    },
+    {
+      key: 'ct_saegil_1_q3',
+      prompt: '다음 중 표기가 바른 것은?',
+      choices: ['며칠', '몇일', '몇 일', '며칟'],
+      answerIndex: 0,
+      explanation: '`몇일`은 없는 말이에요. `며칠`로 적어요.',
+    },
+  ],
+} as const;
+
+/** 새길학원이 자기 반에 낸 배정 1건. 제출은 없다 — 빈 제출 현황도 격리 대상이다. */
+const ACADEMY2_ASSIGNMENT = { key: 'a_saegil_1', title: '맞춤법 첫 점검' } as const;
 
 /**
  * 반 친구.
@@ -250,7 +352,11 @@ w();
 
 // ── 다시 실행할 수 있게 만드는 정리 구문 ─────────────────────────────────────
 
-const seedUserIds = [...ACCOUNTS.map((a) => a.key), ...PEER_KEYS].map(uuidFor);
+const seedUserIds = [
+  ...ACCOUNTS.map((a) => a.key),
+  ...PEER_KEYS,
+  ...ACADEMY2_STUDENTS.map((s) => s.key),
+].map(uuidFor);
 
 w(`-- ── 정리 ────────────────────────────────────────────────────────────────`);
 w(`--`);
@@ -412,11 +518,31 @@ w(
 w(`;`);
 w();
 
+w(`-- 새길학원 학생 둘. 반 친구와 같은 방식으로 로그인 없이 만든다 — 격리 검증은 "다른 학원`);
+w(`-- 교직원에게 이 사람들이 보이지 않는다"를 확인하는 것이고, 그건 프로필과 소속만으로 확인된다.`);
+for (const s of ACADEMY2_STUDENTS) {
+  const id = uuidFor(s.key);
+  w(
+    `insert into auth.users (instance_id, id, aud, role, email, created_at, updated_at, ${AUTH_TOKEN_COLUMNS.join(', ')}) values ('00000000-0000-0000-0000-000000000000', ${q(id)}, 'authenticated', 'authenticated', ${q(`${s.key}@peer.scody.test`)}, now() - interval '90 days', now(), ${AUTH_TOKEN_COLUMNS.map(() => "''").join(', ')}) on conflict (id) do nothing;`,
+  );
+}
+w();
+w(`insert into public.profiles (id, name, scody_id, support_code, grade, created_at) values`);
+w(
+  ACADEMY2_STUDENTS.map(
+    (s) =>
+      `  (${q(uuidFor(s.key))}, ${q(s.name)}, ${q(s.scodyId)}, ${q(supportCodeFor(s.key))}, ${s.grade}, now() - interval '60 days')`,
+  ).join(',\n'),
+);
+w(`;`);
+w();
+
 w(`insert into public.user_roles (user_id, role) values`);
 w(
   [
     ...ACCOUNTS.flatMap((a) => a.roles.map((r) => `  (${q(uuidFor(a.key))}, ${q(r)})`)),
     ...PEER_KEYS.map((key) => `  (${q(uuidFor(key))}, 'student')`),
+    ...ACADEMY2_STUDENTS.map((s) => `  (${q(uuidFor(s.key))}, 'student')`),
   ].join(',\n'),
 );
 w(`;`);
@@ -435,11 +561,16 @@ w(`--`);
 w(`-- 계약 좌석은 재원생(${academyStudents.length}명)보다 조금 많게 둔다 — 좌석 활용률이 100%를 넘지 않고`);
 w(`-- 0%도 아닌 값이 되어야 그 지표를 화면에서 확인할 수 있다.`);
 w(`-- 갱신일은 seed 실행일 기준으로 정한다. 고정 날짜를 박으면 곧 지난 날이 된다.`);
+w(`--`);
+w(`-- 두 번째 학원(${ACADEMY2_NAME})은 격리 실측용이다. 좌석도 재원생 ${ACADEMY2_STUDENTS.length}명보다 조금 많게 둔다.`);
 w(
   `insert into public.academies (id, name, contract_seats, renewal_date, status, created_at) values`,
 );
 w(
-  `  (${q(uuidFor(ACADEMY_KEY))}, ${q(ACADEMY_NAME)}, ${academyStudents.length + 13}, current_date + 120, 'active', now() - interval '90 days');`,
+  `  (${q(uuidFor(ACADEMY_KEY))}, ${q(ACADEMY_NAME)}, ${academyStudents.length + 13}, current_date + 120, 'active', now() - interval '90 days'),`,
+);
+w(
+  `  (${q(uuidFor(ACADEMY2_KEY))}, ${q(ACADEMY2_NAME)}, ${ACADEMY2_STUDENTS.length + 3}, current_date + 200, 'active', now() - interval '60 days');`,
 );
 w();
 
@@ -447,9 +578,13 @@ w(`insert into public.academy_members (academy_id, user_id, member_role) values`
 w(
   [
     ...ACCOUNTS.filter((a) => a.academyRole).map(
-      (a) => `  (${q(uuidFor(ACADEMY_KEY))}, ${q(uuidFor(a.key))}, ${q(a.academyRole!)})`,
+      (a) =>
+        `  (${q(uuidFor(a.academyKey ?? ACADEMY_KEY))}, ${q(uuidFor(a.key))}, ${q(a.academyRole!)})`,
     ),
     ...PEER_KEYS.map((key) => `  (${q(uuidFor(ACADEMY_KEY))}, ${q(uuidFor(key))}, 'student')`),
+    ...ACADEMY2_STUDENTS.map(
+      (s) => `  (${q(uuidFor(ACADEMY2_KEY))}, ${q(uuidFor(s.key))}, 'student')`,
+    ),
   ].join(',\n'),
 );
 w(`;`);
@@ -459,27 +594,31 @@ const classes = ACADEMY_CLASSES.filter((c) => (CLASS_KEYS as readonly string[]).
 
 w(`insert into public.classes (id, academy_id, name, grade, teacher_id, created_at) values`);
 w(
-  classes
-    .map(
+  [
+    ...classes.map(
       (c) =>
         `  (${q(uuidFor(c.id))}, ${q(uuidFor(ACADEMY_KEY))}, ${q(c.name)}, ${c.grade ?? 'null'}, ${q(uuidFor(c.teacherId))}, now() - interval '80 days')`,
-    )
-    .join(',\n'),
+    ),
+    `  (${q(uuidFor(ACADEMY2_CLASS.key))}, ${q(uuidFor(ACADEMY2_KEY))}, ${q(ACADEMY2_CLASS.name)}, ${ACADEMY2_CLASS.grade}, ${q(uuidFor('u_saegil_teacher'))}, now() - interval '55 days')`,
+  ].join(',\n'),
 );
 w(`;`);
 w();
 
 w(`insert into public.class_students (class_id, student_id) values`);
 w(
-  classes
-    .flatMap((c) => c.studentIds.map((s) => `  (${q(uuidFor(c.id))}, ${q(uuidFor(s))})`))
-    .join(',\n'),
+  [
+    ...classes.flatMap((c) => c.studentIds.map((s) => `  (${q(uuidFor(c.id))}, ${q(uuidFor(s))})`)),
+    ...ACADEMY2_STUDENTS.map(
+      (s) => `  (${q(uuidFor(ACADEMY2_CLASS.key))}, ${q(uuidFor(s.key))})`,
+    ),
+  ].join(',\n'),
 );
 w(`;`);
 w();
 
 /*
-  ── 선생님 초대 토큰은 seed를 돌릴 때마다 새로 뽑는다 ────────────────────────
+  ── 초대 토큰은 seed를 돌릴 때마다 새로 뽑는다 ────────────────────────────────
 
   **왜**: 독립 검증이 실증했다(2026-08-14). 학부모 계정(`minji`)이 하드코딩된 `INV-TEACHER`를
   `rpc_accept_invite`에 넣어 **학원 선생님이 됐고**, 그 자리에서 학생 15명의 이름·스코디
@@ -492,28 +631,39 @@ w();
   형태는 `rpc_create_invite`와 같게 맞춘다(`INV-T-` + 대문자 hex 20자 = 74비트 난수).
   `supabase/seed.sql`은 git에 올라가지 않으므로 매번 값이 달라도 diff가 지저분해지지 않는다.
 
-  **학생·학부모 초대는 리터럴로 남긴다**: `e2e/auth-flow.spec.ts`가 `/join?invite=INV-STUDENT`·
-  `INV-PARENT`를 6곳에서 직접 열어 초대 화면의 상태(유효·이미 사용됨·학부모 거부)를 확인한다.
-  두 초대는 학원 **교직원** 권한을 주지 않는다 — 학생 초대는 학생 소속만 붙이고, 학부모 초대는
-  서버가 거부한다(0013:433). 남는 위험은 "아무나 한빛학원 학생으로 붙을 수 있다"이고, 그것을
-  없애려면 E2E가 토큰을 DB에서 읽어 오도록 바꿔야 한다 — 별 작업으로 남긴다(A-102).
+  **학생·학부모 초대도 같이 난수로 뽑는다**(A-103, 2026-08-14). 이 둘은 교직원 권한을 주지
+  않지만(학생 초대는 학생 소속만 붙이고, 학부모 초대는 서버가 거부한다 — 0013:433) 하드코딩된
+  `INV-STUDENT`로 **아무나 한빛학원 학생이 될 수 있었다**(학부모 계정 `minji`로 재현했다).
+  `e2e/auth-flow.spec.ts`가 리터럴 6곳을 쓰고 있어 남겨 뒀던 것인데, 그 테스트가
+  `supabase/seed.sql`에서 토큰을 읽게 바꿨다(`e2e/_seed.ts`의 `inviteToken`).
+
+  접두어를 역할별로 나눈다(`INV-S-`·`INV-P-`·`INV-T-`). 로그나 DB를 사람이 볼 때 어느 초대인지
+  바로 읽힌다. **선생님 접두어는 `INV-T-`로 고정한다** — `e2e/academy-flow.spec.ts`가 원장이
+  만든 초대 링크가 `/join?invite=INV-T-`로 시작하는지 단정하고, 그 값은 서버의
+  `rpc_create_invite`가 만든다(0031).
 */
-const teacherInviteToken = `INV-T-${randomBytes(10).toString('hex').slice(0, 20).toUpperCase()}`;
+const inviteTokenFor = (prefix: string) =>
+  `${prefix}${randomBytes(10).toString('hex').slice(0, 20).toUpperCase()}`;
 
 w(`-- 초대 링크. 수락하면 소속이 붙는다(\`rpc_accept_invite\`).`);
 w(`--`);
-w(`-- 선생님 초대 토큰은 seed를 돌릴 때마다 새로 뽑는다(엔트로피 74비트). 하드코딩 리터럴은`);
-w(`-- 학부모 계정이 수락해 교직원이 되는 것을 실증으로 확인했다 — \`scripts/gen-seed.ts\` 참고.`);
+w(`-- 토큰은 seed를 돌릴 때마다 새로 뽑는다(엔트로피 74비트). 하드코딩 리터럴은 학부모 계정이`);
+w(`-- 수락해 교직원이 되거나 한빛학원 학생으로 붙는 것을 실증으로 확인했다 — \`scripts/gen-seed.ts\`.`);
+w(`-- E2E는 이 파일에서 값을 읽는다(\`e2e/_seed.ts\`의 \`inviteToken\`).`);
+w(`--`);
+w(`-- 새길학원 초대도 하나 둔다. **역할별 첫 토큰이 한빛학원 것이어야 한다** —`);
+w(`-- \`e2e/_seed.ts\`의 \`inviteToken(role)\`이 이 블록에서 역할별 첫 행을 읽는다.`);
 w(`insert into public.invites (token, academy_id, invitee_role, inviter_id) values`);
 w(
   [
-    ['INV-STUDENT', 'student'],
-    ['INV-PARENT', 'parent'],
-    [teacherInviteToken, 'teacher'],
+    [inviteTokenFor('INV-S-'), 'student', ACADEMY_KEY, 'u_academy_director'],
+    [inviteTokenFor('INV-P-'), 'parent', ACADEMY_KEY, 'u_academy_director'],
+    [inviteTokenFor('INV-T-'), 'teacher', ACADEMY_KEY, 'u_academy_director'],
+    [inviteTokenFor('INV-S-'), 'student', ACADEMY2_KEY, 'u_saegil_director'],
   ]
     .map(
-      ([token, role]) =>
-        `  (${q(token)}, ${q(uuidFor(ACADEMY_KEY))}, ${q(role)}, ${q(uuidFor('u_academy_director'))})`,
+      ([token, role, academy, inviter]) =>
+        `  (${q(token)}, ${q(uuidFor(academy))}, ${q(role)}, ${q(uuidFor(inviter))})`,
     )
     .join(',\n'),
 );
@@ -568,37 +718,49 @@ w();
 
 const sets: ContentSet[] = SEED_CONTENT;
 
-w(`-- ── 콘텐츠 ${sets.length}세트 · 문항 ${sets.reduce((n, s) => n + s.questions.length, 0)}개 ─────────────────────────────`);
+const totalQuestions =
+  sets.reduce((n, s) => n + s.questions.length, 0) + ACADEMY2_CONTENT.questions.length;
+
+w(`-- ── 콘텐츠 ${sets.length + 1}세트 · 문항 ${totalQuestions}개 ─────────────────────────────`);
 w(`--`);
-w(`-- 전부 운영자(총괄관리자) 콘텐츠다(\`owner_academy_id\`가 없다). 원본 fixture의`);
+w(`-- 대부분 운영자(총괄관리자) 콘텐츠다(\`owner_academy_id\`가 없다). 원본 fixture의`);
 w(`-- \`ownerAcademyName\`이 있는 세트는 학원 이름으로 소유를 잡는다.`);
+w(`--`);
+w(`-- 마지막 한 세트는 ${ACADEMY2_NAME} 소유다. **학원끼리 서로의 콘텐츠를 보지 못하는지**를`);
+w(`-- 실측하려면 한빛학원 것이 아닌 학원 소유 콘텐츠가 하나 있어야 한다(M-DB-13).`);
 w();
 w(
   `insert into public.content_sets (id, subject, area, title, kind, grade, topic, publish_to_students, owner_academy_id, passage_title, passage_body, created_by, created_at) values`,
 );
 w(
-  sets
-    .map((s) => {
+  [
+    ...sets.map((s) => {
       const owner = s.ownerAcademyName === ACADEMY_NAME ? q(uuidFor(ACADEMY_KEY)) : 'null';
       const creator =
         s.ownerAcademyName === ACADEMY_NAME ? uuidFor('u_academy_director') : uuidFor('u_admin');
       return `  (${q(uuidFor(s.id))}, ${q(s.subject)}, ${q(s.area)}, ${q(s.title)}, ${q(s.kind)}, ${s.grade ?? 'null'}, ${qn(s.topic)}, ${s.publishToStudents ? 'true' : 'false'}, ${owner}, ${qn(s.passage?.title)}, ${qn(s.passage?.body)}, ${q(creator)}, now() - interval '85 days')`;
-    })
-    .join(',\n'),
+    }),
+    // 학원 소유 콘텐츠는 학생 개인 학습에 공개하지 않는다(`publish_to_students = false`).
+    `  (${q(uuidFor(ACADEMY2_CONTENT.key))}, '국어', ${q(ACADEMY2_CONTENT.area)}, ${q(ACADEMY2_CONTENT.title)}, 'grammar', ${ACADEMY2_CONTENT.grade}, ${q(ACADEMY2_CONTENT.topic)}, false, ${q(uuidFor(ACADEMY2_KEY))}, null, null, ${q(uuidFor('u_saegil_director'))}, now() - interval '50 days')`,
+  ].join(',\n'),
 );
 w(`;`);
 w();
 
 w(`insert into public.questions (id, content_set_id, position, prompt, choices, answer_index, explanation) values`);
 w(
-  sets
-    .flatMap((s) =>
+  [
+    ...sets.flatMap((s) =>
       s.questions.map(
         (question, i) =>
           `  (${q(uuidFor(question.id))}, ${q(uuidFor(s.id))}, ${i + 1}, ${q(question.prompt)}, ${arr(question.choices)}, ${question.answerIndex}, ${qn(question.explanation)})`,
       ),
-    )
-    .join(',\n'),
+    ),
+    ...ACADEMY2_CONTENT.questions.map(
+      (question, i) =>
+        `  (${q(uuidFor(question.key))}, ${q(uuidFor(ACADEMY2_CONTENT.key))}, ${i + 1}, ${q(question.prompt)}, ${arr(question.choices)}, ${question.answerIndex}, ${q(question.explanation)})`,
+    ),
+  ].join(',\n'),
 );
 w(`;`);
 w();
@@ -609,29 +771,40 @@ const questionByOldId = new Map(
   sets.flatMap((s) => s.questions.map((question) => [question.id, { set: s, q: question }] as const)),
 );
 
-w(`-- ── 배정 ${ASSIGNMENTS_SEED.length}건과 제출 ───────────────────────────────────────────────`);
+w(`-- ── 배정 ${ASSIGNMENTS_SEED.length + 1}건과 제출 ───────────────────────────────────────────────`);
 w(`--`);
 w(`-- 제출은 \`assignment_targets.attempt_id\`가 가리키는 \`attempts\` 한 행이다. 정답률·시간·`);
 w(`-- 제출일·틀린 문항은 전부 그 행과 \`attempt_answers\`에서 나온다 — 같은 사실을 두 곳에`);
 w(`-- 두지 않는다.`);
+w(`--`);
+w(`-- 마지막 배정은 ${ACADEMY2_NAME}이 자기 반에 낸 것이고 **제출이 없다.** 배정과 제출 현황이`);
+w(`-- 학원 경계를 넘지 않는지 확인하는 자리다(M-DB-13).`);
 w();
 w(
   `insert into public.assignments (id, class_id, content_set_id, title, due_date, original_due_date, created_by, created_at) values`,
 );
 w(
-  ASSIGNMENTS_SEED.map((a) => {
-    const cls = classes.find((c) => c.id === a.classId)!;
-    return `  (${q(uuidFor(a.id))}, ${q(uuidFor(a.classId))}, ${q(uuidFor(a.contentId!))}, ${q(a.title)}, ${day(a.dueDate!)}, ${day(a.dueDate!)}, ${q(uuidFor(cls.teacherId))}, now() - interval '20 days')`;
-  }).join(',\n'),
+  [
+    ...ASSIGNMENTS_SEED.map((a) => {
+      const cls = classes.find((c) => c.id === a.classId)!;
+      return `  (${q(uuidFor(a.id))}, ${q(uuidFor(a.classId))}, ${q(uuidFor(a.contentId!))}, ${q(a.title)}, ${day(a.dueDate!)}, ${day(a.dueDate!)}, ${q(uuidFor(cls.teacherId))}, now() - interval '20 days')`;
+    }),
+    `  (${q(uuidFor(ACADEMY2_ASSIGNMENT.key))}, ${q(uuidFor(ACADEMY2_CLASS.key))}, ${q(uuidFor(ACADEMY2_CONTENT.key))}, ${q(ACADEMY2_ASSIGNMENT.title)}, current_date + 7, current_date + 7, ${q(uuidFor('u_saegil_teacher'))}, now() - interval '10 days')`,
+  ].join(',\n'),
 );
 w(`;`);
 w();
 
 w(`insert into public.assignment_targets (assignment_id, student_id) values`);
 w(
-  ASSIGNMENTS_SEED.flatMap((a) =>
-    a.submissions.map((s) => `  (${q(uuidFor(a.id))}, ${q(uuidFor(s.studentId))})`),
-  ).join(',\n'),
+  [
+    ...ASSIGNMENTS_SEED.flatMap((a) =>
+      a.submissions.map((s) => `  (${q(uuidFor(a.id))}, ${q(uuidFor(s.studentId))})`),
+    ),
+    ...ACADEMY2_STUDENTS.map(
+      (s) => `  (${q(uuidFor(ACADEMY2_ASSIGNMENT.key))}, ${q(uuidFor(s.key))})`,
+    ),
+  ].join(',\n'),
 );
 w(`;`);
 w();
@@ -822,10 +995,12 @@ writeFileSync('supabase/seed.sql', `${out.join('\n')}\n`, 'utf8');
 const counts = {
   '계정(로그인 가능)': ACCOUNTS.length,
   '반 친구': peerCount,
-  '콘텐츠 세트': sets.length,
-  문항: sets.reduce((n, s) => n + s.questions.length, 0),
-  반: classes.length,
-  배정: ASSIGNMENTS_SEED.length,
+  [`${ACADEMY2_NAME} 학생(로그인 없음)`]: ACADEMY2_STUDENTS.length,
+  학원: 2,
+  '콘텐츠 세트': sets.length + 1,
+  문항: totalQuestions,
+  반: classes.length + 1,
+  배정: ASSIGNMENTS_SEED.length + 1,
   풀이: attemptRows.length,
   오답노트: noteRows.length,
 };

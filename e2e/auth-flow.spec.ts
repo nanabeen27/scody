@@ -1,5 +1,13 @@
 import { test, expect } from './_fixtures';
 import { login, loginHere, PHONE_BY_ID, PHONE_PENDING, SIGNUP_PENDING, DEMO_CODE } from './_auth';
+import { inviteToken } from './_seed';
+
+/*
+  초대 토큰은 seed 실행마다 난수다(A-103). 값을 테스트에 적으면 seed가 그 리터럴을 계속 심어야
+  하고, 그러면 레포를 읽는 누구나 한빛학원 학생으로 붙을 수 있다. `supabase/seed.sql`에서 읽는다.
+*/
+const STUDENT_INVITE = inviteToken('student');
+const PARENT_INVITE = inviteToken('parent');
 
 const INTRO = 'Scody는 학생의 학습을 가장 효율적으로 만드는 학습 플랫폼입니다.';
 
@@ -193,7 +201,7 @@ test.describe('M1 소개·로그인·역할 분기', () => {
     학생 홈을 열었다. 로그인은 로그인 화면에서 하고, 토큰을 들고 돌아온다.
   */
   test('초대 링크는 역할과 학원을 인식한다', async ({ page }) => {
-    await page.goto('/join?invite=INV-STUDENT');
+    await page.goto(`/join?invite=${STUDENT_INVITE}`);
     await expect(page.getByText(/학생으로 초대/)).toBeVisible();
     await expect(page.getByText('한빛학원').first()).toBeVisible();
     await expect(page.getByTestId('join-login')).toBeVisible();
@@ -209,11 +217,11 @@ test.describe('M1 소개·로그인·역할 분기', () => {
   });
 
   test('초대 링크에서 로그인하면 토큰을 들고 돌아온다', async ({ page }) => {
-    await page.goto('/join?invite=INV-STUDENT');
+    await page.goto(`/join?invite=${STUDENT_INVITE}`);
     await page.getByTestId('join-login').click();
     await expect(page).toHaveURL(/\/login/);
     await loginHere(page, 'seojun'); // 학원 소속이 없는 개인 구독 학생
-    await expect(page).toHaveURL(/\/join\?invite=INV-STUDENT/);
+    await expect(page).toHaveURL(new RegExp(`/join\\?invite=${STUDENT_INVITE}`));
     // 로그인 전 화면이 아니라 수락 단계로 이어진다.
     await expect(page.getByTestId('join-accept')).toBeVisible();
   });
@@ -221,7 +229,7 @@ test.describe('M1 소개·로그인·역할 분기', () => {
   /* 수락은 `academy_members`에 소속을 넣는다. 화면은 그 결과를 다시 읽어 확인한다. */
   test('로그인한 상태로 초대를 수락하면 소속이 생긴다', async ({ page }) => {
     await login(page, 'seojun');
-    await page.goto('/join?invite=INV-STUDENT');
+    await page.goto(`/join?invite=${STUDENT_INVITE}`);
     await page.getByTestId('join-accept').click();
     await expect(page.getByText('한빛학원과 연결됐어요')).toBeVisible();
     await expect(page.getByText('소속')).toBeVisible();
@@ -229,7 +237,7 @@ test.describe('M1 소개·로그인·역할 분기', () => {
     await expect(page).toHaveURL(/\/student/);
 
     // 같은 링크를 다시 열면 이미 쓴 초대라고 말한다(서버에 수락이 남았다).
-    await page.goto('/join?invite=INV-STUDENT');
+    await page.goto(`/join?invite=${STUDENT_INVITE}`);
     await expect(page.getByText('이미 사용한 초대예요')).toBeVisible();
   });
 
@@ -239,7 +247,7 @@ test.describe('M1 소개·로그인·역할 분기', () => {
   */
   test('학부모 초대는 자녀 확인이 필요하다고 말한다', async ({ page }) => {
     await login(page, 'minji'); // 학부모
-    await page.goto('/join?invite=INV-PARENT');
+    await page.goto(`/join?invite=${PARENT_INVITE}`);
     await expect(page.getByText(/자녀 확인이 필요해요/)).toBeVisible();
     await expect(page.getByTestId('join-accept')).toHaveCount(0);
   });

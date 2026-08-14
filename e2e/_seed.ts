@@ -60,3 +60,37 @@ export async function closeSeedConnection(): Promise<void> {
   await client?.end();
   client = null;
 }
+
+/**
+ * seed가 심어 둔 초대 토큰. 역할당 하나다.
+ *
+ * ## 왜 파일에서 읽는가
+ *
+ * 예전에는 테스트가 `INV-STUDENT`·`INV-PARENT`를 그대로 적었다. 그래서 seed가 그 리터럴을 계속
+ * 심어야 했고, 레포를 읽을 수 있는 누구나 `rpc_accept_invite('INV-STUDENT')`로 한빛학원 학생이
+ * 될 수 있었다(실측으로 재현했다 — A-103). 토큰을 seed 실행마다 난수로 뽑으려면 테스트가 값을
+ * 서버 쪽에서 받아 와야 한다.
+ *
+ * `supabase/seed.sql`을 파싱한다. DB 왕복이 없고, `reseed()`가 넣는 것과 **같은 파일**이라
+ * 재시드 결과와 어긋날 수 없다. 서버 uuid를 규칙으로 다시 만드는 `_ids.ts`의 `sid()`와 같은 자리다.
+ */
+const INVITE_INSERT = /insert into public\.invites \([^)]*\) values\s*([\s\S]*?);/;
+const INVITE_ROW = /\(\s*'([^']+)'\s*,\s*'[^']+'\s*,\s*'([^']+)'/g;
+const RESEED_HINT = '`npm run db:seed`를 먼저 돌려 주세요.';
+
+let inviteTokens: Map<string, string> | null = null;
+
+export function inviteToken(role: 'student' | 'parent' | 'teacher'): string {
+  if (!inviteTokens) {
+    sql ??= readFileSync('supabase/seed.sql', 'utf8');
+    const rows = INVITE_INSERT.exec(sql)?.[1];
+    if (!rows) throw new Error(`seed.sql에서 초대 목록을 찾지 못했어요. ${RESEED_HINT}`);
+    inviteTokens = new Map();
+    for (const [, token, invitedRole] of rows.matchAll(INVITE_ROW)) {
+      if (!inviteTokens.has(invitedRole)) inviteTokens.set(invitedRole, token);
+    }
+  }
+  const token = inviteTokens.get(role);
+  if (!token) throw new Error(`seed.sql에 ${role} 초대가 없어요. ${RESEED_HINT}`);
+  return token;
+}

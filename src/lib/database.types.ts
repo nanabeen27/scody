@@ -707,7 +707,7 @@ export type Database = {
           accepted_at: string | null
           accepted_by: string | null
           created_at: string
-          expires_at: string | null
+          expires_at: string
           invitee_role: Database["public"]["Enums"]["invite_role"]
           inviter_id: string | null
           token: string
@@ -717,7 +717,7 @@ export type Database = {
           accepted_at?: string | null
           accepted_by?: string | null
           created_at?: string
-          expires_at?: string | null
+          expires_at?: string
           invitee_role: Database["public"]["Enums"]["invite_role"]
           inviter_id?: string | null
           token: string
@@ -727,7 +727,7 @@ export type Database = {
           accepted_at?: string | null
           accepted_by?: string | null
           created_at?: string
-          expires_at?: string | null
+          expires_at?: string
           invitee_role?: Database["public"]["Enums"]["invite_role"]
           inviter_id?: string | null
           token?: string

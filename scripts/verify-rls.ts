@@ -17,8 +17,14 @@
  * 그래서 마지막에 `[정리]` 단계가 돌고, **되돌린 결과를 다시 단정한다.** 단정이 실패해도,
  * 중간에 `await`가 거부돼도 정리는 돈다(`try/finally`).
  *
- * **그래도 `npm run db:verify`로 돌린다.** seed 총계를 등호로 단정하는 자리가 7곳이라, 앱에서
- * 만든 기록이 남아 있는 DB에서는 그 단정이 깨진다. 정리는 **이 스크립트가 만든 것만** 치운다.
+ * **그래도 `npm run db:verify`로 돌린다.** seed 총계를 등호로 단정하는 자리가 9곳이라(계정·학원·
+ * 콘텐츠·문항·배정·풀이·오답노트·반·초대), 앱에서 만든 기록이 남아 있는 DB에서는 그 단정이
+ * 깨진다. 정리는 **이 스크립트가 만든 것만** 치운다.
+ *
+ * **학원 간 격리는 학원 둘로 시험한다**(M-DB-13). seed에 새길학원이 있고, 이 스크립트의
+ * `[학원 격리]` 단계가 네 방향(한빛 원장·선생 · 새길 원장·선생)으로 상대 학원의 콘텐츠·반·학생·
+ * 배정·제출 현황·초대·오답 메모가 보이지 않는지, 그리고 교차 배정·교차 초대·교차 소속 쓰기가
+ * 막히는지 확인한다.
  *
  * **`npm test`에 넣지 않는다.** 네트워크와 원격 DB 자격 증명이 필요해서, 단위 테스트에 넣으면
  * `.env`가 없는 환경에서 전체 테스트가 깨진다. 스키마나 정책을 바꿀 때 손으로 돌린다.
@@ -171,19 +177,26 @@ async function verify(anon: SupabaseClient) {
 
   console.log('\n[시드 데이터가 실제로 들어갔나]');
   const admin = await signIn('admin');
-  check('계정 21개(로그인 9 + 반친구 12)', (await count(admin, 'profiles')) === 21);
-  check('콘텐츠 13세트', (await count(admin, 'content_sets')) === 13);
-  check('문항 189개', (await count(admin, 'questions')) === 189);
+  /*
+    seed에 **두 번째 학원**(새길학원)이 들어와 다섯 총계가 움직였다(M-DB-13). 값은 그대로 등호로
+    단정한다 — `>=`로 바꾸면 "seed가 정확히 무엇을 넣는지"를 확인하는 이 단정의 목적이 없어진다.
+  */
+  check('계정 25개(로그인 11 + 반친구 12 + 새길학원 학생 2)', (await count(admin, 'profiles')) === 25);
+  check('학원 2곳(한빛·새길)', (await count(admin, 'academies')) === 2);
+  check('콘텐츠 14세트', (await count(admin, 'content_sets')) === 14);
+  check('문항 192개', (await count(admin, 'questions')) === 192);
   /*
     **개수를 변수로 들고 간다.** 아래 검증이 배정·풀이를 하나씩 만들고, 정리 단계가 그것을
     치운 뒤 **같은 수로 돌아왔는지** 다시 단정한다. 등호로 단정하는 값 자체는 그대로 둔다.
   */
   const assignmentsAtSeed = await count(admin, 'assignments');
-  check('배정 4건', assignmentsAtSeed === 4);
+  check('배정 5건', assignmentsAtSeed === 5);
   const attemptsAtSeed = await count(admin, 'attempts');
   check('풀이 32건', attemptsAtSeed === 32);
   check('오답노트 11건', (await count(admin, 'wrong_notes')) === 11);
-  check('반 2개', (await count(admin, 'classes')) === 2);
+  check('반 3개', (await count(admin, 'classes')) === 3);
+  const invitesAtSeed = await count(admin, 'invites');
+  check('초대 4건(한빛 3 + 새길 1)', invitesAtSeed === 4);
 
   /*
     검증이 **행을 남기는** 표의 seed 상태를 적어 둔다. seed는 칭찬·주간 요약·재풀이 요청·운영
@@ -830,6 +843,320 @@ async function verify(anon: SupabaseClient) {
       .eq('student_id', uid)
       .eq('kind', 'answer_saved');
     check('활동 이벤트가 트리거로 남았다', (evented ?? 0) > 0, `${evented}행`);
+  }
+
+  /*
+    ── 학원 간 격리 ──────────────────────────────────────────────────────────
+
+    **왜 여기까지 오는 데 오래 걸렸나**: DB에 학원이 한빛학원 한 곳뿐이어서 이 성질을 시험할 수
+    없었다(M-DB-13). 학원이 하나면 모든 조회가 "내 학원 것"이라 `owner_academy_id = my_academy_id()`
+    조건을 **지워도 같은 결과가 나온다.** 그래서 정책은 맞아 보였지만 근거가 없었다.
+
+    seed에 새길학원을 넣고(원장·선생·반 1개·학생 2명·콘텐츠 1세트·배정 1건·초대 1건) 네 방향으로
+    확인한다: 한빛 원장·한빛 선생·새길 원장·새길 선생이 각각 **상대 학원 것을 하나도 보지 못하고**,
+    그러면서 **자기 학원 것은 본다**(비어 있어서 통과하는 것이 아님을 함께 단정한다).
+
+    기준선(어느 id가 어느 학원의 것인지)은 **운영자로 읽는다** — 검증 대상이 아니라 잣대다.
+  */
+  console.log('\n[학원 격리] 두 학원의 기준선');
+  const saegilDirector = await signIn('saegil.director');
+  const saegilTeacher = await signIn('saegil.teacher');
+
+  const { data: academyRows } = await admin.from('academies').select('id, name');
+  const academyIdOf = (name: string) =>
+    ((academyRows ?? []).find((a) => a.name === name)?.id ?? '') as string;
+  const hanbitId = academyIdOf('한빛학원');
+  const saegilId = academyIdOf('새길학원');
+  check(
+    '학원 둘의 id가 서로 다르다(격리 검증의 전제)',
+    !!hanbitId && !!saegilId && hanbitId !== saegilId,
+    `${hanbitId} / ${saegilId}`,
+  );
+
+  const { data: allClasses } = await admin.from('classes').select('id, academy_id');
+  const classIdsOf = (academy: string) =>
+    (allClasses ?? []).filter((c) => c.academy_id === academy).map((c) => c.id as string);
+  const { data: allAssignments } = await admin.from('assignments').select('id, class_id');
+  const assignmentIdsOf = (academy: string) => {
+    const ids = classIdsOf(academy);
+    return (allAssignments ?? [])
+      .filter((a) => ids.includes(a.class_id as string))
+      .map((a) => a.id as string);
+  };
+  const { data: allMembers } = await admin
+    .from('academy_members')
+    .select('academy_id, user_id, member_role');
+  const studentIdsOf = (academy: string) =>
+    (allMembers ?? [])
+      .filter((m) => m.academy_id === academy && m.member_role === 'student')
+      .map((m) => m.user_id as string);
+  check(
+    `기준선을 읽었다: 한빛 반 ${classIdsOf(hanbitId).length}개·학생 ${studentIdsOf(hanbitId).length}명 · ` +
+      `새길 반 ${classIdsOf(saegilId).length}개·학생 ${studentIdsOf(saegilId).length}명`,
+    classIdsOf(hanbitId).length === 2 &&
+      studentIdsOf(hanbitId).length === 14 &&
+      classIdsOf(saegilId).length === 1 &&
+      studentIdsOf(saegilId).length === 2,
+  );
+
+  /**
+   * 그 계정에게 보이는 `table`의 행 중 **남의 학원 것이 하나도 없다.**
+   *
+   * 조회가 거부되면 실패로 본다 — `0행`과 `오류`는 다른 사실이고, 오류를 통과로 세면 표를 없애도
+   * 격리가 지켜진 것으로 읽힌다.
+   */
+  async function noneVisible(
+    who: string,
+    client: SupabaseClient,
+    table: string,
+    column: string,
+    forbidden: readonly string[],
+  ) {
+    const { data, error } = await client.from(table).select(column);
+    const rows = (data ?? []) as unknown as Record<string, string | null>[];
+    const leaked = rows.filter((r) => r[column] != null && forbidden.includes(r[column] as string));
+    check(
+      `${who}: ${table}에 남의 학원 행이 없다 (본 ${rows.length}행 · 유출 ${leaked.length}행)`,
+      !error && leaked.length === 0,
+      error?.message ?? leaked.map((r) => String(r[column])).join(', '),
+    );
+  }
+
+  const sides = [
+    { who: '한빛 원장', client: director, mine: hanbitId, theirs: saegilId },
+    { who: '한빛 선생', client: teacher, mine: hanbitId, theirs: saegilId },
+    { who: '새길 원장', client: saegilDirector, mine: saegilId, theirs: hanbitId },
+    { who: '새길 선생', client: saegilTeacher, mine: saegilId, theirs: hanbitId },
+  ];
+
+  /*
+    **seed에는 한빛학원 소유 콘텐츠가 없다.**
+
+    실측으로 알게 된 사실이다(2026-08-14): `src/data/content.ts`의 어느 세트에도
+    `ownerAcademyName`이 없어서 seed의 13세트는 전부 운영자 콘텐츠(`owner_academy_id is null`)다.
+    `scripts/gen-seed.ts`의 `ownerAcademyName === ACADEMY_NAME` 분기는 지금 아무 세트에도 맞지 않는다.
+
+    그대로 두면 콘텐츠 격리가 **한 방향만** 시험된다 — 새길학원 소유 세트가 한빛에게 안 보이는 것은
+    확인되지만, 그 반대는 볼 대상이 없어서 정책을 지워도 통과한다. 그래서 한빛 원장으로 자기 학원
+    콘텐츠 한 세트를 **여기서 만들어** 양쪽을 대칭으로 시험하고, 정리 단계가 그것을 치운다.
+  */
+  console.log('\n[학원 격리] 한빛학원 소유 콘텐츠를 만들어 양쪽을 대칭으로 시험한다');
+  const contentAtSeed = await count(admin, 'content_sets');
+  let hanbitOwnedSetId: string | null = null;
+  {
+    onCleanup('교차 확인용 콘텐츠 정리', async () => {
+      if (hanbitOwnedSetId) {
+        await ownerExec('delete from public.content_sets where id = $1::uuid', [hanbitOwnedSetId]);
+      }
+      check(
+        `콘텐츠가 seed 상태(${contentAtSeed}세트)로 돌아왔다`,
+        (await count(admin, 'content_sets')) === contentAtSeed,
+      );
+    });
+    const { data: made, error: makeErr } = await director
+      .from('content_sets')
+      .insert({
+        subject: '국어',
+        area: '문법',
+        title: '격리 검증용 한빛 문제',
+        kind: 'grammar',
+        grade: 1,
+        publish_to_students: false,
+        owner_academy_id: hanbitId,
+        created_by: (await director.auth.getUser()).data.user!.id,
+      })
+      .select('id')
+      .single();
+    check('한빛 원장이 자기 학원 콘텐츠를 등록할 수 있다', !makeErr && !!made?.id, makeErr?.message);
+    hanbitOwnedSetId = (made?.id as string | undefined) ?? null;
+    if (hanbitOwnedSetId) {
+      const seenBy = async (client: SupabaseClient) =>
+        count(client, 'content_sets', `id=${hanbitOwnedSetId}`);
+      check('한빛 원장에게 그 세트가 보인다', (await seenBy(director)) === 1);
+      check('한빛 선생에게도 보인다(같은 학원)', (await seenBy(teacher)) === 1);
+      check('새길 원장에게 보이지 않는다', (await seenBy(saegilDirector)) === 0);
+      check('새길 선생에게 보이지 않는다', (await seenBy(saegilTeacher)) === 0);
+      check('학원과 무관한 학생에게 보이지 않는다', (await seenBy(seojun)) === 0);
+    }
+  }
+
+  console.log('\n[학원 격리] 다른 학원의 콘텐츠·반·학생·배정·초대·메모가 보이지 않는다');
+  for (const side of sides) {
+    await noneVisible(side.who, side.client, 'content_sets', 'owner_academy_id', [side.theirs]);
+    await noneVisible(side.who, side.client, 'classes', 'academy_id', [side.theirs]);
+    await noneVisible(side.who, side.client, 'class_students', 'class_id', classIdsOf(side.theirs));
+    await noneVisible(side.who, side.client, 'v_class_roster', 'class_id', classIdsOf(side.theirs));
+    await noneVisible(side.who, side.client, 'assignments', 'class_id', classIdsOf(side.theirs));
+    await noneVisible(
+      side.who,
+      side.client,
+      'v_assignment_submissions',
+      'assignment_id',
+      assignmentIdsOf(side.theirs),
+    );
+    await noneVisible(side.who, side.client, 'invites', 'academy_id', [side.theirs]);
+    await noneVisible(side.who, side.client, 'profiles', 'id', studentIdsOf(side.theirs));
+    await noneVisible(
+      side.who,
+      side.client,
+      'v_academy_visible_notes',
+      'student_id',
+      studentIdsOf(side.theirs),
+    );
+  }
+
+  /*
+    **비어 있어서 통과한 것이 아니다.** 위 단정은 "남의 것이 없다"만 보므로, 조회가 통째로 0행이면
+    똑같이 통과한다. 각자 자기 학원 것은 실제로 본다는 것을 함께 단정한다.
+  */
+  console.log('\n[학원 격리] 자기 학원 것은 보인다(위 단정이 공허하지 않다는 근거)');
+  for (const side of sides) {
+    const ownSets = await count(side.client, 'content_sets', `owner_academy_id=${side.mine}`);
+    check(`${side.who}: 자기 학원 콘텐츠가 보인다 (${ownSets}세트)`, ownSets > 0);
+    const ownClasses = await count(side.client, 'classes', `academy_id=${side.mine}`);
+    check(`${side.who}: 자기 학원 반이 보인다 (${ownClasses}개)`, ownClasses > 0);
+    const ownRoster = await count(side.client, 'v_class_roster');
+    check(`${side.who}: 자기 반 로스터가 보인다 (${ownRoster}행)`, ownRoster > 0);
+  }
+
+  console.log('\n[학원 격리] 다른 학원 반에는 배정할 수 없다');
+  {
+    const hanbitClassId = classIdsOf(hanbitId)[0];
+    const saegilClassId = classIdsOf(saegilId)[0];
+    /** 다른 학원 반에 배정을 시도한다. 만들어지면 격리가 깨진 것이고, 그 배정은 반드시 치운다. */
+    const crossAssign = async (
+      who: string,
+      client: SupabaseClient,
+      classId: string,
+      contentSetId: string,
+      why: string,
+    ) => {
+      /*
+        **시도 전에 정리를 등록한다.** 거부되면 지울 것이 없어 0행이 지워지고 단정만 남는다.
+        통과하면(=격리가 깨졌다) 그 배정이 남아 남의 학원 학생 화면에 과제로 보인다.
+      */
+      let made: string | null = null;
+      onCleanup(`교차 배정 정리(${who})`, async () => {
+        if (made) await ownerExec('delete from public.assignments where id = $1::uuid', [made]);
+        check(
+          `배정이 seed 상태(${assignmentsAtSeed}건)로 돌아왔다 — ${who}`,
+          (await count(admin, 'assignments')) === assignmentsAtSeed,
+        );
+      });
+      const { data, error } = await client.rpc('rpc_add_assignment', {
+        p_class_id: classId,
+        p_content_set_id: contentSetId,
+        p_title: '격리 검증용 교차 배정',
+        p_due_date: null,
+      });
+      made = (data as string | null) ?? null;
+      check(
+        `${who}: ${why}`,
+        !!error && !made,
+        error?.message ?? `배정 ${made}가 만들어졌다 — 격리가 깨졌다`,
+      );
+    };
+    // ① 남의 반에 (운영자 공개) 콘텐츠를 배정한다 — 막는 것은 반 소유다.
+    await crossAssign('한빛 원장', director, saegilClassId, setId, '새길학원 반에 배정할 수 없다');
+    await crossAssign(
+      '새길 원장',
+      saegilDirector,
+      hanbitClassId,
+      setId,
+      '한빛학원 반에 배정할 수 없다',
+    );
+    // ② 자기 반에 **남의 학원 콘텐츠**를 배정한다 — 막는 것은 콘텐츠 소유다.
+    const { data: saegilSets } = await admin
+      .from('content_sets')
+      .select('id')
+      .eq('owner_academy_id', saegilId);
+    check(
+      `학원 소유 콘텐츠가 양쪽에 있다 (한빛 ${hanbitOwnedSetId ? 1 : 0} · 새길 ${saegilSets?.length ?? 0})`,
+      !!hanbitOwnedSetId && (saegilSets?.length ?? 0) > 0,
+    );
+    if (hanbitOwnedSetId && (saegilSets?.length ?? 0) > 0) {
+      await crossAssign(
+        '한빛 원장',
+        director,
+        hanbitClassId,
+        saegilSets![0].id as string,
+        '새길학원 콘텐츠는 자기 반에도 배정할 수 없다',
+      );
+      await crossAssign(
+        '새길 원장',
+        saegilDirector,
+        saegilClassId,
+        hanbitOwnedSetId,
+        '한빛학원 콘텐츠는 자기 반에도 배정할 수 없다',
+      );
+    }
+  }
+
+  console.log('\n[학원 격리] 다른 학원의 초대를 만들 수 없다');
+  {
+    const crossInvite = async (who: string, client: SupabaseClient, academyId: string) => {
+      let made: string | null = null;
+      onCleanup(`교차 초대 정리(${who})`, async () => {
+        if (made) await ownerExec('delete from public.invites where token = $1', [made]);
+        check(
+          `초대가 seed 상태(${invitesAtSeed}건)로 돌아왔다 — ${who}`,
+          (await count(admin, 'invites')) === invitesAtSeed,
+        );
+      });
+      const { data, error } = await client.rpc('rpc_create_invite', {
+        p_academy_id: academyId,
+        p_invitee_role: 'teacher',
+        p_valid_days: 7,
+      });
+      made = (data as string | null) ?? null;
+      check(
+        `${who}: 다른 학원 초대를 만들 수 없다`,
+        !!error && !made,
+        error?.message ?? `토큰 ${made}가 만들어졌다 — 격리가 깨졌다`,
+      );
+    };
+    await crossInvite('한빛 원장', director, saegilId);
+    await crossInvite('새길 원장', saegilDirector, hanbitId);
+  }
+
+  console.log('\n[학원 격리] 다른 학원에 사람을 넣을 수 없다');
+  {
+    const membersAtSeed = await count(admin, 'academy_members');
+    const crossMember = async (
+      who: string,
+      client: SupabaseClient,
+      academyId: string,
+      userId: string,
+    ) => {
+      onCleanup(`교차 소속 정리(${who})`, async () => {
+        await ownerExec(
+          'delete from public.academy_members where academy_id = $1::uuid and user_id = $2::uuid',
+          [academyId, userId],
+        );
+        check(
+          `학원 소속이 seed 상태(${membersAtSeed}건)로 돌아왔다 — ${who}`,
+          (await count(admin, 'academy_members')) === membersAtSeed,
+        );
+      });
+      const { error } = await client
+        .from('academy_members')
+        .insert({ academy_id: academyId, user_id: userId, member_role: 'teacher' });
+      // RLS로 막힌 insert는 오류를 주지만, 오류 없이 통과하는 경우도 행으로 확인한다.
+      const { count: added } = await admin
+        .from('academy_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('academy_id', academyId)
+        .eq('user_id', userId);
+      check(
+        `${who}: 다른 학원에 사람을 넣을 수 없다`,
+        added === 0,
+        `${error?.message ?? '오류 없음'} / ${added}행`,
+      );
+    };
+    const hanbitTeacherId = (await teacher.auth.getUser()).data.user!.id;
+    const saegilTeacherId = (await saegilTeacher.auth.getUser()).data.user!.id;
+    await crossMember('한빛 원장', director, saegilId, hanbitTeacherId);
+    await crossMember('새길 원장', saegilDirector, hanbitId, saegilTeacherId);
   }
 
   console.log('\n[학원 경계] 소속이 끝나면 선생님도 메모를 못 읽는다');

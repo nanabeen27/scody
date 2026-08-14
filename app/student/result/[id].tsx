@@ -41,7 +41,7 @@ export default function ResultScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { readOnly } = useSession();
   const { all } = useStudentItems();
-  const { sets, loading: contentLoading } = useContent();
+  const { sets, loading: contentLoading, error: contentError, reload: reloadContent } = useContent();
   const {
     attempts,
     addWrongNote,
@@ -52,6 +52,8 @@ export default function ResultScreen() {
     removeFromQueue,
     isQueued,
     loading: progressLoading,
+    error: progressError,
+    reload: reloadProgress,
   } = useProgress();
   // 오답노트에 담은 문항을 근거로 다음에 풀 학습을 고른다. 담긴 오답이 없으면 비어 있다.
   const recommendations = useRecommendations(2);
@@ -63,22 +65,53 @@ export default function ResultScreen() {
   const attempt = id ? attempts[id] : undefined;
 
   /*
-    **읽는 중과 없는 것을 가른다.** 학습·콘텐츠·풀이 기록은 세 조회에서 오고, 첫 조회가 끝나기
-    전에는 셋 다 비어 있다 — 그 창에 `결과를 찾지 못했어요`를 그리면 결과 주소로 바로 들어온
-    학생에게 없는 기록을 없다고 단정한다(다른 화면과 같은 규칙 — `app/admin/content/[id].tsx`).
+    **읽는 중 · 실패 · 없는 기록을 셋으로 가른다.** 학습·콘텐츠·풀이 기록은 세 조회에서 오고,
+    첫 조회가 끝나기 전에는 셋 다 비어 있다 — 그 창에 `결과를 찾지 못했어요`를 그리면 결과
+    주소로 바로 들어온 학생에게 없는 기록을 없다고 단정한다
+    (다른 화면과 같은 규칙 — `app/admin/content/[id].tsx`).
+
+    조회가 **실패해도** 같은 문장이 나왔다(M-DB-16). 못 읽은 것과 없는 것은 다르다 —
+    없다고 하면 학생은 방금 푼 기록이 사라졌다고 믿는다.
   */
   const reading = progressLoading || contentLoading;
+  /** 조회 실패 문장. 다시 읽는 중에는 감춘다. */
+  const loadError = reading ? null : (progressError ?? contentError);
+
+  /** 두 조회를 함께 다시 시도한다. */
+  async function retryLoad() {
+    await Promise.all([reloadProgress(), reloadContent()]);
+  }
 
   if (!item || !content || !attempt) {
     return (
       <Screen
         testID="student-result"
-        title={reading ? '결과를 불러오고 있어요' : '결과를 찾지 못했어요'}
+        title={
+          reading
+            ? '결과를 불러오고 있어요'
+            : loadError
+              ? '결과를 불러오지 못했어요'
+              : '결과를 찾지 못했어요'
+        }
       >
         {reading ? (
           <Group>
             <Row title="잠시만 기다려 주세요" />
           </Group>
+        ) : loadError ? (
+          /* 실패 문장은 서버가 준 것을 쓴다. 다시 시도가 이 화면의 유일한 다음 행동이다. */
+          <>
+            <AppText variant="caption" tone="danger">
+              {loadError}
+            </AppText>
+            <ActionBar>
+              <Button
+                testID="result-load-retry"
+                label="다시 불러오기"
+                onPress={() => void retryLoad()}
+              />
+            </ActionBar>
+          </>
         ) : (
           <ActionBar>
             <Button label="홈으로 갈게요" onPress={() => router.replace('/student' as never)} />

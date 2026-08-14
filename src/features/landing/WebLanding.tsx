@@ -7,7 +7,7 @@ import { colors, control, spacing, radius, typeface } from '@/theme/tokens';
 import { useResponsive } from '@/theme/useResponsive';
 import { useSession } from '@/session';
 import { homeHrefFor, ROLE_LABEL } from '@/session/routing';
-import { DEV_ACCOUNTS } from '@/session/devAccounts';
+import { DEV_ACCOUNTS, DEV_LOGIN_ENABLED } from '@/session/devAccounts';
 import { LEGAL_DOCS } from '@/features/legal/documents';
 import { Reveal } from './Reveal';
 
@@ -237,7 +237,11 @@ export function WebLanding() {
           <View style={styles.footerTools}>
             <ThemeToggle />
           </View>
-          <DemoAccounts onEnter={(id) => void enterDemo(id)} />
+          {/*
+            개발용 로그인이 꺼진 빌드에는 이 목록을 두지 않는다(D-135). 공개 소개
+            페이지라서, 켜져 있으면 아무나 계정 목록을 보고 들어올 수 있다.
+          */}
+          {DEV_LOGIN_ENABLED ? <DemoAccounts onEnter={(id) => void enterDemo(id)} /> : null}
         </View>
       </View>
     </ScrollView>

@@ -10,6 +10,7 @@ import {
 } from 'react';
 import type { AcademyClass, Account, Role } from '@/data/types';
 import { errorMessage, hasSupabaseConfig, supabase } from '@/lib/supabase';
+import { DEV_LOGIN_ENABLED, DEV_LOGIN_PASSWORD } from '@/session/devAccounts';
 import {
   loadDirectory,
   loadSelfRoles,
@@ -231,11 +232,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (!hasSupabaseConfig()) {
         return { ok: false, error: 'Supabase 설정이 없어요.' };
       }
+      /*
+        **개발용 로그인은 켜져 있을 때만 동작한다**(D-135). 기본값이 꺼짐이라, 이 값을 넣지 않은
+        빌드에는 이 경로가 없다 — 실수로 운영에 실려 나가는 것을 막는 유일한 장치다(M-DB-2가
+        닫히기 전까지는 이것이 유일한 로그인이라 지울 수는 없다).
+      */
+      if (!DEV_LOGIN_ENABLED || !DEV_LOGIN_PASSWORD) {
+        return { ok: false, error: '이 빌드에는 개발용 로그인이 없어요.' };
+      }
       setLoading(true);
       const { data, error } = await supabase().auth.signInWithPassword({
         // seed가 만든 개발용 계정. 실제 서비스에서는 이 경로가 없다.
         email: `${scodyId.trim().toLowerCase()}@scody.test`,
-        password: 'test1234',
+        password: DEV_LOGIN_PASSWORD,
       });
       if (error || !data.user) {
         setLoading(false);

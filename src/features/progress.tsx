@@ -133,6 +133,17 @@ export function buildAttempt(
 interface ProgressValue {
   /** 첫 조회가 끝나기 전에는 참이다. */
   loading: boolean;
+  /**
+   * 마지막 조회가 실패한 이유. 성공하면 `null`이다.
+   *
+   * **화면이 실패와 빈 계정을 가르는 데 쓴다**(M-DB-16). 예전에는 실패를 `console.warn`으로만
+   * 남기고 `loading`을 내렸다 — 그래서 조회가 500으로 끊긴 학생에게 `아직 시작한 학습이 없어요`가
+   * 영구 상태로 남았고, 화면에는 오류도 재시도도 없었다.
+   *
+   * 값은 사람에게 그대로 보여 줄 문장이다(`errorMessage`). 실패한 조회는 아무것도 얹지 않으므로
+   * 이미 읽어 둔 기록은 그대로 남는다. 다시 시도는 `reload()`다.
+   */
+  error: string | null;
   /** 지금 보고 있는 계정이 소유한 풀이 기록. */
   attempts: Record<string, Attempt>;
   /** 다른 학생의 기록. 권한이 없으면 응답에 오지 않으므로 빈 값이다. */
@@ -230,6 +241,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
   const uid = account?.userId ?? '';
   const [reading, setReading] = useState(true);
+  /** 마지막 조회가 실패한 이유. 다음 조회가 성공하면 `null`로 돌아간다. */
+  const [error, setError] = useState<string | null>(null);
   /**
    * 지금 화면에 얹힌 기록이 **누구의 것인지**. 조회가 끝날 때만 채운다.
    *
@@ -314,6 +327,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       setWeekSummaries({});
       setPraiseByChild({});
       setComparisons({});
+      setError(null);
       setLoadedFor(null);
       setReading(false);
       return;
@@ -357,16 +371,21 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       );
       if (!alive()) return await awaitSuccessor(id);
       setComparisons(Object.fromEntries(pairs));
+      // 성공했으면 지난 실패를 지운다 — 다시 시도가 통했다는 사실도 화면에 닿아야 한다.
+      setError(null);
     } catch (e) {
-      console.warn('학습 기록을 읽지 못했어요:', errorMessage(e));
+      const message = errorMessage(e);
+      console.warn('학습 기록을 읽지 못했어요:', message);
       // 실패한 조회는 아무것도 얹지 않았다. 나를 밀어낸 조회가 있으면 그것이 얹을 때까지 기다린다.
       if (!alive()) return await awaitSuccessor(id);
+      // 화면이 이 문장으로 실패와 빈 계정을 가른다(M-DB-16).
+      setError(message);
     } finally {
       if (alive()) {
         /*
           **실패도 끝으로 본다.** 실패한 계정 키를 비워 두면 화면이 `불러오고 있어요`에서
-          영구히 멈춘다 — 이 provider는 오류를 내보내지 않으므로 화면이 다시 시도할 방법도
-          없다(오류·재시도는 M-DB-16으로 남겼다).
+          영구히 멈춘다. 실패했다는 사실은 `error`가 들고 있으므로, 화면은 그것을 보고 실패를
+          말하고 `reload()`로 다시 시도한다.
         */
         setLoadedFor(target.userId);
         setReading(false);
@@ -779,6 +798,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   const value = useMemo<ProgressValue>(
     () => ({
       loading,
+      error,
       attempts,
       attemptsOf,
       wrongNotesOf,
@@ -816,6 +836,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     }),
     [
       loading,
+      error,
       attempts,
       attemptsOf,
       wrongNotesOf,

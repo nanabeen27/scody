@@ -32,11 +32,19 @@ export default function StudentPick() {
   const params = useLocalSearchParams<{ grade?: string; area?: string; topic?: string }>();
   const { personal, academy, hasPersonal } = useStudentItems();
   const { addToQueue, removeFromQueue, isQueued } = useProgress();
-  const { sets, loading: contentLoading } = useContent();
+  const { sets, loading: contentLoading, error: contentError, reload: reloadContent } = useContent();
   const { show } = useToast();
   const account = useCurrentAccount();
   const { academyLinked, readOnly } = useSession();
   const academyPaid = !!account.academyName && academyLinked;
+
+  /**
+   * 콘텐츠 조회가 실패했을 때 보여 줄 문장. 다시 읽는 중에는 감춘다.
+   *
+   * **실패와 `아직 준비 중이에요`는 다른 말이다**(M-DB-16). 실패한 조회는 모든 칸을 0개로
+   * 만들어서, 콘텐츠가 준비되지 않았다고 잘못 말하고 그 줄들은 눌리지도 않는다.
+   */
+  const loadError = contentLoading ? null : contentError;
 
   const grade = params.grade ? (Number(params.grade) as Grade) : undefined;
   const area = params.area as KoreanArea | undefined;
@@ -169,10 +177,28 @@ export default function StudentPick() {
         <AppText variant="caption" tone="secondary">
           학습을 불러오고 있어요.
         </AppText>
+      ) : loadError ? (
+        /*
+          **실패했으면 단계를 그리지 않고 실패를 말한다**(M-DB-16 · `DESIGN.md` §9).
+          0개인 칸을 `아직 준비 중이에요`로 두면 조회 실패를 콘텐츠 문제로 잘못 말한다 —
+          이용권이 없을 때 단계를 그리지 않는 것과 같은 판단이다(위 `hasPersonal`).
+        */
+        <View style={{ gap: spacing.sm, alignItems: 'flex-start' }} testID="pick-load-failed">
+          <AppText variant="caption" tone="danger">
+            학습을 불러오지 못했어요. {loadError}
+          </AppText>
+          <Button
+            testID="pick-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void reloadContent()}
+          />
+        </View>
       ) : null}
 
       {/* 1단계: 학년 */}
-      {!grade && !contentLoading ? (
+      {!grade && !contentLoading && !loadError ? (
         <>
           <AppText variant="caption" tone="secondary">
             학년 → 영역 → 유형 순으로 좁혀 가요. 원하는 문제만 딱 찾을 수 있어요.
@@ -197,7 +223,7 @@ export default function StudentPick() {
       ) : null}
 
       {/* 2단계: 영역 */}
-      {grade && !area && !contentLoading ? (
+      {grade && !area && !contentLoading && !loadError ? (
         <Group>
           {AREAS.map((a) => {
             const n = countFor(grade, a);
@@ -216,7 +242,7 @@ export default function StudentPick() {
       ) : null}
 
       {/* 3단계: 세부 유형 */}
-      {grade && area && !topic && !contentLoading ? (
+      {grade && area && !topic && !contentLoading && !loadError ? (
         <Group>
           {topicsFor(area).map((t) => {
             const n = countFor(grade, area, t);
@@ -234,8 +260,11 @@ export default function StudentPick() {
         </Group>
       ) : null}
 
-      {/* 4단계: 학습 목록. 유형 이름은 위 경로에 이미 있으므로 섹션 제목으로 또 쓰지 않는다. */}
-      {grade && area && topic ? (
+      {/*
+        4단계: 학습 목록. 유형 이름은 위 경로에 이미 있으므로 섹션 제목으로 또 쓰지 않는다.
+        실패했으면 `이 유형은 아직 준비 중이에요.`도 사실이 아니다 — 위 실패 줄이 그 자리를 맡는다.
+      */}
+      {grade && area && topic && !loadError ? (
         matched.length > 0 ? (
           <>
             <AppText variant="caption" tone="tertiary">
