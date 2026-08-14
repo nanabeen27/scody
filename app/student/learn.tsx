@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { View } from 'react-native';
 import { Screen, Section, Group, Row, LearningRow, AppText, Button } from '@/components';
+import { useContent } from '@/features/content';
 import { useProgress } from '@/features/progress';
 import { useStudentItems, useQueuedItems, byTodoThenDue } from '@/features/learning';
 import { useCurrentAccount, useSession } from '@/session';
@@ -26,7 +27,8 @@ export default function StudentLearn() {
   const router = useRouter();
   const { academy, hasPersonal } = useStudentItems();
   const queued = useQueuedItems();
-  const { wrongNotes } = useProgress();
+  const { wrongNotes, loading: progressLoading } = useProgress();
+  const { loading: contentLoading } = useContent();
   const [showAllAcademy, setShowAllAcademy] = useState(false);
   const account = useCurrentAccount();
   const { academyLinked } = useSession();
@@ -38,6 +40,13 @@ export default function StudentLearn() {
    * 학원 얘기를 하던 학생이라 "받은 학습이 없어요"까지는 알려 줘야 한다.
    */
   const inAcademy = !!account.academyName;
+
+  /*
+    **읽는 중과 없는 것을 가른다.** 배정은 학습 기록 조회에서, 문항 수·영역은 콘텐츠 조회에서
+    온다. 첫 조회가 끝나기 전에는 `academy`가 비어 있어서 소속이 있는 학생에게
+    `아직 학원에서 받은 학습이 없어요.`를 먼저 보여 준다(홈과 같은 규칙 — `app/student/index.tsx`).
+  */
+  const reading = progressLoading || contentLoading;
 
   const hasQueue = queued.items.length > 0;
 
@@ -79,6 +88,11 @@ export default function StudentLearn() {
                 />
               ) : null}
             </>
+          ) : reading ? (
+            /* 조회 중에는 없다고 말하지 않는다. 문장과 무게는 `pick.tsx`·홈과 같다. */
+            <AppText variant="caption" tone="secondary">
+              학습을 불러오고 있어요.
+            </AppText>
           ) : (
             <Group>
               <View style={{ padding: spacing.lg }}>

@@ -229,7 +229,18 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   useAcademyStaff();
 
   const uid = account?.userId ?? '';
-  const [loading, setLoading] = useState(true);
+  const [reading, setReading] = useState(true);
+  /**
+   * 지금 화면에 얹힌 기록이 **누구의 것인지**. 조회가 끝날 때만 채운다.
+   *
+   * 상태 하나로 두면 로그인한 사람이 바뀐 **첫 렌더**가 `false`로 남는다 — 효과는 렌더가
+   * 끝난 뒤에 돌고, 그 안에서도 마이크로태스크를 한 번 넘긴 뒤에야 값을 올린다(린트가 효과
+   * 본문의 setState를 막는다). 그 한 프레임에 화면은 빈 데이터를 사실로 그린다
+   * (실측: 학생 홈 새로고침에서 `아직 시작한 학습이 없어요`가 629ms → 9ms로 줄었을 뿐
+   * 사라지지 않았다). 계정 키를 비교하면 그 프레임까지 덮인다.
+   */
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const accountKey = account?.userId ?? null;
   const [attemptsByUser, setAttemptsByUser] = useState<Record<string, Record<string, Attempt>>>({});
   const [notesByUser, setNotesByUser] = useState<Record<string, WrongNote[]>>({});
   const [academyNotes, setAcademyNotes] = useState<Record<string, AcademyNote[]>>({});
@@ -303,7 +314,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       setWeekSummaries({});
       setPraiseByChild({});
       setComparisons({});
-      setLoading(false);
+      setLoadedFor(null);
+      setReading(false);
       return;
     }
     /*
@@ -313,7 +325,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       false로 남는다. 그러면 화면은 빈 데이터를 사실처럼 그린다 — 학습 고르기가 모든 학년을
       `아직 준비 중이에요`로 말하고 그 줄은 눌리지 않는다(실측: E2E 11건이 이 창에서 갈렸다).
     */
-    setLoading(true);
+    setReading(true);
     try {
       const isAcademy = target.roles.includes('academy');
       const [attemptRows, notes, retry, q, asgn, summaries, praises, aNotes] = await Promise.all([
@@ -350,7 +362,15 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       // 실패한 조회는 아무것도 얹지 않았다. 나를 밀어낸 조회가 있으면 그것이 얹을 때까지 기다린다.
       if (!alive()) return await awaitSuccessor(id);
     } finally {
-      if (alive()) setLoading(false);
+      if (alive()) {
+        /*
+          **실패도 끝으로 본다.** 실패한 계정 키를 비워 두면 화면이 `불러오고 있어요`에서
+          영구히 멈춘다 — 이 provider는 오류를 내보내지 않으므로 화면이 다시 시도할 방법도
+          없다(오류·재시도는 M-DB-16으로 남겼다).
+        */
+        setLoadedFor(target.userId);
+        setReading(false);
+      }
     }
   }, [awaitSuccessor]);
 
@@ -752,6 +772,9 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       }),
     [denied, reload, uid, write],
   );
+
+  /** 조회 중이거나, 얹힌 기록이 다른 계정의 것이면 아직 읽는 중이다. */
+  const loading = reading || loadedFor !== accountKey;
 
   const value = useMemo<ProgressValue>(
     () => ({

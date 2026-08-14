@@ -67,7 +67,18 @@ export function ContentProvider({ children }: { children: ReactNode }) {
   // 옵셔널 체이닝을 의존성에 두면 React Compiler가 메모를 보존하지 못한다.
   const academyId = academy?.id;
   const [sets, setSets] = useState<ContentSet[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [reading, setReading] = useState(true);
+  /**
+   * 지금 화면에 얹힌 `sets`가 **누구의 것인지**. 아래 효과가 조회를 끝낼 때만 채운다.
+   *
+   * `loading`을 상태 하나로 두면 로그인한 사람이 바뀐 **첫 렌더**가 `false`로 남는다 —
+   * 효과는 렌더가 끝난 뒤에 돌고, 그 안에서도 마이크로태스크를 한 번 넘긴 뒤에야
+   * `loading`을 올린다(린트가 효과 본문의 setState를 막는다). 그 한 프레임에 화면은 빈
+   * 데이터를 사실로 그린다(실측: 학생 홈 새로고침에서 `아직 시작한 학습이 없어요`가
+   * 629ms → 9ms로 줄었을 뿐 사라지지 않았다). 계정 키를 비교하면 그 프레임까지 덮인다.
+   */
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const accountKey = account?.userId ?? null;
 
   /** 다시 읽기 신호. 값이 바뀌면 아래 효과가 다시 돈다. */
   const [nonce, setNonce] = useState(0);
@@ -81,35 +92,45 @@ export function ContentProvider({ children }: { children: ReactNode }) {
   */
   useEffect(() => {
     let alive = true;
-    void (async () => {
-      let next: ContentSet[] = [];
-      if (account) {
-      /*
-        **조회를 시작할 때 다시 `loading`으로 돌린다.**
-
-        계정이 없는 첫 렌더에서 `loading`을 false로 내려 두면, 로그인 뒤 실제 조회가 도는 동안에도
-        false로 남는다. 그러면 화면은 빈 데이터를 사실처럼 그린다 — 학습 고르기가 모든 학년을
-        `아직 준비 중이에요`로 말하고 그 줄은 눌리지 않는다(실측: E2E 11건이 이 창에서 갈렸다).
-
-        마이크로태스크 뒤에 부른다 — 효과 본문에서 곧바로 setState하면 렌더가 한 번 더 돈다.
-      */
-      await Promise.resolve();
+    const key = account?.userId ?? null;
+    /** 이 조회가 끝났다고 표시한다. 성공·실패 모두 여기를 지난다. */
+    const done = (rows: ContentSet[] | null) => {
       if (!alive) return;
-      setLoading(true);
+      if (rows) setSets(rows);
+      /*
+        **실패도 끝으로 본다.** 실패한 계정 키를 비워 두면 화면이 `불러오고 있어요`에서 영구히
+        멈춘다 — 지금 이 provider는 오류를 내보내지 않으므로 화면이 다시 시도할 방법도 없다
+        (오류·재시도는 M-DB-16으로 남겼다).
+      */
+      setLoadedFor(key);
+      setReading(false);
+    };
+    void (async () => {
+      if (account) {
+        /*
+          **조회를 시작할 때 다시 읽는 중으로 돌린다.**
+
+          계정이 없는 첫 렌더에서 내려 두면, 로그인 뒤 실제 조회가 도는 동안에도 false로 남는다.
+          그러면 화면은 빈 데이터를 사실처럼 그린다 — 학습 고르기가 모든 학년을
+          `아직 준비 중이에요`로 말하고 그 줄은 눌리지 않는다(실측: E2E 11건이 이 창에서 갈렸다).
+
+          마이크로태스크 뒤에 부른다 — 효과 본문에서 곧바로 setState하면 렌더가 한 번 더 돈다.
+          그 한 프레임은 위 `loadedFor` 비교가 덮는다.
+        */
+        await Promise.resolve();
+        if (!alive) return;
+        setReading(true);
 
         try {
-          next = await listContent();
+          done(await listContent());
         } catch (e) {
           console.warn('콘텐츠를 읽지 못했어요:', errorMessage(e));
-          return;
-        } finally {
-          if (alive) setLoading(false);
+          done(null);
         }
+        return;
       }
-      if (alive) {
-        setSets(next);
-        setLoading(false);
-      }
+      // 로그아웃하면 비운다.
+      done([]);
     })();
     return () => {
       alive = false;
@@ -149,6 +170,8 @@ export function ContentProvider({ children }: { children: ReactNode }) {
     [academyId, readOnly],
   );
 
+  /** 조회 중이거나, 얹힌 값이 다른 계정의 것이면 아직 읽는 중이다. */
+  const loading = reading || loadedFor !== accountKey;
   const value = useMemo(() => ({ sets, loading, addContent, reload }), [
     sets,
     loading,

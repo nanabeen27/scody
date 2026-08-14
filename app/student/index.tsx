@@ -15,6 +15,7 @@ import {
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
 import { useStudentItems, useQueuedItems, byDue, dueLabel } from '@/features/learning';
+import { useContent } from '@/features/content';
 import { useProgress, PRAISE_LABEL } from '@/features/progress';
 import { useToast } from '@/features/toast';
 import { endRow } from '@/theme/styles';
@@ -42,7 +43,8 @@ export default function StudentHome() {
   const queued = useQueuedItems();
   const [ask, setAsk] = useState('');
   const [showAllAcademy, setShowAllAcademy] = useState(false);
-  const { praiseFor, dismissPraise } = useProgress();
+  const { praiseFor, dismissPraise, loading: progressLoading } = useProgress();
+  const { loading: contentLoading } = useContent();
   const { readOnly } = useSession();
   const { show } = useToast();
   // 부모님이 보낸 칭찬 중 아직 확인하지 않은 것만. 확인하면 다시 뜨지 않는다.
@@ -60,6 +62,19 @@ export default function StudentHome() {
     const failed = results.find((r) => !r.ok);
     if (failed) show(failed.error ?? '확인하지 못했어요', 'removed');
   }
+
+  /*
+    **읽는 중과 없는 것을 가른다.**
+
+    학습 목록은 콘텐츠 조회와 학습 기록 조회 둘에서 온다(`src/features/learning.ts`). 첫 조회가
+    끝나기 전에는 배정도 담아 둔 학습도 비어 있어서, 그 창에 개수나 `없어요`를 그리면 학원 과제
+    4개가 있는 학생에게 `아직 시작한 학습이 없어요`를 먼저 보여 준다. 조회가 실패하면 두 provider가
+    `loading`을 내리기만 하므로 그 화면이 그대로 남아, 학생은 자기 계정이 빈 줄로 믿는다.
+
+    화면 전체를 기다리게 두지는 않는다 — 개수를 말하는 자리만 기다린다(같은 규칙: `pick.tsx`
+    학년 목록 · `result/[id].tsx` `결과를 찾지 못했어요`).
+  */
+  const reading = progressLoading || contentLoading;
 
   // 마감이 이른 과제부터. 학습 탭도 같은 정렬을 쓴다(`byTodoThenDue`).
   const items = [...all].sort(byDue);
@@ -170,6 +185,14 @@ export default function StudentHome() {
             <Button label="시작하기" onPress={() => go(next.id)} />
           </View>
         </View>
+      ) : reading ? (
+        /*
+          조회 중에는 히어로를 그리지 않고 한 줄만 둔다. 카드를 남겨 제목 자리를 비우면
+          빈 카드가 곧 `할 일이 없다`는 뜻으로 읽힌다. 문장과 무게는 `pick.tsx`와 같다.
+        */
+        <AppText variant="caption" tone="secondary">
+          학습을 불러오고 있어요.
+        </AppText>
       ) : nothingYet ? (
         <View style={styles.hero}>
           <AppText variant="caption" tone="secondary" style={styles.heroLabel}>
@@ -216,7 +239,8 @@ export default function StudentHome() {
         그때는 음수 마진이 다음 섹션을 끌어당겨 `남은 학습 13개`와 `Scody AI에게 물어보기`가
         4px 사이로 붙어 한 덩어리로 읽혔다. 이제 바깥 컬럼 간격은 이 덩어리 하나에만 걸린다.
       */}
-      {goalTotal > 0 ? (
+      {/* 조회 중에는 세지 않는다 — 절반만 온 목록으로 `남은 학습 2개`라고 말하게 된다. */}
+      {!reading && goalTotal > 0 ? (
         <View style={styles.progressBlock}>
           <View testID="home-progress" style={styles.progress}>
             <View style={styles.progressText}>
@@ -261,8 +285,11 @@ export default function StudentHome() {
         />
       </View>
 
-      {/* 학원 과제 */}
-      {hasAcademy ? (
+      {/*
+        학원 과제. 조회 중에는 이 면을 두지 않는다 — 배정을 아직 못 읽은 상태에서
+        `학원에서 내준 과제물을 모두 마쳤어요.`가 나오면 마치지 않은 과제를 마쳤다고 말한다.
+      */}
+      {!reading && hasAcademy ? (
         academyTodo.length > 0 ? (
           <Section
             title="학원에서 내준 과제가 있어요"
@@ -335,8 +362,12 @@ export default function StudentHome() {
         )
       ) : null}
 
-      {/* 담아 둔 개인 학습 */}
-      {hasPersonal || queued.items.length > 0 ? (
+      {/*
+        담아 둔 개인 학습. `hasPersonal`은 이용권이라 조회를 기다리지 않고 참이 되는데,
+        담아 둔 목록은 두 조회가 끝나야 채워진다(담긴 값은 개인 학습에서 찾는다). 그 창에
+        이 면을 두면 담아 둔 학습이 있는 학생에게 `담아 둔 학습이 없어요.`를 보여 준다.
+      */}
+      {!reading && (hasPersonal || queued.items.length > 0) ? (
         <Section
           title="담아 둔 학습"
           action={
