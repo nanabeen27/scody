@@ -16,3 +16,7 @@ public/dotlottie-player.wasm
 
 # Playwright MCP가 브라우저 확인 중에 남기는 스냅샷·콘솔 로그
 .playwright-mcp/
+
+# 개발 seed(`npm run db:seed`가 만든다). 실행마다 난수 초대 토큰이 들어가므로
+# 레포에 올리지 않는다 — `scripts/gen-seed.ts`가 그것을 전제한다(A-103·D-137).
+supabase/seed.sql

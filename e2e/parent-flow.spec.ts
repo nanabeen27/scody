@@ -2,7 +2,7 @@ import { test, expect } from './_fixtures';
 import { HAEUN_OFFSETS, personalItemId, seedMonths, sid } from './_ids';
 import { type Page } from '@playwright/test';
 import { loginHere } from './_auth';
-import { answerAll, keepWrongNotes } from './_solve';
+import { answerAll, keepWrongNotes, openFirstPersonal } from './_solve';
 
 async function loginParent(page: Page) {
   await page.goto('/login');
@@ -32,7 +32,7 @@ test.describe('M3 학부모 흐름', () => {
   test('종합 리포트에 정답률·취약 영역이 나오고 상세 리포트로 들어간다', async ({ page }) => {
     await page.goto('/login');
     await loginHere(page, 'yerin');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();
@@ -126,7 +126,7 @@ test.describe('M3 학부모 흐름', () => {
     // 정예린(자녀)이 오답을 담고, 학부모 최민지가 그 오답을 리포트에서 본다
     await page.goto('/login');
     await loginHere(page, 'yerin');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();
@@ -350,7 +350,7 @@ test.describe('M3 학부모 흐름', () => {
     */
     await page.goto('/login');
     await loginHere(page, 'yerin');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();
@@ -407,10 +407,14 @@ test.describe('M3 학부모 흐름', () => {
     await page.getByText('로그아웃').click();
     await loginHere(page, 'yerin');
 
-    // 히어로보다 위에 온다
+    /*
+      히어로보다 위에 온다. 히어로를 **보이는 문장**으로 잡는다 — 정예린은 담아 둔 학습도 남은
+      학원 과제도 없어서 히어로에 올라갈 학습이 없고(D-140) `today-primary`가 그리지 않는다.
+      확인하려는 것은 자리(칭찬 한 줄이 히어로 위)이므로 그 자리에 실제로 서는 면을 잡는다.
+    */
     const line = page.getByText(/님이 칭찬을 보냈어요/);
     const praise = await line.boundingBox();
-    const hero = await page.getByTestId('today-primary').boundingBox();
+    const hero = await page.getByText('오늘 할 일을 다 끝냈어요').boundingBox();
     expect(praise!.y).toBeLessThan(hero!.y);
     await expect(line).toContainText('꾸준히 했어요');
 
@@ -537,7 +541,7 @@ test.describe('M3 학부모 흐름', () => {
   test('자녀가 정리한 오답노트 메모와 별표를 학부모가 본다', async ({ page }) => {
     await page.goto('/login');
     await loginHere(page, 'yerin');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();

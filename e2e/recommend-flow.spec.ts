@@ -1,11 +1,11 @@
 import { test, expect } from './_fixtures';
 import { type Page } from '@playwright/test';
 import { login } from './_auth';
-import { answerAll, keepWrongNotes } from './_solve';
+import { answerAll, keepWrongNotes, openFirstPersonal } from './_solve';
 
 /** 개인 학습 하나를 일부러 틀리게 풀고 제출한다(모두 1번 보기 선택). */
 async function solveWithMistakes(page: Page) {
-  await page.getByText('시작하기').click();
+  await openFirstPersonal(page);
   await page.getByTestId('detail-start').click();
   await answerAll(page);
   await page.getByTestId('solve-submit').click();

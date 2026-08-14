@@ -1,6 +1,6 @@
 import { test, expect } from './_fixtures';
 import { login, PHONE_BY_ID, PHONE_PENDING } from './_auth';
-import { answerAll } from './_solve';
+import { answerAll, openFirstPersonal } from './_solve';
 
 test.describe('M6 접근성', () => {
   test('로그인 폼 요소에 접근 가능한 라벨이 있다', async ({ page }) => {
@@ -41,7 +41,7 @@ test.describe('M6 접근성', () => {
 
   test('문제 보기는 라디오 역할과 이름을 가진다', async ({ page }) => {
     await login(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     const radios = page.getByRole('radio');
     expect(await radios.count()).toBeGreaterThan(0);

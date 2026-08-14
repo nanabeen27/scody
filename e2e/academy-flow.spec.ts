@@ -133,7 +133,7 @@ test.describe('M4 학원 흐름', () => {
     await page.getByRole('link', { name: '학습' }).click();
     // 목록은 급한 것부터 세 줄까지 보여 준다. 새 배정은 마감이 가장 멀어 더 보기 안에 있다.
     await page.getByTestId('learn-academy-more').click();
-    await expect(page.getByText(`${displayDate(FUTURE_DUE)} 마감`).first()).toBeVisible();
+    await expect(page.getByText(`${displayDate(FUTURE_DUE)}까지`).first()).toBeVisible();
   });
 
   test('새로 배정한 과제는 학생 홈에 알림으로 뜨고, 한 문항이라도 풀면 사라진다', async ({

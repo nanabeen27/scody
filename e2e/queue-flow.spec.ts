@@ -1,7 +1,7 @@
 import { test, expect } from './_fixtures';
 import { type Page } from '@playwright/test';
 import { loginHere } from './_auth';
-import { answerAll, keepWrongNotes } from './_solve';
+import { answerAll, keepWrongNotes, openFirstPersonal } from './_solve';
 
 async function loginAs(page: Page, scodyId: string) {
   await page.goto('/login');
@@ -78,7 +78,7 @@ test.describe('M8 담아 둔 학습', () => {
 
   test('추천 행의 담기 버튼이 행 이동을 삼키지 않는다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();

@@ -18,6 +18,25 @@ export async function answerAll(page: Page) {
   throw new Error('문항 페이지가 20장을 넘었어요. 풀이 화면 페이지 나누기를 확인해 주세요.');
 }
 
+/**
+ * 개인 학습 하나(고1 · 독서 · `인문(일반)` · `정보의 홍수와 비판적 읽기`)의 상세로 들어간다.
+ *
+ * 예전에는 이 자리가 홈 히어로의 `시작하기` 한 번이었다. 히어로 후보가 **학생이 약속한 일**
+ * (담아 둔 학습 → 남은 학원 과제)로 좁혀지면서(D-140) 담은 것도 배정도 없는 계정의 홈에는
+ * 히어로가 `오늘 할 일을 다 끝냈어요`라 `시작하기`가 없다 — 개인 학습은 학습 탭에서 고른다.
+ *
+ * 여는 세트를 고정한 이유: 예전 히어로는 `공개 카탈로그의 첫 세트`라 콘텐츠가 늘거나 순서가
+ * 바뀌면 다른 학습이 열렸다. 이제 테스트가 무엇을 푸는지 이름으로 남는다.
+ */
+export async function openFirstPersonal(page: Page) {
+  await page.getByRole('link', { name: '학습' }).click();
+  await page.getByTestId('learn-pick').click();
+  await page.getByTestId('learn-grade-1').click();
+  await page.getByTestId('learn-area-독서').click();
+  await page.getByTestId('learn-topic-인문(일반)').click();
+  await page.getByText('정보의 홍수와 비판적 읽기').first().click();
+}
+
 /** 결과 화면에서 아직 담지 않은 오답을 위에서부터 오답노트에 담는다. */
 export async function keepWrongNotes(page: Page, count = 1) {
   for (let i = 0; i < count; i++) {

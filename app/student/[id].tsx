@@ -12,7 +12,7 @@ import {
   Icon,
   AppText,
 } from '@/components';
-import { useStudentItems } from '@/features/learning';
+import { formatDate, useStudentItems } from '@/features/learning';
 import { useContent } from '@/features/content';
 import { useProgress } from '@/features/progress';
 import { useToast } from '@/features/toast';
@@ -141,7 +141,8 @@ export default function LearningDetail() {
         <Row title="영역" meta={`국어 · ${item.area}`} />
         <Row title="유형" meta={KIND_LABEL[content.kind]} />
         <Row title="문항 수" meta={`${content.questions.length}문항`} />
-        {item.dueDate ? <Row title="마감" meta={`${item.dueDate}까지`} /> : null}
+        {/* ISO 원문(`2026-08-20`)을 화면에 그대로 내보내지 않는다 — `formatDate` 한곳을 쓴다. */}
+        {item.dueDate ? <Row title="마감" meta={`${formatDate(item.dueDate)}까지`} /> : null}
         {attempt ? <Row title="정답률" meta={`${attempt.accuracy}%`} /> : null}
       </Group>
       {/*

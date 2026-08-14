@@ -1,7 +1,7 @@
 import { test, expect } from './_fixtures';
 import { type Page } from '@playwright/test';
 import { loginHere } from './_auth';
-import { answerAll, keepWrongNotes } from './_solve';
+import { answerAll, keepWrongNotes, openFirstPersonal } from './_solve';
 
 const LEAK_MARKER = '정보의 홍수와 비판적 읽기';
 const LEAK_QUESTION = '윗글의 중심 내용으로 가장 적절한 것은?';
@@ -20,7 +20,7 @@ async function logout(page: Page) {
 
 /** 개인 학습 하나를 끝까지 풀고 틀린 문제를 오답노트에 담는다. */
 async function solveAndSaveWrongNote(page: Page) {
-  await page.getByText('시작하기').click();
+  await openFirstPersonal(page);
   await page.getByTestId('detail-start').click();
   await answerAll(page);
   await page.getByTestId('solve-submit').click();

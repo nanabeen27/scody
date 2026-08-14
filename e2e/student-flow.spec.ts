@@ -2,7 +2,9 @@ import { test, expect } from './_fixtures';
 import { type Page } from '@playwright/test';
 import { loginHere } from './_auth';
 import { actThenToast, waitForQuietToast } from './_toast';
-import { answerAll, keepWrongNotes } from './_solve';
+import { answerAll, keepWrongNotes, openFirstPersonal } from './_solve';
+import { assignLearning, expectAssigned } from './_assign';
+import { dayFromToday, sid } from './_ids';
 
 async function loginAs(page: Page, scodyId: string) {
   await page.goto('/login');
@@ -22,7 +24,7 @@ async function pickSpellingSet(page: Page) {
 test.describe('M2 학생 국어 학습 흐름', () => {
   test('지문형 학습: 지문을 읽고 풀어 제출한다', async ({ page }) => {
     await loginAs(page, 'seojun'); // 김서준, 개인 학습
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await expect(page).toHaveURL(/\/student\//);
     await expect(page.getByText('지문형')).toBeVisible();
     await page.getByTestId('detail-start').click();
@@ -52,7 +54,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('문항을 5개씩 보거나 한 문항씩 보면서 풀 수 있다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
 
     // 기본은 5문항씩
@@ -82,7 +84,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('제출 버튼은 문항을 다 푼 뒤에 나타난다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
 
     // 아직 아무것도 안 풀었으면 제출 버튼이 없다
@@ -104,7 +106,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('이전과 다음 버튼의 크기가 같다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await page.getByTestId('solve-next').click();
 
@@ -120,7 +122,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('오답노트에 담으면 담았다고 알려주고 알림은 스스로 사라진다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();
@@ -141,7 +143,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('제출 후 상세로 돌아오면 결과를 다시 볼 수 있다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     const detailUrl = page.url();
     await page.getByTestId('detail-start').click();
 
@@ -172,7 +174,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('제출한 학습을 다시 풀기 전에 기록이 바뀐다고 알려준다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();
@@ -192,7 +194,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('다시 풀기로 들어가면 지난 답이 지워지고 다 풀어야 제출할 수 있다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();
@@ -268,18 +270,34 @@ test.describe('M2 학생 국어 학습 흐름', () => {
   });
 
   test('학습 탭 학원 목록은 마감이 이른 것부터 세 줄까지 보여준다', async ({ page }) => {
-    await loginAs(page, 'yerin'); // 학원 과제 4개(마감 7/20·7/22·7/24·7/25)
+    // 정예린: 학원 과제 4개. seed가 마감을 오늘 기준 상대 간격으로 놓는다(가장 이른 것이 -8일).
+    await loginAs(page, 'yerin');
     await page.getByRole('link', { name: '학습' }).click();
 
     // 세 줄까지만. 나머지는 더 보기 안에 있다 — 주요 행동이 화면 밖으로 밀리지 않게.
     const more = page.getByTestId('learn-academy-more');
     await expect(more).toBeVisible();
 
-    // 급한 것부터: 가장 이른 7월 20일이 가장 늦은 7월 25일보다 위에 있다
-    const first = await page.getByText(/7월 20일 마감/).boundingBox();
+    /*
+      급한 것부터: 마감이 가장 이른 `독서 - 비판적 읽기 점검`(-8일)이 가장 늦은
+      `문법 - 맞춤법 점검`(-3일)보다 위에 있다.
+
+      **날짜 문구로 세우지 않는다.** 목록 행도 이제 오늘 기준으로 말하므로(D-142) 마감이 지난
+      네 과제가 모두 `마감이 지났어요`라 서로 구분되지 않는다. 예전 단정은 `7월 20일 마감`처럼
+      고정 날짜였는데 seed가 상대 날짜로 바뀌면서 이미 깨져 있었다(기준 실패).
+    */
+    const first = await page.getByText('독서 - 비판적 읽기 점검').boundingBox();
     await more.click();
-    const last = await page.getByText(/7월 25일 마감/).boundingBox();
+    const last = await page.getByText('문법 - 맞춤법 점검').boundingBox();
     expect(first!.y).toBeLessThan(last!.y);
+
+    /*
+      정예린은 네 과제를 모두 냈다. **낸 과제에는 지난 마감을 경고하지 않는다**(D-142) —
+      날짜와 정답률만 남는다. 마감이 지났다고 말하는 것은 아직 남은 과제뿐이다
+      (박도윤으로 확인한다: `남은 학원 과제가 히어로에 오고, 지난 마감을 알려준다`).
+    */
+    await expect(page.getByText('마감이 지났어요')).toHaveCount(0);
+    await expect(page.getByText(/정답률 \d+%/).first()).toBeVisible();
 
     // 펼치면 주요 행동은 여전히 아래에 있다(순서는 D-039 그대로)
     await expect(page.getByTestId('learn-pick')).toBeVisible();
@@ -446,7 +464,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('오답노트에서 지우면 바로 빠지고 되돌릴 수 있다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();
@@ -479,7 +497,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await expect(page.getByText('담아 둔 오답이 없어요')).toBeVisible();
   });
 
-  test('학원 과제가 남았으면 알려주고, 다 끝내면 개인 학습을 권한다', async ({ page }) => {
+  test('학원 과제가 남았으면 알려주고, 다 끝내면 할 수 있는 일만 말한다', async ({ page }) => {
     await page.goto('/login');
     await loginHere(page, 'doyun'); // 박도윤: 학원 이용권, 미제출 과제 1개
     await expect(page.getByText('학원에서 내준 과제가 있어요')).toBeVisible();
@@ -492,8 +510,17 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await page.getByTestId('result-done').click();
     await expect(page.getByTestId('academy-cleared')).toBeVisible();
     await expect(page.getByText('학원에서 내준 과제물을 모두 마쳤어요.')).toBeVisible();
-    await expect(page.getByText('개인 학습을 해볼까요?')).toBeVisible();
     await expect(page.getByText('학원에서 내준 과제가 있어요')).toHaveCount(0);
+
+    /*
+      **개인 이용권이 없는 학생에게 개인 학습을 권하지 않는다**(D-141). 박도윤에게 학습 탭의
+      개인 학습 진입 줄은 렌더되지 않으므로 `개인 학습 고르기`는 누를 것이 0개인 목적지였다.
+      히어로 캡션도 이 학생에게 열려 있지 않은 길(새로 고르기)을 가리키지 않는다.
+    */
+    await expect(page.getByText('개인 학습을 해볼까요?')).toHaveCount(0);
+    await expect(page.getByTestId('home-go-learn')).toHaveCount(0);
+    await expect(page.getByText(/새 학습을 골라볼 수 있어요/)).toHaveCount(0);
+    await expect(page.getByText('학원에서 과제를 내주면 여기에서 알려 줘요.')).toBeVisible();
 
     // 학원 학습이 없는 학생에게는 두 문구 모두 띄우지 않는다
     await page.getByRole('link', { name: '내 정보' }).click();
@@ -504,18 +531,46 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await expect(page.getByTestId('academy-cleared')).toHaveCount(0);
   });
 
-  test('학원 과제는 마감이 이른 것부터 오고, 지난 마감을 알려준다', async ({ page }) => {
-    await loginAs(page, 'yerin'); // 학원 과제 4개 — 마감 7/20 · 7/22 · 7/24 · 7/25
+  test('남은 학원 과제가 히어로에 오고, 지난 마감을 알려준다', async ({ page }) => {
+    /*
+      박도윤: 남은 학원 과제가 `현대소설 점검` 하나이고 마감이 지났다(seed에서 -4일).
+      예전에는 정예린으로 이 단정을 세웠는데 seed가 정예린의 배정 4건을 **모두 제출**로
+      만들면서 그 계정의 히어로에는 학원 과제가 올 수 없게 됐다(기준 실패).
+    */
+    await loginAs(page, 'doyun');
     const hero = page.getByTestId('today-primary');
-    // 시드에서 가장 이른 마감(7월 20일)이 히어로에 온다
-    await expect(hero.getByText('독서 - 비판적 읽기 점검')).toBeVisible();
+    await expect(hero.getByText('현대소설 점검')).toBeVisible();
     await expect(hero.getByText('마감이 지났어요')).toBeVisible();
     // 히어로가 이미 학원 과제를 가리키면 섹션에 같은 행동을 두 번 두지 않는다
     await expect(page.getByTestId('home-academy-first')).toHaveCount(0);
+
+    /*
+      **목록 행도 같은 문장을 쓴다**(D-142). 예전에는 이 줄만 `8월 10일 마감`이라 지난 마감이
+      여유 있게 읽혔고, 오늘 기준으로 말하는 곳은 홈 히어로 하나뿐이었다.
+    */
+    await page.getByRole('link', { name: '학습' }).click();
+    await expect(page.getByText('마감이 지났어요')).toBeVisible();
   });
 
   test('담아 둔 학습이 히어로를 차지하면 학원 과제로 가는 길을 따로 둔다', async ({ page }) => {
-    await loginAs(page, 'yerin');
+    /*
+      정예린은 seed의 배정 4건을 모두 냈으므로 **남은 과제를 하나 만들어야** 이 상태가 된다.
+      원장으로 반에 하나 배정하고(학원 흐름과 같은 헬퍼) 학생으로 돌아온다.
+    */
+    await page.goto('/login');
+    await loginHere(page, 'hanbit.director');
+    await page.getByRole('link', { name: '학습 배정' }).click();
+    await assignLearning(page, {
+      classId: sid('c_kor1'),
+      contentId: sid('ct_gram_1'),
+      search: '맞춤법',
+      due: dayFromToday(14),
+    });
+    await expectAssigned(page);
+    await page.getByRole('link', { name: '학원 관리' }).click();
+    await page.getByText('로그아웃').click();
+    await loginHere(page, 'yerin');
+
     await page.getByRole('link', { name: '학습' }).click();
     await page.getByTestId('learn-pick').click();
     await page.getByTestId('learn-grade-2').click();
@@ -530,7 +585,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     const first = page.getByTestId('home-academy-first');
     await expect(first).toBeVisible();
     await first.click();
-    await expect(page.getByText('독서 - 비판적 읽기 점검').first()).toBeVisible();
+    await expect(page.getByText('헷갈리는 맞춤법·어법').first()).toBeVisible();
     await expect(page.getByTestId('detail-start')).toBeVisible();
   });
 
@@ -538,6 +593,22 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await loginAs(page, 'seojun'); // 개인 이용권만, 아직 담은 학습이 없다
     // 공개 카탈로그 개수를 할 일처럼 세지 않는다(공개 개수는 학습 탭이 말한다)
     await expect(page.getByTestId('home-progress')).toHaveCount(0);
+
+    /*
+      **히어로도 진행 상황과 같은 집합만 쓴다**(D-140). 아무도 고르지 않은 카탈로그의 첫 세트를
+      `오늘의 학습`으로 올리지 않으므로 이 상태에는 시작할 것이 없다.
+
+      **그리고 `끝냈다`고도 말하지 않는다**(D-143). 이 계정은 담은 것도 배정도 없고 낸 것도
+      없다 — 약속된 일이 애초에 없었으므로 `오늘 할 일을 다 끝냈어요`는 거짓이다. 예전에는
+      `nothingYet`이 `all.length === 0`을 봐서, `all`에 공개 카탈로그가 들어 있다는 이유로
+      이 계정이 완료 면으로 떨어졌다.
+    */
+    await expect(page.getByTestId('today-primary')).toHaveCount(0);
+    await expect(page.getByText('오늘 할 일을 다 끝냈어요')).toHaveCount(0);
+    await expect(page.getByText('아직 시작한 학습이 없어요')).toBeVisible();
+    // 개인 이용권이 있으니 고르러 가는 것이 실제 다음 행동이다(D-141).
+    await expect(page.getByText('새 학습을 골라볼까요?')).toBeVisible();
+    await expect(page.getByTestId('home-empty-start')).toBeVisible();
 
     await page.getByRole('link', { name: '학습' }).click();
     await page.getByTestId('learn-pick').click();
@@ -551,6 +622,8 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await expect(page.getByText('남은 학습 1개')).toBeVisible();
     await expect(page.getByText('담아 둔 학습 1개')).toBeVisible();
     await expect(page.getByText('/ 1 완료')).toBeVisible();
+    // 담아 두면 그것이 히어로가 된다 — 분모에 들어온 것이 곧 오늘의 학습이다
+    await expect(page.getByTestId('today-primary').getByText('담아 둔 학습')).toBeVisible();
   });
 
   test('학습이 하나도 없는 계정에는 다 끝냈다고 말하지 않는다', async ({ page }) => {
@@ -568,8 +641,16 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     // 셀 것이 없으면 진행 상황도 두지 않는다
     await expect(page.getByTestId('home-progress')).toHaveCount(0);
 
-    await page.getByTestId('home-empty-start').click();
-    await expect(page).toHaveURL(/\/student\/learn/);
+    /*
+      **이용권이 없으면 고르러 가는 버튼을 두지 않고 이유를 말한다**(D-141 · A-096).
+      예전에는 여기에 `문제 담으러 가기`가 있었는데 그 목적지(학습 탭)에서 이 계정이 누를 수
+      있는 것은 0개였다 — 공식 입구로 들어온 학생이 두 번째 화면에서 흐름이 끊긴 자리다.
+      이용권을 시작하는 진입점은 결제 연결과 함께 온다(A-096).
+    */
+    await expect(page.getByTestId('home-empty-start')).toHaveCount(0);
+    await expect(
+      page.getByText('개인 학습 이용권이 없어서 아직 고를 수 있는 학습이 없어요.'),
+    ).toBeVisible();
   });
 
   test('풀다 나온 학습은 이어서 하기로 알아볼 수 있다', async ({ page }) => {
@@ -604,7 +685,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('풀이 중 이탈 후 돌아오면 선택이 유지된다(자동 저장)', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await expect(page.getByText(/^0 \/ \d+ 풀었어요$/)).toBeVisible();
     await page.getByRole('radio').nth(1).click();
@@ -616,7 +697,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('오답노트: 요약 버튼이 추가됨 상태로 바뀌고 마무리에서 남은 문제를 알려준다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();
@@ -666,7 +747,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('오답노트는 대화가 입력창 위에 오고, 지문은 첫 문항만 펼쳐진다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();
@@ -696,7 +777,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('추천 학습을 담아도 담았다고 알려준다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();
@@ -715,7 +796,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('추가 대화까지 다시 정리하고, 지우면 처음 상태로 돌아간다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();
@@ -856,7 +937,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
   test('학습 탭의 오답노트 → 카드 복습에서 다시 풀고 별표로 집중 복습한다', async ({ page }) => {
     await loginAs(page, 'seojun');
-    await page.getByText('시작하기').click();
+    await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await answerAll(page);
     await page.getByTestId('solve-submit').click();

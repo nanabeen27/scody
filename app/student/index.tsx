@@ -46,6 +46,7 @@ export default function StudentHome() {
   const {
     praiseFor,
     dismissPraise,
+    wrongNotes,
     loading: progressLoading,
     error: progressError,
     reload: reloadProgress,
@@ -123,12 +124,33 @@ export default function StudentHome() {
     queued.items.length > 0 ? `담아 둔 학습 ${queued.items.length}개` : null,
   ].filter((s): s is string => !!s);
 
-  // 담아 둔 학습이 있으면 그것부터. 없으면 남은 학습의 첫 번째.
-  const next = queued.items[0] ?? todo[0];
+  /**
+   * 오늘의 학습 후보는 **학생이 약속한 일**뿐이다: 담아 둔 학습 → 남은 학원 과제(D-140).
+   * 바로 아래 진행 상황의 분모(`goalTotal`)와 **같은 집합**이라, 진행 상황이
+   * `남은 학습이 없어요`라고 말하는 화면에서 히어로만 `시작하기`를 내놓는 일이 없다.
+   *
+   * **공개 카탈로그(`all` 안의 개인 학습)는 후보가 아니다.** 예전에는 `todo[0]`이라
+   * 담아 둔 것도 배정도 없는 학생에게 카탈로그의 첫 세트가 `오늘의 학습`으로 올라왔다 —
+   * 학생이 고른 적도, 누가 시킨 적도 없는 항목이다. D-034가 진행 상황에서 이미 같은 판단을
+   * 했고(카탈로그 크기를 할 일로 읽지 않는다) 히어로도 같은 기준을 쓴다. 새로 고르는 일은
+   * 아래 캡션과 `담아 둔 학습` 빈 상태가 맡는다.
+   */
+  const next = queued.items[0] ?? academyTodo[0];
   const fromQueue = !!queued.items[0];
   const nextDue = dueLabel(next?.dueDate);
-  // 아직 아무 학습도 없는 계정(가입 직후)에는 '다 끝냈어요'라고 말하지 않는다.
-  const nothingYet = all.length === 0 && queued.items.length === 0;
+  /**
+   * 아직 아무 학습도 없는 계정에는 `다 끝냈어요`라고 말하지 않는다.
+   *
+   * **기준은 `all`이 아니라 약속된 집합이다**(D-143). 예전에는 `all.length === 0`을 봤는데,
+   * `all`에는 공개 카탈로그가 들어 있어서 **개인 이용권이 있으면 아무것도 안 해도** 이 값이
+   * 거짓이 됐다. 그러면 담은 것도 배정도 없고 낸 것도 없는 학생에게 히어로가
+   * `오늘 할 일을 다 끝냈어요`라고 말한다 — 끝낸 것이 하나도 없는데.
+   *
+   * D-140이 히어로 후보를 약속한 일로 좁혔으니 `완료` 판정도 같은 집합을 봐야 한다.
+   * `goalTotal`(남은 학원 과제 + 담아 둔 학습 + 낸 학원 과제)이 0이면 약속된 일이 애초에
+   * 없었다는 뜻이므로 `끝냈다`가 성립하지 않는다.
+   */
+  const nothingYet = goalTotal === 0;
   // 히어로에 올린 학습은 아래 목록에서 뺀다. 같은 것이 두 번 보이지 않게.
   const academyList = academyTodo.filter((i) => i.id !== next?.id);
   const queueList = queued.items.filter((i) => i.id !== next?.id);
@@ -144,6 +166,33 @@ export default function StudentHome() {
   const freshAcademy = academyTodo.filter(
     (i) => i.status === 'todo' && !dueLabel(i.dueDate)?.overdue,
   );
+
+  /*
+    **할 수 없는 일에는 버튼을 두지 않고 이유를 한 줄로 말한다**(`DESIGN.md` §8 · D-141).
+
+    개인 이용권이 없는 학생에게 이 화면은 세 자리에서 사실이 아닌 말을 했다: `개인 학습 고르기`가
+    고를 것이 하나도 없는 학습 탭으로 보냈고(`learn.tsx`는 `hasPersonal`이 false면 진입 줄을
+    아예 렌더하지 않는다), `오늘 할 일을 다 끝냈어요` 캡션이 오답노트가 비어 있는데도 오답 복습을
+    가리켰고, 배정을 아직 받지 못한 학원 학생에게 `문제 담으러 가기`를 줬다.
+
+    이용권을 시작하는 진입점은 아직 없다(A-096 · 결제는 5절 범위 밖) — 그래서 없는 길을
+    가리키지 않고 지금의 사실만 말한다.
+  */
+  /** 오답노트에 담아 둔 것이 있을 때만 오답 복습을 가리킬 수 있다. */
+  const canReview = wrongNotes.length > 0;
+  /** 새로 고를 수 없는 계정에 그 이유(또는 지금 기다리는 것)를 말하는 한 줄. */
+  const noPickReason = account.academyName
+    ? '학원에서 과제를 내주면 여기에서 알려 줘요.'
+    : '개인 학습 이용권이 없어서 아직 고를 수 있는 학습이 없어요.';
+  /** `오늘 할 일을 다 끝냈어요` 아래 한 줄. 실제로 열려 있는 길만 가리킨다. */
+  const restCaption =
+    canReview && hasPersonal
+      ? '학습 탭에서 오답을 다시 풀거나 새 학습을 골라볼 수 있어요.'
+      : canReview
+        ? '학습 탭에서 오답을 다시 풀어볼 수 있어요.'
+        : hasPersonal
+          ? '학습 탭에서 새 학습을 골라볼 수 있어요.'
+          : noPickReason;
 
   const go = (id: string) => router.push(`/student/${id}` as never);
 
@@ -254,24 +303,35 @@ export default function StudentHome() {
           </AppText>
           <AppText style={styles.heroTitle}>아직 시작한 학습이 없어요</AppText>
           <AppText variant="caption" tone="secondary">
-            새 학습을 골라볼까요?
+            {hasPersonal ? '새 학습을 골라볼까요?' : noPickReason}
           </AppText>
-          <View style={styles.heroCta}>
-            {/*
-              `문제 담으러 가기`의 무게는 앱 어디서나 같다: **강조색 + `hug` + 화살표**
-              (`queue.tsx` 두 곳 · `records.tsx` 한 곳도 같다). §8이 이름까지 지목한
-              `다른 화면으로 보내기만 하는 버튼`이라 전폭이 아니고, 그래도 화면의 다음
-              행동이라 강조색은 남긴다. 폭이 위계를 말한다 — 전폭은 그 화면을 끝내는
-              버튼만 쓴다.
-            */}
-            <Button
-              testID="home-empty-start"
-              hug
-              label="문제 담으러 가기"
-              trailing={<Icon name="arrow-right" size={16} color={colors.accentText} />}
-              onPress={() => router.push('/student/learn' as never)}
-            />
-          </View>
+          {/*
+            **이용권이 없으면 고르러 가는 행동을 두지 않는다**(D-141). 그 목적지에서 이 학생이
+            누를 수 있는 것은 0개다 — 가입 직후 계정이 두 번째 화면에서 흐름이 끊긴 자리가
+            여기였다(A-096). 위 캡션이 이유를 말한다.
+
+            이 버튼이 남는 경우는 **개인 이용권이 있고 약속된 일이 아직 없을 때**다
+            (담아 둔 것도 학원 배정도 없는 계정 — seed의 김서준이 그렇다). 그 학생에게는
+            고르러 가는 것이 실제로 다음 행동이다.
+          */}
+          {hasPersonal ? (
+            <View style={styles.heroCta}>
+              {/*
+                `문제 담으러 가기`의 무게는 앱 어디서나 같다: **강조색 + `hug` + 화살표**
+                (`queue.tsx` 두 곳 · `records.tsx` 한 곳도 같다). §8이 이름까지 지목한
+                `다른 화면으로 보내기만 하는 버튼`이라 전폭이 아니고, 그래도 화면의 다음
+                행동이라 강조색은 남긴다. 폭이 위계를 말한다 — 전폭은 그 화면을 끝내는
+                버튼만 쓴다.
+              */}
+              <Button
+                testID="home-empty-start"
+                hug
+                label="문제 담으러 가기"
+                trailing={<Icon name="arrow-right" size={16} color={colors.accentText} />}
+                onPress={() => router.push('/student/learn' as never)}
+              />
+            </View>
+          ) : null}
         </View>
       ) : (
         <View style={styles.hero}>
@@ -279,8 +339,12 @@ export default function StudentHome() {
             오늘의 학습
           </AppText>
           <AppText style={styles.heroTitle}>오늘 할 일을 다 끝냈어요</AppText>
+          {/*
+            **가리키는 곳이 실제로 열려 있어야 한다**(D-141). 이 문장은 오래 두 절을 고정으로
+            말했는데, 오답노트가 비어 있고 개인 이용권도 없는 학생에게는 **두 절 모두 거짓**이었다.
+          */}
           <AppText variant="caption" tone="secondary">
-            학습 탭에서 오답을 다시 풀거나 새 학습을 골라볼 수 있어요.
+            {restCaption}
           </AppText>
         </View>
       )}
@@ -398,24 +462,34 @@ export default function StudentHome() {
         ) : (
           <View testID="academy-cleared" style={styles.cleared}>
             <AppText variant="label">학원에서 내준 과제물을 모두 마쳤어요.</AppText>
-            <AppText variant="caption" tone="secondary">
-              개인 학습을 해볼까요?
-            </AppText>
             {/*
-              면 안 마지막 줄의 행동은 오른쪽 끝이다(§8 규칙 ③). 위 두 줄은 글자라
-              왼쪽에 그대로 두고 이 줄만 감싼다 — `cleared`째로 오른쪽에 붙이면 문장까지 따라간다.
-              `hug`을 함께 준다: 부모의 `alignItems: 'flex-start'`에 기대고 있던 폭이라
-              감싸는 줄 안에서는 늘어난다.
+              **개인 학습을 권하는 것은 고를 수 있는 학생에게만**이다(D-141). 이용권이 없으면
+              `개인 학습을 해볼까요?`와 그 행동을 두지 않는다 — 목적지에서 누를 수 있는 것이
+              0개다. 그 학생이 지금 무엇을 할 수 있는지는 위 히어로 캡션이 말하므로(`restCaption`)
+              같은 말을 두 번 두지 않는다.
             */}
-            <View style={[styles.clearedAction, endRow.action]}>
-              <Button
-                testID="home-go-learn"
-                variant="secondary"
-                hug
-                label="개인 학습 고르기"
-                onPress={() => router.push('/student/learn' as never)}
-              />
-            </View>
+            {hasPersonal ? (
+              <>
+                <AppText variant="caption" tone="secondary">
+                  개인 학습을 해볼까요?
+                </AppText>
+                {/*
+                  면 안 마지막 줄의 행동은 오른쪽 끝이다(§8 규칙 ③). 위 두 줄은 글자라
+                  왼쪽에 그대로 두고 이 줄만 감싼다 — `cleared`째로 오른쪽에 붙이면 문장까지 따라간다.
+                  `hug`을 함께 준다: 부모의 `alignItems: 'flex-start'`에 기대고 있던 폭이라
+                  감싸는 줄 안에서는 늘어난다.
+                */}
+                <View style={[styles.clearedAction, endRow.action]}>
+                  <Button
+                    testID="home-go-learn"
+                    variant="secondary"
+                    hug
+                    label="개인 학습 고르기"
+                    onPress={() => router.push('/student/learn' as never)}
+                  />
+                </View>
+              </>
+            ) : null}
           </View>
         )
       ) : null}
