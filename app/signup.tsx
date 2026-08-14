@@ -381,7 +381,7 @@ export default function Signup() {
                 testID="signup-academy-name"
                 value={academyName}
                 onChangeText={setAcademyName}
-                placeholder="예: 한빛학원"
+                placeholder="예: 서울국어학원"
               />
             ) : null}
           </AuthSection>

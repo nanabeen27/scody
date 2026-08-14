@@ -258,7 +258,7 @@ export default function AdminUsers() {
           setQuery(t);
           setPage(0);
         }}
-        placeholder="예: KJN-6EF, 박도윤, doyun, 010-1000-0003"
+        placeholder="예: ABC-123, 홍길동, hong, 010-0000-0000"
         autoCapitalize="none"
         autoCorrect={false}
       />

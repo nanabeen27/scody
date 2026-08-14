@@ -277,7 +277,7 @@ export default function AcademyClasses() {
               testID="class-new-teacher-search"
               value={teacherQuery}
               onChangeText={setTeacherQuery}
-              placeholder="예: 오선생 또는 hanbit.teacher"
+              placeholder="예: 김선생 또는 kimteacher"
             />
           ) : null}
           <Group>

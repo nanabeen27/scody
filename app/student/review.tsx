@@ -59,10 +59,40 @@ function deckTitle(area: string | undefined, onlyStarred: boolean): string {
  */
 export default function Review() {
   const params = useLocalSearchParams<{ area?: string; starred?: string }>();
-  const { loading, error, reload } = useProgress();
+  const {
+    wrongNotes,
+    loading: progressLoading,
+    error: progressError,
+    reload: reloadProgress,
+  } = useProgress();
+  const {
+    sets,
+    loading: contentLoading,
+    error: contentError,
+    reload: reloadContent,
+  } = useContent();
   const title = deckTitle(params.area, params.starred === '1');
 
-  if (loading) {
+  /*
+    **게이트는 첫 조회에만 걸린다.** `loading`은 다시 읽을 때마다 참이 되는데(`runRead`가
+    `setReading(true)`), 쓰기가 실패하면 `patchNote`·`write`가 `reload()`를 부른다. 그때
+    `ReviewDeck`을 언마운트하면 덱·고른 답·대화가 전부 초기화된다 — 별표 한 번이 실패하면
+    5번째 카드에서 만든 대화가 사라지고 화면은 `별표를 달지 못했어요`만 말한다.
+    다시 읽는 동안 이전 데이터는 지워지지 않으므로(`notesByUser`는 새 값이 올 때 교체된다)
+    **손에 있는 것이 있으면 덱을 그대로 둔다.**
+
+    콘텐츠 조회도 함께 본다 — 지문(`findContent`)이 그쪽에서 오고, 실패하면 독서·문학 카드가
+    지문 없이 그려진다(다른 학생 화면도 두 조회를 함께 본다).
+  */
+  const noNotes = wrongNotes.length === 0;
+  const noContent = sets.length === 0;
+  const firstRead = (progressLoading && noNotes) || (contentLoading && noContent);
+  /** 첫 조회가 실패했을 때만 실패 면을 세운다. 다시 읽는 중에는 감춘다. */
+  const firstError = firstRead
+    ? null
+    : ((noNotes ? progressError : null) ?? (noContent ? contentError : null));
+
+  if (firstRead) {
     return (
       <Screen testID="student-review" backFallback="/student/learn" title={title}>
         <Group>
@@ -73,19 +103,19 @@ export default function Review() {
   }
 
   /* 실패는 빈 목록과 다르게 말한다(M-DB-16). 다시 시도가 이 화면의 유일한 다음 행동이다. */
-  if (error) {
+  if (firstError) {
     return (
       <Screen testID="student-review" backFallback="/student/learn" title={title}>
         <View style={{ gap: spacing.sm, alignItems: 'flex-start' }} testID="review-load-failed">
           <AppText variant="caption" tone="danger">
-            오답을 불러오지 못했어요. {error}
+            오답을 불러오지 못했어요. {firstError}
           </AppText>
           <Button
             testID="review-load-retry"
             variant="secondary"
             hug
             label="다시 불러오기"
-            onPress={() => void reload()}
+            onPress={() => void Promise.all([reloadProgress(), reloadContent()])}
           />
         </View>
       </Screen>
@@ -189,6 +219,8 @@ function ReviewDeck() {
     setLive('');
     setQuestion('');
     setAskFailed(false);
+    // 확인 단계도 카드에 딸린 상태다. 두고 가면 다시 그 카드에 왔을 때 묻지 않은 확인이 뜬다.
+    setConfirmMemo(null);
   }
 
   function nextCard() {

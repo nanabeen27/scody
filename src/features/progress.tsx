@@ -463,9 +463,18 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     (studentId: string) => retryByUser[studentId] ?? NO_RETRY,
     [retryByUser],
   );
+  /*
+    `wrongNotes`·`wrongNotesOf`와 **같은 규칙**을 쓴다(D-071). 이 경로만 마스크가 없었다 —
+    지금은 서버가 막아서(대리 중 `auth.uid()`가 운영자라 `can_see_student()`가 거짓) 0행이지만,
+    A-048의 토큰 분리가 들어오는 날 학원 화면들이 학생 메모 본문을 운영자에게 그린다.
+    막는 벽을 서버 한 겹에만 두지 않는다.
+  */
   const academyNotesOf = useCallback(
-    (studentId: string) => academyNotes[studentId] ?? NO_ACADEMY_NOTES,
-    [academyNotes],
+    (studentId: string) => {
+      const notes = academyNotes[studentId] ?? NO_ACADEMY_NOTES;
+      return readOnly ? notes.map((n) => ({ ...n, dig: undefined })) : notes;
+    },
+    [academyNotes, readOnly],
   );
   const comparisonsOf = useCallback(
     (studentId: string) => comparisons[studentId] ?? NO_COMPARISONS,

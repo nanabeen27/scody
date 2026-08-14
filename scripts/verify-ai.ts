@@ -37,7 +37,8 @@ async function main() {
   const client = createClient(URL_, KEY, { auth: { persistSession: false } });
   const { error: signInError } = await client.auth.signInWithPassword({
     email: 'seojun@scody.test',
-    password: 'test1234',
+    // seed 계정 비밀번호는 `.env`에서 읽는다 — 레포에 리터럴로 두지 않는다.
+    password: process.env.EXPO_PUBLIC_DEV_LOGIN_PASSWORD ?? '',
   });
   if (signInError) {
     check('로그인', false, signInError.message);

@@ -53,7 +53,21 @@ export function LearningRow({ item, onPress, leading, trailing, note, testID }: 
     <View style={styles.wrap} testID={testID}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${item.subject} ${item.title}`}
+        /*
+          **메타를 이름에 함께 넣는다.** `aria-label`은 접근 가능한 이름 계산에서 자손 텍스트를
+          덮으므로, 예전 라벨(`과목 제목`)만 두면 `10문항 · 마감이 지났어요 · 정답률 80%`가
+          스크린리더에 닿지 않았다. D-142가 색 대신 **글자**로 지난 마감을 말하기로 했는데
+          그 글자가 이름에서 빠지면 §11(색만으로 뜻을 전하지 않는다)이 지켜지지 않는다.
+        */
+        accessibilityLabel={[
+          `${item.subject} ${item.title}`,
+          `${item.questionCount}문항`,
+          due?.text,
+          tail || null,
+          note,
+        ]
+          .filter(Boolean)
+          .join(', ')}
         onPress={onPress}
         style={({ pressed }) => [
           styles.row,

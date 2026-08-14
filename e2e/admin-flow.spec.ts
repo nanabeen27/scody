@@ -507,7 +507,8 @@ test.describe('총괄관리자 대리 보기', () => {
     // ① 무엇이 열리는지 시작 전에 말한다
     const scope = page.getByTestId('impersonate-scope');
     await expect(scope).toContainText('연결된 자녀의 학습 기록 전부');
-    await expect(scope).toContainText('오답노트 메모 본문과 별표까지');
+    // 메모 본문은 대리 보기에서 가려진다(D-071) — 범위 문장이 그 사실을 말한다.
+    await expect(scope).toContainText('메모 본문은 가려요');
 
     // ② 넓게 여는 대상에는 `데이터 점검`을 두지 않는다
     await expect(page.getByTestId('impersonate-kind-자녀 리포트 문의')).toBeVisible();

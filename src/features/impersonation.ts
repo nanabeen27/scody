@@ -68,19 +68,33 @@ export function ticketRequiredFor(target: Account): boolean {
  * 역할이 여럿이면 줄도 여럿이다(선생님 겸 학부모 계정은 두 줄이다).
  */
 export function impersonationScope(target: Account): string[] {
-  const where = target.academyName ?? '소속 학원';
   const lines: string[] = [];
   if (target.roles.includes('student')) {
     lines.push('이 학생의 개인 학습·학원 과제 기록과 오답노트 문항');
   }
+  /*
+    **메모 본문은 어느 역할에서도 열리지 않는다**(D-071). `wrongNotes`·`wrongNotesOf`·
+    `academyNotesOf`가 대리 중에 `dig`를 값째 지운다. 이 문장이 화면과 감사 로그에 함께 남으므로,
+    실제로 열리지 않는 것을 열린다고 적으면 접속기록을 읽는 사람이 잘못 판단한다 — 같은 화면이
+    13줄 위에서 `오답노트에 AI와 정리한 메모는 보이지 않아요.`라고 이미 말하고 있었다.
+  */
   if (target.roles.includes('parent')) {
-    lines.push('연결된 자녀의 학습 기록 전부 — 오답노트 메모 본문과 별표까지');
+    lines.push('연결된 자녀의 학습 기록 전부 — 오답노트는 문항과 별표까지(메모 본문은 가려요)');
   }
-  if (target.roles.includes('academy')) {
+  /*
+    **소속이 실제로 있을 때만 학원 범위를 말한다.** `removeMember`는 `academy_members.left_at`만
+    채우고 `user_roles`의 `academy` 행은 남기므로, 학원에서 제외된 계정은 `roles: ['academy']`인데
+    `academyName`·`academyRole`이 비어 있다. 그때 예전 코드는 `academyRole !== 'teacher'`라는
+    이유로 **원장 범위**를 말했다 — 원장이 아니고, 소속이 없고, 실제로는 아무것도 열리지 않는다.
+  */
+  if (target.roles.includes('academy') && !target.academyName) {
+    lines.push('학원 소속이 끝난 계정이라 학원 화면에서는 아무것도 열리지 않아요');
+  } else if (target.roles.includes('academy')) {
+    const where = target.academyName;
     lines.push(
       target.academyRole === 'teacher'
-        ? `${where} 담당 반 학생의 제출 결과와 배정 학습 오답노트 메모`
-        : `${where} 전체의 반·학생·제출 결과와 배정 학습 오답노트 메모`,
+        ? `${where} 담당 반 학생의 제출 결과와 배정 학습의 오답 문항`
+        : `${where} 전체의 반·학생·제출 결과와 배정 학습의 오답 문항`,
     );
   }
   // 역할이 하나도 없는 계정(가입만 한 상태)도 있다. 빈 배열을 그대로 두지 않는다.

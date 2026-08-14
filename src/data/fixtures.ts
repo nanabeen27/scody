@@ -8,7 +8,8 @@ import {
 import { SOLO_STUDENTS } from './solo';
 
 /** 프로토타입 공용 비밀번호. 실제 서비스에서는 사용하지 않는다. */
-export const DEMO_PASSWORD = 'test1234';
+/** 개발 fixture 계정의 자리 표시용. 실제 로그인에 쓰이지 않는다(서버가 검증한다). */
+export const DEMO_PASSWORD = '(개발 fixture)';
 
 /**
  * 프로토타입 공용 인증번호. 실제로는 서버가 발송하고 검증한다.

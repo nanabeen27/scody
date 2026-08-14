@@ -358,19 +358,6 @@ export default function AdminUserDetail() {
             학생 계정이에요. 꼭 필요한 만큼만 보고 바로 끝내 주세요.
           </AppText>
         ) : null}
-        {/*
-          **무엇이 열리는지 시작 전에 말한다**(D-149). 학부모·원장 계정은 대리하는 순간 남의
-          기록까지 열리는데, 예전에는 화면이 그 사실을 한 줄도 말하지 않았다(A-079).
-          여기 적힌 문장이 감사 로그에 남는 문장과 같다(`impersonationScope`).
-        */}
-        <View testID="impersonate-scope" style={{ gap: spacing.xs }}>
-          <AppText variant="caption" tone="secondary">
-            지금 열리는 범위
-          </AppText>
-          {scope.map((line) => (
-            <AppText key={line}>· {line}</AppText>
-          ))}
-        </View>
         <AppText variant="caption" tone="tertiary">
           {IMPERSONATION_MINUTES}분이 지나면 자동으로 끝나요. 사유와 열람 범위는 운영 기록에
           남아요.
@@ -384,6 +371,19 @@ export default function AdminUserDetail() {
           </AppText>
         ) : (
           <>
+        {/*
+          **무엇이 열리는지 시작 전에 말한다**(D-149). 학부모·원장 계정은 대리하는 순간 남의
+          기록까지 열리는데, 예전에는 화면이 그 사실을 한 줄도 말하지 않았다(A-079).
+          여기 적힌 문장이 감사 로그에 남는 문장과 같다(`impersonationScope`).
+        */}
+        <View testID="impersonate-scope" style={{ gap: spacing.xs }}>
+          <AppText variant="caption" tone="secondary">
+            지금 열리는 범위
+          </AppText>
+          {scope.map((line) => (
+            <AppText key={line}>· {line}</AppText>
+          ))}
+        </View>
             {/* 라벨과 칩은 `Field`의 라벨-입력 간격과 같게 붙인다. */}
             <View style={{ gap: spacing.xs }}>
               <AppText variant="caption" tone="secondary">

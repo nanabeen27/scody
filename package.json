@@ -17,10 +17,10 @@
     "web:preview": "expo export -p web --output-dir dist && npx serve dist -s -l 8081",
     "motion:wasm": "cp node_modules/@lottiefiles/dotlottie-web/dist/dotlottie-player.wasm public/",
     "db:push": "set -a && . ./.env && set +a && supabase db push",
-    "db:seed": "tsx scripts/gen-seed.ts && tsx scripts/run-sql.ts supabase/seed.sql",
+    "db:seed": "set -a && . ./.env && set +a && tsx scripts/gen-seed.ts && tsx scripts/run-sql.ts supabase/seed.sql",
     "db:types": "set -a && . ./.env && set +a && supabase gen types typescript --linked > src/lib/database.types.ts",
     "db:verify": "npm run db:seed && tsx scripts/verify-rls.ts",
-    "ai:secret": "set -a && . ./.env && set +a && supabase secrets set OPENROUTER_API_KEY=\"$EXPO_PUBLIC_OPENROUTER_API_KEY\"",
+    "ai:secret": "set -a && . ./.env && set +a && supabase secrets set OPENROUTER_API_KEY=\"$OPENROUTER_API_KEY\"",
     "ai:deploy": "set -a && . ./.env && set +a && supabase functions deploy ai-proxy",
     "ai:verify": "tsx scripts/verify-ai.ts"
   },

@@ -44,7 +44,25 @@ import type { Account, ContentSet, Grade, Role } from '../src/data/types';
 const ANCHOR = '2026-07-28';
 
 /** 프로토타입 공용 비밀번호. **개발용 로그인 전용**이고 운영에서는 쓰지 않는다. */
-const DEV_PASSWORD = 'test1234';
+/**
+ * 개발용 계정 공용 비밀번호. **리터럴로 두지 않는다.**
+ *
+ * 예전에는 `test1234`가 이 파일에 박혀 있었다. 이 레포는 공개 저장소이고 seed는 **원격 개발
+ * 프로젝트**에 들어가므로(`scripts/run-sql.ts`), 그 값은 곧 `admin@scody.test`를 포함한 11개
+ * 계정의 비밀번호가 공개된 것과 같았다 — Supabase의 비밀번호 grant는 anon 키만으로 부를 수 있고
+ * anon 키와 프로젝트 URL은 클라이언트 번들에 정상적으로 실린다. `DEV_LOGIN_ENABLED`(D-135)는
+ * **화면의 버튼만** 없애고 서버의 계정은 그대로 둔다.
+ *
+ * 그래서 `.env`에서 읽는다(untracked). 값이 없으면 seed를 만들지 않는다 — 기본값을 두면
+ * 그 기본값이 다시 공개 비밀번호가 된다.
+ */
+const DEV_PASSWORD = process.env.EXPO_PUBLIC_DEV_LOGIN_PASSWORD ?? '';
+if (DEV_PASSWORD.length < 16) {
+  throw new Error(
+    '`.env`에 `EXPO_PUBLIC_DEV_LOGIN_PASSWORD`(16자 이상)를 넣어 주세요. ' +
+      'seed 계정의 비밀번호이고, 레포에 리터럴로 두지 않습니다.',
+  );
+}
 
 // ── 결정적 식별자 ────────────────────────────────────────────────────────────
 
@@ -343,7 +361,7 @@ w(`-- 개발·테스트 seed. **자동 생성 파일이다** — 고치지 말�
 w(`-- \`npx tsx scripts/gen-seed.ts\`로 다시 만든다.`);
 w(`--`);
 w(`-- 실제 사용자 데이터가 아니다. 화면에서 실제 재원생·실제 기록처럼 표현하지 않는다.`);
-w(`-- 로그인 비밀번호(\`${DEV_PASSWORD}\`)는 개발용이다. 운영 DB에 이 seed를 넣지 않는다.`);
+w('-- 로그인 비밀번호는 `.env`의 `EXPO_PUBLIC_DEV_LOGIN_PASSWORD`다. 운영 DB에 이 seed를 넣지 않는다.');
 w();
 w(`-- \`crypt\`·\`gen_salt\`(pgcrypto)는 Supabase에서 \`extensions\` 스키마에 있다. seed는 psql로`);
 w(`-- 직접 도는데 그 경로에는 \`extensions\`가 없어서 함수를 못 찾는다.`);

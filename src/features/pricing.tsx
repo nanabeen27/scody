@@ -70,6 +70,14 @@ interface PricingValue {
    * `표시하지 않았어요`로 읽히지 않게 한다.
    */
   loading: boolean;
+  /**
+   * 조회 실패 문장. 성공하면 `null`이다.
+   *
+   * 없을 때는 실패해도 화면이 `DEFAULT_PRICING`을 **서버 값처럼** 말했다 — 운영자가 좌석 단가를
+   * 올려도 조회가 실패한 원장 화면은 옛 기준값으로 `좌석 단가`·`한 달 예상 금액`을 계산했다
+   * (A-098이 닫은 것의 나머지 절반). `progress`·`content` provider와 같은 계약이다(M-DB-16).
+   */
+  error: string | null;
   /** 한 항목을 설정한다. 허용 범위를 벗어나면 잘라 낸다. 새 정책 행이 하나 쌓인다. */
   setValue: (key: keyof PricingPolicy, value: number) => Promise<WriteResult>;
   /** step만큼 올리거나 내린다. 새 정책 행이 하나 쌓인다. */
@@ -102,6 +110,7 @@ export function PricingProvider({ children }: { children: ReactNode }) {
   const [policy, setPolicy] = useState<PricingPolicy>(DEFAULT_PRICING);
   const [parentPays, setParentPays] = useState<string[]>(NO_OFFERS);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   /**
    * 지금 정책의 최신 값.
@@ -142,6 +151,7 @@ export function PricingProvider({ children }: { children: ReactNode }) {
       await Promise.resolve();
       if (!alive) return;
       setLoading(true);
+      setError(null);
       try {
         const [next, seat, offers] = await Promise.all([
           isAdmin ? repo.loadCurrentPricing() : repo.loadPublicPricing(),
@@ -160,6 +170,8 @@ export function PricingProvider({ children }: { children: ReactNode }) {
         applyPolicy({ ...DEFAULT_PRICING, ...next, ...seat });
         setParentPays(offers);
       } catch (e) {
+        // 화면이 기준값을 서버 값처럼 말하지 않게 실패를 값으로 내보낸다.
+        if (alive) setError(errorMessage(e));
         console.warn('요금 정책을 읽지 못했어요:', errorMessage(e));
       } finally {
         if (alive) setLoading(false);
@@ -236,6 +248,7 @@ export function PricingProvider({ children }: { children: ReactNode }) {
     () => ({
       policy,
       loading,
+      error,
       setValue,
       bump,
       reset,
@@ -244,7 +257,7 @@ export function PricingProvider({ children }: { children: ReactNode }) {
       offerToPay,
       cancelOffer,
     }),
-    [policy, loading, setValue, bump, reset, changed, parentPays, offerToPay, cancelOffer],
+    [policy, loading, error, setValue, bump, reset, changed, parentPays, offerToPay, cancelOffer],
   );
   return <PricingContext.Provider value={value}>{children}</PricingContext.Provider>;
 }

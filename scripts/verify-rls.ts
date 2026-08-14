@@ -43,9 +43,11 @@ for (const line of readFileSync('.env', 'utf8').split('\n')) {
 
 const URL_ = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
-const PASSWORD = 'test1234';
+/** seed 계정 비밀번호. `.env`에서 읽는다 — 레포에 리터럴로 두지 않는다(gen-seed와 같은 이유). */
+const PASSWORD = process.env.EXPO_PUBLIC_DEV_LOGIN_PASSWORD ?? '';
 
 if (!URL_ || !KEY) throw new Error('.env에 EXPO_PUBLIC_SUPABASE_URL·ANON_KEY가 필요해요.');
+if (!PASSWORD) throw new Error('.env에 EXPO_PUBLIC_DEV_LOGIN_PASSWORD가 필요해요.');
 
 let failed = 0;
 let passed = 0;
@@ -672,14 +674,25 @@ async function verify(anon: SupabaseClient) {
     check('선생님에게 좌석 단가 뷰가 0행', (await count(teacher, seat)) === 0);
     check('학생에게 좌석 단가 뷰가 0행', (await count(seojun, seat)) === 0);
     check('학부모에게 좌석 단가 뷰가 0행', (await count(minji, seat)) === 0);
-    check('익명에게 좌석 단가 뷰가 0행', (await count(anon, seat)) === 0);
-    // 개인 요금·연 결제 비율은 이 뷰에 없다 — 있으면 0024가 막은 것이 다시 열린 것이다.
-    const seatCols = Object.keys(dirSeat?.[0] ?? {});
+    /*
+      **익명은 권한 자체가 없다**(0035). 0034는 `authenticated`에게만 grant했는데 Supabase의
+      기본 권한 때문에 `anon`이 select를 그대로 갖고 있었고, 막는 벽이 뷰 본문의 `is_director()`
+      하나뿐이었다. 지금은 grant가 없어 질의가 권한 오류를 받는다 — `count()`는 오류에 `-1`을
+      돌려주므로 `0행`이 아니라 `읽지 못한다`로 단정한다(0행이면 벽이 한 겹만 남았다는 뜻이다).
+    */
+    check('익명은 좌석 단가 뷰를 읽지 못한다(권한 없음)', (await count(anon, seat)) === -1);
+    /*
+      개인 요금·연 결제 비율은 이 뷰에 없다 — 있으면 0024가 막은 것이 다시 열린 것이다.
+
+      **`select('*')`로 받아야 한다.** 위 질의처럼 컬럼을 나열해 받은 행의 키를 세면 방금 자기가
+      나열한 것을 다시 확인하는 셈이라 **실패할 수 없는 검사**가 된다(뷰가 `student_paid`를
+      내보내도 통과했다).
+    */
+    const { data: seatAll } = await director.from(seat).select('*');
+    const seatCols = Object.keys(seatAll?.[0] ?? {}).sort();
     check(
-      '좌석 뷰에 개인 요금·연 결제 컬럼이 없다',
-      !['student_paid', 'parent_paid', 'annual_discount_pct', 'annual_share_pct'].some((c) =>
-        seatCols.includes(c),
-      ),
+      '좌석 뷰가 내보내는 컬럼은 넷뿐이다',
+      seatCols.join(',') === 'academy_seat,effective_from,seat_discount_from,seat_discount_pct',
       seatCols.join(','),
     );
   }

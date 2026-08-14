@@ -53,7 +53,7 @@ export default function AcademyManage() {
   const { readOnly, academy } = useSession();
   const isDirector = account.academyRole === 'director';
   const { teachers, addTeacher, removeTeacher, classesFor } = useAcademyStaff();
-  const { policy } = usePricing();
+  const { policy, error: pricingError } = usePricing();
   const { show } = useToast();
   const classes = classesFor(account);
   const seatCount = new Set(classes.flatMap((c) => c.studentIds)).size;
@@ -409,6 +409,15 @@ export default function AcademyManage() {
             trailing={<AppText variant="label">{won(monthly)}</AppText>}
           />
         </Group>
+        {/*
+          **조회가 실패했으면 그 사실을 말한다.** 실패하면 정책이 코드 기준값에 남는데, 그것을
+          아무 말 없이 그리면 운영자가 올린 단가와 다른 금액을 **서버 값처럼** 말한다(D-148의 나머지).
+        */}
+        {pricingError ? (
+          <AppText variant="caption" tone="danger">
+            좌석 단가를 불러오지 못했어요. 아래 금액은 기준값이에요. {pricingError}
+          </AppText>
+        ) : null}
         <AppText variant="caption" tone="tertiary">
           추정값이고 실제 청구는 연결되지 않았어요. 이용 인원은 지금 반에 속한 학생 수예요.
         </AppText>
