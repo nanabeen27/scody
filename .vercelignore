@@ -1,0 +1,27 @@
+# Vercel로 업로드하지 않는 것.
+#
+# **`.vercelignore`가 없으면 `.env`까지 올라간다.** `vercel deploy`는 `.gitignore`가 아니라 이
+# 파일을 본다. `.env`에는 `SUPABASE_DB_PASSWORD`·`SUPABASE_ACCESS_TOKEN`이 들어 있어서,
+# 빌드 환경에 올리면 그 값이 빌드 로그·캐시에 남을 수 있다. 빌드에 필요한 두 값
+# (`EXPO_PUBLIC_SUPABASE_URL`·`EXPO_PUBLIC_SUPABASE_ANON_KEY`)은 Vercel 환경변수로만 준다.
+.env
+.env.*
+!.env.example
+
+# 로컬 산출물
+dist
+.expo
+test-results
+playwright-report
+.playwright-mcp
+
+# 웹 빌드에 들어가지 않는 것 — 업로드 크기와 유출 면적을 함께 줄인다.
+# `supabase/`는 마이그레이션과 seed다. seed에는 실행마다 바뀌는 난수 초대 토큰이 들어간다(D-137).
+supabase
+e2e
+__tests__
+scripts
+docs
+.claude
+# 루트에 떨어져 있는 확인용 캡처 하나. `assets/`·`public/`의 이미지는 빌드가 쓰므로 건드리지 않는다.
+seojun-home-mobile.png
