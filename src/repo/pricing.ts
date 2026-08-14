@@ -132,7 +132,11 @@ export async function loadAcademySeatPricing(): Promise<AcademySeatPricing | nul
  * 시계로 적으면 방금 넣은 행이 `current_pricing()`에서 빠질 수 있다.
  */
 export async function savePricingPolicy(next: PricingPolicy): Promise<WriteResult> {
-  const uid = (await supabase().auth.getUser()).data.user?.id;
+  // 세션은 로컬 저장소에서 읽는다 — `getUser()`는 **매번 서버로 왕복한다**(`GoTrueClient._getUser`가
+  // 캐시 없이 `GET /auth/v1/user`를 부른다). 여기서 uid는 **컬럼 값**으로만 쓰고, 그 값이 맞는지는
+  // RLS가 `= auth.uid()`로 다시 판단한다(0015) — 틀린 값을 보내면 서버가 거부한다. 그래서 신뢰
+  // 경계가 로컬 세션으로 내려오지 않는다.
+  const uid = (await supabase().auth.getSession()).data.session?.user.id;
   if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
   const { error } = await supabase()
     .from('pricing_policies')
@@ -175,7 +179,7 @@ export async function loadPaymentOffers(parentId: string): Promise<string[]> {
  * 자녀에 두 행이 생기지 않고, `canceled_at`을 비워 되살린다.
  */
 export async function offerPaymentFor(childId: string): Promise<WriteResult> {
-  const uid = (await supabase().auth.getUser()).data.user?.id;
+  const uid = (await supabase().auth.getSession()).data.session?.user.id;
   if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
   const { error } = await supabase()
     .from('parent_payment_offers')
@@ -188,7 +192,7 @@ export async function offerPaymentFor(childId: string): Promise<WriteResult> {
 
 /** 표시를 취소한다. 행은 남고 `canceled_at`이 채워진다 — 취소도 기록이다. */
 export async function cancelPaymentOffer(childId: string): Promise<WriteResult> {
-  const uid = (await supabase().auth.getUser()).data.user?.id;
+  const uid = (await supabase().auth.getSession()).data.session?.user.id;
   if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
   const { error } = await supabase()
     .from('parent_payment_offers')

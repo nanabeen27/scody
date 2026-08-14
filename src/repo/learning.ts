@@ -294,7 +294,11 @@ export async function saveDraft(input: {
   questionId: string;
   pickedIndex: number;
 }): Promise<WriteResult> {
-  const uid = (await supabase().auth.getUser()).data.user?.id;
+  // 세션은 로컬 저장소에서 읽는다 — `getUser()`는 **매번 서버로 왕복한다**(`GoTrueClient._getUser`가
+  // 캐시 없이 `GET /auth/v1/user`를 부른다). 여기서 uid는 **컬럼 값**으로만 쓰고, 그 값이 맞는지는
+  // RLS가 `= auth.uid()`로 다시 판단한다(0015) — 틀린 값을 보내면 서버가 거부한다. 그래서 신뢰
+  // 경계가 로컬 세션으로 내려오지 않는다. `saveDraft`는 답을 고를 때마다 불려서 이 왕복이 가장 비쌌다.
+  const uid = (await supabase().auth.getSession()).data.session?.user.id;
   if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
   const { error } = await supabase()
     .from('answer_drafts')
@@ -438,7 +442,7 @@ export async function addNote(input: {
   assignmentId?: string;
   pickedIndex?: number;
 }): Promise<WriteResult & { id?: string }> {
-  const uid = (await supabase().auth.getUser()).data.user?.id;
+  const uid = (await supabase().auth.getSession()).data.session?.user.id;
   if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
   const { data, error } = await supabase()
     .from('wrong_notes')
@@ -464,7 +468,7 @@ export async function addNote(input: {
  * 값으로 맞춘다.
  */
 export async function restoreNote(note: WrongNote): Promise<WriteResult> {
-  const uid = (await supabase().auth.getUser()).data.user?.id;
+  const uid = (await supabase().auth.getSession()).data.session?.user.id;
   if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
   const { error } = await supabase().from('wrong_notes').insert({
     id: note.id,
@@ -507,7 +511,7 @@ export async function loadQueue(): Promise<QueueEntry[]> {
 }
 
 export async function addToQueue(contentId: string, position: number): Promise<WriteResult> {
-  const uid = (await supabase().auth.getUser()).data.user?.id;
+  const uid = (await supabase().auth.getSession()).data.session?.user.id;
   if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
   const { error } = await supabase()
     .from('study_queue')
@@ -526,7 +530,7 @@ export async function removeFromQueue(contentIds: readonly string[]): Promise<Wr
 
 /** 순서를 다시 쓴다. 화면이 정한 배열 순서를 그대로 `position`에 넣는다. */
 export async function setQueueOrder(contentIds: readonly string[]): Promise<WriteResult> {
-  const uid = (await supabase().auth.getUser()).data.user?.id;
+  const uid = (await supabase().auth.getSession()).data.session?.user.id;
   if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
   const { error } = await supabase()
     .from('study_queue')
@@ -542,7 +546,7 @@ export async function setQueueOrder(contentIds: readonly string[]): Promise<Writ
 /**
  * 학원 과제 하나의 반 평균·순위.
  *
- * **집계만 받는다**(`rpc_class_comparison`). 학부모는 RLS상 다른 학생의 제출을 볼 수 없고,
+ * **집계만 받는다**(`rpc_class_comparisons`). 학부모는 RLS상 다른 학생의 제출을 볼 수 없고,
  * 그것이 맞다 — 개별 정답률을 열지 않고 평균과 순위만 내려받는다.
  */
 export interface ClassComparison {
@@ -550,18 +554,6 @@ export interface ClassComparison {
   rank: number | null;
   avg: number | null;
   mine: number | null;
-}
-
-export async function classComparison(
-  assignmentId: string,
-  studentId: string,
-): Promise<ClassComparison> {
-  const { data, error } = await supabase().rpc('rpc_class_comparison', {
-    p_assignment_id: assignmentId,
-    p_student_id: studentId,
-  });
-  if (error) throw new Error(errorMessage(error));
-  return data as unknown as ClassComparison;
 }
 
 /**

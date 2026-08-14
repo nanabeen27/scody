@@ -80,7 +80,12 @@ export function AuditProvider({ children }: { children: ReactNode }) {
         if (!alive) return;
         setLoading(true);
         try {
-          next = await repo.listAuditLogs();
+          /*
+            **운영자만 읽는다.** `audit_logs`의 select 정책이 `is_admin()`이라 다른 역할에는
+            언제나 빈 배열이 온다 — 학생·학부모·선생 로그인이 그 사실을 확인하려고 앱 루트에서
+            왕복 한 번을 쓸 이유가 없다(`progress.tsx`의 `isAcademy` 분기와 같은 판단).
+          */
+          next = account.roles.includes('admin') ? await repo.listAuditLogs() : [];
         } catch (e) {
           console.warn('운영 기록을 읽지 못했어요:', errorMessage(e));
           return;

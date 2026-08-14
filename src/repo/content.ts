@@ -78,7 +78,14 @@ export interface NewContent {
 export async function createContent(input: NewContent): Promise<ContentSet> {
   const db = supabase();
   // 등록한 사람을 남긴다(`content_sets.created_by`). 이 값이 비면 누가 올린 콘텐츠인지 알 수 없다.
-  const uid = (await db.auth.getUser()).data.user?.id;
+  /*
+    세션은 로컬 저장소에서 읽는다 — `getUser()`는 매번 서버로 왕복한다.
+
+    **여기만 다르다**: `content_sets_insert`는 `is_admin() or owner_academy_id = my_academy_id()`만
+    보고 `created_by`는 검사하지 않는다(0015). 즉 이 컬럼은 서버가 다시 판단해 주지 않는 값이다 —
+    등록자 표시·귀속·정산을 이 값으로 만들려면 그 전에 정책에 `created_by = auth.uid()`를 더해야 한다.
+  */
+  const uid = (await db.auth.getSession()).data.session?.user.id;
   if (!uid) throw new Error('다시 로그인해 주세요.');
   const { data: set, error } = await db
     .from('content_sets')

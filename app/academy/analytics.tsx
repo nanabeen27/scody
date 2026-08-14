@@ -15,6 +15,7 @@ import {
   RichText,
   type SegmentedOption,
   ActionBar,
+  TestDataNote,
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
 import { useAcademyStaff } from '@/features/academy';
@@ -846,17 +847,6 @@ export default function AcademyAnalytics() {
   );
 }
 
-/**
- * 테스트 데이터 고지. 반 친구·로스터 학생이 이름까지 있어 실제 재원생처럼 보인다(마스터 플랜 5절).
- * 첫 문장은 운영자 개요(`app/admin/index.tsx`)와 같게 두고, 뒤 문장만 이 화면 사실로 바꿨다.
- */
-function TestDataNote() {
-  return (
-    <AppText variant="caption" tone="tertiary">
-개발·테스트 계정 기준입니다. 실제 재원생 기록이 아니에요. 값은 실제 제출 기록에서 계산해요.
-    </AppText>
-  );
-}
 
 /**
  * 오답 하나를 펼쳐 보여 준다. **메모 본문까지 보여 주는 것은 배정 학습 오답에 한한다**(D-054).

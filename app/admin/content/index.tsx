@@ -34,7 +34,8 @@ const COMPARE: Record<string, (a: ContentRow, b: ContentRow) => number> = {
   title: (a, b) => a.set.title.localeCompare(b.set.title),
   questions: (a, b) => a.set.questions.length - b.set.questions.length,
   solves: (a, b) => a.solves - b.solves,
-  // 기록이 없는 세트(`null`)는 어느 방향으로 세워도 맨 뒤다 — 0%로 두면 가장 어려운 세트가 된다.
+  // 기록이 없는 세트(`null`)는 오름차순에서 맨 뒤다 — 0%로 두면 가장 어려운 세트가 된다.
+  // **내림차순(헤더 두 번 클릭)에서는 맨 앞으로 온다**(A-122).
   accuracy: (a, b) => (a.accuracy ?? 101) - (b.accuracy ?? 101),
 };
 

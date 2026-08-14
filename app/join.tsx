@@ -32,7 +32,7 @@ const INVITEE_LABEL: Record<string, string> = {
 export default function Join() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { account, loading: sessionLoading, reload } = useSession();
+  const { account, loading: sessionLoading, reload, readOnly } = useSession();
   const { invite: param } = useLocalSearchParams<{ invite?: string }>();
   const token = String(param ?? '').trim();
 
@@ -77,6 +77,17 @@ export default function Join() {
 
   async function accept() {
     if (busy) return;
+    /*
+      **대리 보기 중에는 수락하지 않는다**(D-071). 이 화면은 provider를 지나지 않고
+      `acceptInvite`를 직접 부르는 앱 안 유일한 쓰기라, provider들이 쥔 `readOnly` 검사 밖에
+      혼자 남아 있었다. 대리 중에는 `auth.uid()`가 운영자이므로(M-DB-6) 그대로 부르면
+      **운영자 계정에** 소속과 역할이 붙고 초대가 소진되며, `tg_invites_immutable`(0031)이
+      되돌리기를 막는다 — 실제 초대 대상은 `이미 사용한 초대예요`를 보게 된다.
+    */
+    if (readOnly) {
+      setError('대리 보기 중에는 초대를 수락할 수 없어요.');
+      return;
+    }
     setBusy(true);
     setError(null);
     const result = await acceptInvite(token);

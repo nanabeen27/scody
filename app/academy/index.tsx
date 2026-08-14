@@ -20,6 +20,7 @@ import {
   Table,
   useTableSort,
   type Column,
+  TestDataNote,
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
 import { useAcademyStaff } from '@/features/academy';
@@ -141,6 +142,8 @@ export default function AcademyDashboard() {
   const noWork = perf.length - rated.length;
   const areas = useMemo(() => areaBreakdown(rangeScoped, sets), [rangeScoped, sets]);
   const dist = useMemo(() => accuracyDistribution(rangeScoped), [rangeScoped]);
+  /** 가장 큰 칸. 막대 길이의 분모다. 모두 0이면 0이다. */
+  const distMax = Math.max(...dist.map((x) => x.students), 0);
   const grades = useMemo(() => gradeBreakdown(classes, rangeScoped), [classes, rangeScoped]);
   const hard = useMemo(() => hardestQuestions(rangeScoped, sets, PREVIEW), [rangeScoped, sets]);
   const classIndex = useMemo(() => byClass(rangeScoped), [rangeScoped]);
@@ -610,16 +613,13 @@ export default function AcademyDashboard() {
           학생 {dist.reduce((n, b) => n + b.students, 0).toLocaleString('en-US')}명을 정답률 10점
           구간으로 나눈 거예요. 낸 기록이 없는 학생은 세지 않아요.
         </AppText>
+        {/* 최댓값은 막대마다가 아니라 한 번 낸다 — 예전에는 행마다 `some`과 `Math.max`를 다시 돌았다. */}
         <View style={styles.bars} testID="academy-distribution">
           {dist.map((b) => (
             <BarRow
               key={b.label}
               label={b.label}
-              value={
-                dist.some((x) => x.students > 0)
-                  ? (b.students / Math.max(...dist.map((x) => x.students))) * 100
-                  : 0
-              }
+              value={distMax > 0 ? (b.students / distMax) * 100 : 0}
               note={`${b.students.toLocaleString('en-US')}명`}
               muted={b.students === 0}
             />
@@ -719,17 +719,6 @@ export default function AcademyDashboard() {
   );
 }
 
-/**
- * 화면 첫 줄 고지. 빈 상태와 평상시 화면이 **같은 문장**을 쓰도록 한 곳에 둔다.
- * 로스터가 반 120개·학생 3,000명을 만들어(마스터 플랜 5절) 고지가 없으면 실제 재원생으로 읽힌다.
- */
-function TestDataNote() {
-  return (
-    <AppText variant="caption" tone="tertiary">
-개발·테스트 계정 기준입니다. 실제 재원생 기록이 아니에요. 값은 실제 제출 기록에서 계산해요.
-    </AppText>
-  );
-}
 
 /**
  * 안 낸 과제 중 가장 이른 마감을 말하는 꼬리말.
@@ -877,7 +866,8 @@ function Delta({ row }: { row: MetricRow }) {
       </AppText>
     );
   }
-  const body = `${Math.abs(d)}${row.ratio ? '%p' : row.unit}`;
+  // 문자열은 `deltaText`가 만든다 — 스크린리더 문장과 셀이 같은 말을 하게(부호는 아래에서 색과 함께).
+  const body = deltaText(row).replace(/^[+−]/, '');
   if (d === 0) {
     return (
       <AppText tone="secondary" style={styles.num}>

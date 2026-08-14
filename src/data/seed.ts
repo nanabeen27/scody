@@ -12,14 +12,13 @@
  * 그래서 규칙은 하나다 — **`app/`·`src/features/`·`src/repo/`·`src/components/`에서
  * 이 파일을 import하지 않는다.**
  */
-import { ACCOUNTS, ACADEMY_CLASSES, DEMO_KAKAO_USER, LEARNING_BY_USER, PARENT_CHILDREN } from './fixtures';
+import { ACCOUNTS, ACADEMY_CLASSES, LEARNING_BY_USER, PARENT_CHILDREN } from './fixtures';
 import type { Account, AcademyClass, LearningItem, Role } from './types';
 
 export {
   ACCOUNTS,
   ACADEMY_CLASSES,
   ASSIGNMENTS_SEED,
-  DEMO_KAKAO_USER,
   DEMO_PASSWORD,
   DEMO_PHONE_CODE,
 } from './fixtures';
@@ -46,17 +45,7 @@ export function authenticate(scodyId: string, password: string): Account | undef
   return account;
 }
 
-/** 휴대폰 번호로 시드 계정을 찾는다. 번호가 없는 로스터 계정은 조회되지 않는다. */
-export function authenticateByPhone(phone: string): Account | undefined {
-  const key = phone.replace(/\D/g, '');
-  if (!key) return undefined;
-  return ACCOUNTS.find((a) => a.phone && a.phone.replace(/\D/g, '') === key);
-}
 
-/** '카카오로 계속하기' 데모: 카카오 연결 계정. */
-export function signInWithKakaoDemo(): Account | undefined {
-  return getAccount(DEMO_KAKAO_USER);
-}
 
 export function getLearningItems(userId: string): readonly LearningItem[] {
   return LEARNING_BY_USER[userId] ?? [];

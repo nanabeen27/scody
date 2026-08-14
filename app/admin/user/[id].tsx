@@ -16,7 +16,7 @@ import {
   type SegmentedOption,
   ActionBar,
 } from '@/components';
-import type { Account, Entitlement } from '@/data';
+import type { Entitlement } from '@/data';
 import { isActiveEntitlement } from '@/data/accountMeta';
 import {
   classNamesOf,

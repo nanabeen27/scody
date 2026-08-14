@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { Assignment, LearningItem, Question } from '@/data';
+import type { Assignment, LearningItem } from '@/data';
 import type { Account } from '@/data/types';
 import { errorMessage } from '@/lib/supabase';
 import * as repo from '@/repo/learning';
@@ -101,34 +101,6 @@ export function restoreQueueEntries(
   return next;
 }
 
-/** 문항 배열로 attempt 계산(정오·시간 포함). 결과 화면이 서버 응답을 기다리지 않고 그릴 때 쓴다. */
-export function buildAttempt(
-  meta: { itemId: string; title: string; area: string; source: 'personal' | 'academy' },
-  questions: Question[],
-  picked: Record<string, number>,
-  timeSec: number,
-  dateISO: string,
-): Attempt {
-  const perQuestion: PerQuestion[] = questions.map((q) => ({
-    qId: q.id,
-    prompt: q.prompt,
-    choices: q.choices,
-    answerIndex: q.answerIndex,
-    pickedIndex: picked[q.id],
-    correct: picked[q.id] === q.answerIndex,
-  }));
-  const correct = perQuestion.filter((p) => p.correct).length;
-  const total = questions.length;
-  return {
-    ...meta,
-    timeSec,
-    correct,
-    total,
-    accuracy: total ? Math.round((correct / total) * 100) : 0,
-    dateISO,
-    perQuestion,
-  };
-}
 
 interface ProgressValue {
   /** 첫 조회가 끝나기 전에는 참이다. */
@@ -385,10 +357,22 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         반 비교는 **기록을 읽을 수 있는 학생마다** 한 번씩 받는다(본인 + 연결된 자녀).
         제출한 학원 과제가 있는 학생만 대상이다 — 없으면 빈 객체가 온다.
       */
-      const studentIds = Object.keys(attemptRows);
-      const pairs = await Promise.all(
-        studentIds.map(async (sid) => [sid, await repo.classComparisons(sid)] as const),
-      );
+      /*
+        **반 비교는 학부모 화면만 읽는다.** 소비자가 둘이고(`app/parent/attempt.tsx` ·
+        `src/features/report.ts`의 `useChildReport`) 학생·선생·원장·운영자는 이 값을 쓰지 않는다.
+        그런데 `Object.keys(attemptRows)`는 RLS가 허용한 **모두**라, 운영자 로그인은 제출 기록이
+        있는 학생 수만큼(seed 기준 14명) RPC를 부르고 전부 버렸다. 게다가 이 단계는
+        `finally`의 `setLoadedFor` 앞이라 **로그인마다 왕복 한 단계를 더 기다리게** 했다.
+        위 `isAcademy` 분기와 같은 모양으로 역할에서 끊는다.
+      */
+      const isParent = target.roles.includes('parent');
+      const pairs = isParent
+        ? await Promise.all(
+            Object.keys(attemptRows).map(
+              async (sid) => [sid, await repo.classComparisons(sid)] as const,
+            ),
+          )
+        : [];
       if (!alive()) return await awaitSuccessor(id);
       setComparisons(Object.fromEntries(pairs));
       // 성공했으면 지난 실패를 지운다 — 다시 시도가 통했다는 사실도 화면에 닿아야 한다.
@@ -569,42 +553,68 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     [reload],
   );
 
-  const submitAttempt = useCallback<ProgressValue['submitAttempt']>(
-    (input) =>
+  /**
+   * 서버에 쓰고 **성공하면** 다시 읽는다. 대리 보기 중에는 아무것도 쓰지 않는다(D-071).
+   *
+   * 이 세 줄(`denied` 검사 → 쓰기 → `reload`)이 쓰기 함수마다 손으로 반복돼 있었다. **지금 9곳이
+   * 이 헬퍼를 지난다**(`mutate` 7 · `mutateLocal` 2). 나머지는 낙관적 갱신 앞에 자기 판단으로
+   * 끝내는 갈래가 있어(`dropFromQueue`·`addToQueue` 등) 손으로 남아 있다 — **이 헬퍼를 쓰면
+   * 검사를 빠뜨릴 수 없지만, 쓰지 않는 길이 아직 있다.** 새 쓰기는 되도록 여기를 지나게 한다.
+   * `DENIED` 문장을 인라인으로 다시 적던 네 곳은 함께 사라졌다.
+   */
+  const mutate = useCallback(
+    <T extends WriteResult>(run: () => Promise<T>): Promise<T | WriteResult> =>
       write(async () => {
-        if (denied) return { ok: false, error: '대리 보기 중에는 바꿀 수 없어요.' };
-        const result = await repo.submitAttempt(input);
+        if (denied) return DENIED;
+        const result = await run();
         if (result.ok) await reload();
         return result;
       }),
     [denied, reload, write],
+  );
+
+  /**
+   * 화면을 먼저 바꿔 두고 쓴다. **실패하면** 서버 값으로 되돌린다.
+   *
+   * 되돌리기가 실패 쪽에 있는 것이 `mutate`와 다른 점이다 — 성공했으면 이미 화면이 맞다.
+   */
+  const mutateLocal = useCallback(
+    <T extends WriteResult>(apply: () => void, run: () => Promise<T>): Promise<T | WriteResult> =>
+      write(async () => {
+        if (denied) return DENIED;
+        apply();
+        const result = await run();
+        if (!result.ok) await reload();
+        return result;
+      }),
+    [denied, reload, write],
+  );
+
+  const submitAttempt = useCallback<ProgressValue['submitAttempt']>(
+    (input) =>
+      mutate(() => repo.submitAttempt(input)),
+    [mutate],
   );
 
   const addWrongNote = useCallback<ProgressValue['addWrongNote']>(
     (input) =>
-      write(async () => {
-        if (denied) return DENIED;
-        const result = await repo.addNote(input);
-        if (result.ok) await reload();
-        return result;
-      }),
-    [denied, reload, write],
+      mutate(() => repo.addNote(input)),
+    [mutate],
   );
 
   const removeWrongNote = useCallback<ProgressValue['removeWrongNote']>(
     (id) =>
-      write(async () => {
-        if (denied) return DENIED;
+      mutateLocal(
+        () => {
         // 화면이 곧바로 반응해야 한다. 실패하면 다시 읽어 되돌리고 결과를 화면에 넘긴다.
         setNotesByUser((prev) => ({
           ...prev,
           [uid]: (prev[uid] ?? []).filter((w) => w.id !== id),
         }));
-        const result = await repo.removeNote(id);
-        if (!result.ok) await reload();
-        return result;
-      }),
-    [denied, reload, uid, write],
+        },
+        () => repo.removeNote(id),
+      ),
+    [mutateLocal, uid],
   );
 
   const restoreWrongNote = useCallback<ProgressValue['restoreWrongNote']>(
@@ -630,17 +640,16 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       id: string,
       fields: { dig?: string; starred?: boolean; mastered?: boolean },
     ): Promise<WriteResult> =>
-      write(async () => {
-        if (denied) return DENIED;
+      mutateLocal(
+        () => {
         setNotesByUser((prev) => ({
           ...prev,
           [uid]: (prev[uid] ?? []).map((w) => (w.id === id ? { ...w, ...fields } : w)),
         }));
-        const result = await repo.setNoteFields(id, fields);
-        if (!result.ok) await reload();
-        return result;
-      }),
-    [denied, reload, uid, write],
+        },
+        () => repo.setNoteFields(id, fields),
+      ),
+    [mutateLocal, uid],
   );
 
   const setDig = useCallback((id: string, text: string) => patchNote(id, { dig: text }), [patchNote]);
@@ -676,6 +685,11 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
   const dropFromQueue = useCallback(
     (itemIds: readonly string[]): Promise<WriteResult> =>
+      /*
+        `mutateLocal`을 쓰지 않는다 — 낙관적 갱신 앞에 **자기 판단으로 끝내는 두 갈래**가 있다
+        (담을 것이 없음 / 담긴 칸을 못 찾음). 그 판단은 쓰기 전에 결과를 정하므로 `apply`에
+        넣을 수 없다.
+      */
       write(async () => {
         if (denied) return DENIED;
         if (itemIds.length === 0) return { ok: true };
@@ -732,35 +746,20 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
   const addAssignment = useCallback<ProgressValue['addAssignment']>(
     (input) =>
-      write(async () => {
-        if (denied) return { ok: false, error: '대리 보기 중에는 바꿀 수 없어요.' };
-        const result = await repo.addAssignment(input);
-        if (result.ok) await reload();
-        return result;
-      }),
-    [denied, reload, write],
+      mutate(() => repo.addAssignment(input)),
+    [mutate],
   );
 
   const removeAssignment = useCallback<ProgressValue['removeAssignment']>(
     (assignmentId) =>
-      write(async () => {
-        if (denied) return { ok: false, error: '대리 보기 중에는 바꿀 수 없어요.' };
-        const result = await repo.removeAssignment(assignmentId);
-        if (result.ok) await reload();
-        return result;
-      }),
-    [denied, reload, write],
+      mutate(() => repo.removeAssignment(assignmentId)),
+    [mutate],
   );
 
   const reassign = useCallback<ProgressValue['reassign']>(
     (assignmentId, dueDate) =>
-      write(async () => {
-        if (denied) return { ok: false, error: '대리 보기 중에는 바꿀 수 없어요.' };
-        const result = await repo.reassign(assignmentId, dueDate);
-        if (result.ok) await reload();
-        return result;
-      }),
-    [denied, reload, write],
+      mutate(() => repo.reassign(assignmentId, dueDate)),
+    [mutate],
   );
 
   const requestRetryFor = useCallback<ProgressValue['requestRetryFor']>(
@@ -788,24 +787,14 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
   const setWeekSummary = useCallback<ProgressValue['setWeekSummary']>(
     (childId, monday, text, byAI) =>
-      write(async () => {
-        if (denied) return DENIED;
-        const result = await parentRepo.setWeekSummary({ childId, monday, text, byAI });
-        if (result.ok) await reload();
-        return result;
-      }),
-    [denied, reload, write],
+      mutate(() => parentRepo.setWeekSummary({ childId, monday, text, byAI })),
+    [mutate],
   );
 
   const sendPraise = useCallback<ProgressValue['sendPraise']>(
     (childId, kind) =>
-      write(async () => {
-        if (denied) return DENIED;
-        const result = await parentRepo.sendPraise(childId, kind);
-        if (result.ok) await reload();
-        return result;
-      }),
-    [denied, reload, write],
+      mutate(() => parentRepo.sendPraise(childId, kind)),
+    [mutate],
   );
 
   const dismissPraise = useCallback<ProgressValue['dismissPraise']>(

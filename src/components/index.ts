@@ -39,5 +39,6 @@ export { Screen } from './Screen';
 export { Section } from './Section';
 export { SegmentedControl, type SegmentedOption } from './SegmentedControl';
 export { SourceTag, type LearningSource } from './SourceTag';
+export { TestDataNote } from './TestDataNote';
 export { ThemeToggle } from './ThemeToggle';
 export { Toast, type ToastAction, type ToastKind } from './Toast';

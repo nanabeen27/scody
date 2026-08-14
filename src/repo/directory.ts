@@ -151,9 +151,25 @@ export async function loadDirectory(
   }
 
   const academyById = new Map((academies.data ?? []).map((a) => [a.id, a] as const));
-  /** 사람 → 소속 학원. 학생도 교직원도 같은 표에서 온다. */
+  /**
+   * 사람 → 소속 학원. 학생도 교직원도 같은 표에서 온다.
+   *
+   * **서버와 같은 순서로 접는다.** 한 사람이 여러 학원에 속하면 `Map`은 마지막 행만 남기는데,
+   * PostgREST는 `order`가 없으면 순서를 보장하지 않아 **어느 학원이 이길지 호출마다 달라질 수
+   * 있었다.** 서버는 그 모호함을 `my_academy_id()`에서 이미 없앴다 —
+   * `order by (member_role = 'director') desc, joined_at, academy_id`(0024). 같은 규칙을 쓴다.
+   * (지금 seed에는 다중 소속 계정이 없어 결과는 그대로다.)
+   */
+  const RANK: Record<string, number> = { director: 0, teacher: 1, student: 2 };
   const memberByUser = new Map(
-    (members.data ?? []).map((m) => [m.user_id, m] as const),
+    [...(members.data ?? [])]
+      .sort(
+        (a, b) =>
+          (RANK[a.member_role] ?? 9) - (RANK[b.member_role] ?? 9) ||
+          a.academy_id.localeCompare(b.academy_id),
+      )
+      .reverse()
+      .map((m) => [m.user_id, m] as const),
   );
 
   const people = new Map<string, Account>();

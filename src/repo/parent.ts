@@ -58,7 +58,11 @@ export async function requestRetry(input: {
   contentId: string;
   assignmentId?: string;
 }): Promise<WriteResult> {
-  const uid = (await supabase().auth.getUser()).data.user?.id;
+  // 세션은 로컬 저장소에서 읽는다 — `getUser()`는 **매번 서버로 왕복한다**(`GoTrueClient._getUser`가
+  // 캐시 없이 `GET /auth/v1/user`를 부른다). 여기서 uid는 **컬럼 값**으로만 쓰고, 그 값이 맞는지는
+  // RLS가 `= auth.uid()`로 다시 판단한다(0015) — 틀린 값을 보내면 서버가 거부한다. 그래서 신뢰
+  // 경계가 로컬 세션으로 내려오지 않는다.
+  const uid = (await supabase().auth.getSession()).data.session?.user.id;
   if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
   const { error } = await supabase()
     .from('retry_requests')
@@ -109,7 +113,7 @@ export async function loadPraises(): Promise<Record<string, Praise[]>> {
 }
 
 export async function sendPraise(childId: string, kind: PraiseKind): Promise<WriteResult> {
-  const uid = (await supabase().auth.getUser()).data.user?.id;
+  const uid = (await supabase().auth.getSession()).data.session?.user.id;
   if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
   const { error } = await supabase()
     .from('praises')
@@ -157,7 +161,7 @@ export async function setWeekSummary(input: {
 }): Promise<WriteResult> {
   // `week_summaries_insert`가 `created_by = auth.uid()`를 요구한다 — 로그인이 없으면
   // 정책 거절 문구가 아니라 다시 로그인하라는 말로 돌려준다.
-  const uid = (await supabase().auth.getUser()).data.user?.id;
+  const uid = (await supabase().auth.getSession()).data.session?.user.id;
   if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
   const { error } = await supabase()
     .from('week_summaries')

@@ -37,7 +37,7 @@ const COMPARE: Record<string, (a: AcademyRow, b: AcademyRow) => number> = {
   contract: (a, b) => a.contractSeats - b.contractSeats,
   enrolled: (a, b) => a.enrolled - b.enrolled,
   use: (a, b) => a.usePct - b.usePct,
-  // 기록이 없는 값은 어느 방향으로 세워도 맨 뒤다.
+  // 기록이 없는 값은 오름차순에서 맨 뒤다. **내림차순에서는 맨 앞으로 온다**(A-122).
   active: (a, b) => (a.active28 ?? -1) - (b.active28 ?? -1),
   renewal: (a, b) => (a.renewalInDays ?? 1e9) - (b.renewalInDays ?? 1e9),
   monthly: (a, b) => a.monthly - b.monthly,

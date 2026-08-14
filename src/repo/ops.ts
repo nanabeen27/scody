@@ -139,7 +139,11 @@ export async function writeAuditLog(entry: {
   detail: string;
   subjectId?: string;
 }): Promise<WriteResult> {
-  const uid = (await supabase().auth.getUser()).data.user?.id;
+  // 세션은 로컬 저장소에서 읽는다 — `getUser()`는 **매번 서버로 왕복한다**(`GoTrueClient._getUser`가
+  // 캐시 없이 `GET /auth/v1/user`를 부른다). 여기서 uid는 **컬럼 값**으로만 쓰고, 그 값이 맞는지는
+  // RLS가 `= auth.uid()`로 다시 판단한다(0015) — 틀린 값을 보내면 서버가 거부한다. 그래서 신뢰
+  // 경계가 로컬 세션으로 내려오지 않는다.
+  const uid = (await supabase().auth.getSession()).data.session?.user.id;
   if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
   const { error } = await supabase().from('audit_logs').insert({
     actor_id: uid,

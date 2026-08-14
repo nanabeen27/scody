@@ -3,6 +3,7 @@ import { useContent } from './content';
 import { useProgress } from './progress';
 import { useCurrentAccount, useSession } from '@/session';
 import { personalItems, findContent, type LearningItem, type ContentSet } from '@/data';
+import { isActiveEntitlement } from '@/data/accountMeta';
 
 export interface StudentItems {
   personal: LearningItem[];
@@ -182,7 +183,16 @@ function buildStudentItems({
     return started ? { ...item, status: 'in_progress' } : item;
   };
 
-  const hasPersonal = account.entitlements.some((e) => e.kind === 'personal');
+  /*
+    **해지된 이용권은 세지 않는다.** `Account.entitlements`에는 해지 행도 그대로 담긴다
+    (`toEntitlement`가 `canceled_at`을 `status: 'canceled'`로 옮긴다). 그래서 여기서 종류만 보면
+    운영자 화면은 `해지`라고 하고 학생 화면은 개인 카탈로그를 계속 여는 상태가 된다 —
+    서버 집계(0014)도 `canceled_at is null`만 센다. 판정을 `isActiveEntitlement` 한곳으로 모은다.
+    (지금 seed에는 해지 행이 없어 화면 동작은 그대로다.)
+  */
+  const hasPersonal = account.entitlements.some(
+    (e) => e.kind === 'personal' && isActiveEntitlement(e),
+  );
   const personal = (hasPersonal ? personalItems(sets) : []).map(merge);
 
   /*

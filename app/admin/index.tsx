@@ -90,6 +90,13 @@ export default function AdminHome() {
     반복된다. 한 번만 만들어 둔다.
   */
   const signups = useMemo(() => activityQuery.data?.signups ?? [], [activityQuery.data]);
+  /** 주간 가입 수. 표의 `값`과 `추이`가 같은 배열을 본다 — 두 번 계산하면 갈릴 자리다. */
+  /** 활동일 분포 막대의 분모. 0으로 나누지 않게 최소 1이다. */
+  const l7Max = Math.max(...(activity.l7 ?? []).map((x) => x.count), 1);
+  const signupWeekly = useMemo(
+    () => M.signupWeekly(signups, activity.weekLabels),
+    [signups, activity.weekLabels],
+  );
   const events = useMemo(() => activityQuery.data?.events ?? [], [activityQuery.data]);
 
   const growth = useMemo(() => M.growth(events, activity), [events, activity]);
@@ -323,9 +330,9 @@ export default function AdminHome() {
                 (누적은 `학생 계정` 행이 규모에서 이미 말한다).
               */
               key: 'signup',
+              // 값과 추이가 **같은 배열**을 본다. 예전에는 같은 인자로 두 번 계산했다.
               value: (() => {
-                const weekly = M.signupWeekly(signups, activity.weekLabels);
-                const last = weekly[weekly.length - 1];
+                const last = signupWeekly[signupWeekly.length - 1];
                 return last == null ? '' : `${last.toLocaleString('en-US')}명`;
               })(),
               unavailable:
@@ -333,7 +340,7 @@ export default function AdminHome() {
                 (activity.weekLabels.length === 0
                   ? '완성된 주가 아직 없어요. 한 주가 끝나면 값이 나와요'
                   : undefined),
-              values: M.signupWeekly(signups, activity.weekLabels),
+              values: signupWeekly,
               unit: '명',
             },
             {
@@ -496,12 +503,13 @@ export default function AdminHome() {
         </AppText>
         {activity.l7 ? (
           <>
+            {/* 최댓값은 막대마다가 아니라 위에서 한 번 낸다(`l7Max`). `l7!` 단정도 함께 사라진다. */}
             <View style={{ gap: spacing.sm }}>
               {activity.l7.map((b) => (
                 <BarRow
                   key={b.days}
                   label={`${b.days}일`}
-                  value={(b.count / Math.max(...activity.l7!.map((x) => x.count), 1)) * 100}
+                  value={(b.count / l7Max) * 100}
                   note={`${b.count.toLocaleString('en-US')}명`}
                   labelWidth={32}
                   noteWidth={72}

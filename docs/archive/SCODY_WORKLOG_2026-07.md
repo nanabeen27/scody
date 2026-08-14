@@ -5465,3 +5465,78 @@ D-149의 학부모 테스트는 화면이 `메모 본문은 가려요`라고 **�
 | `accountMeta`로 `isDirector` 모으기(9곳) | 대부분 이번 diff 밖이다. A-120 |
 | `AcademyMemoNotice` 컴포넌트화 | 문장은 세 곳이 정확히 같고, 실제로 어긋난 것은 톤(`tertiary` vs `secondary`)이다 — UI 판단이라 남겼다 |
 | React Compiler 켜기 | 런타임 동작을 넓게 바꾸는 결정이다. 주석만 사실로 고쳤다 |
+
+---
+
+## 2026-08-15 — /simplify 레포 전체 + 정확성 검사 (D-164)
+
+앞선 `/simplify`는 diff만 봤다. 이번에는 **레포 전체**(app 56 · src 110 · e2e 19 · scripts 5,
+약 5.3만 줄)를 네 관점으로 돌리고, 이어서 정확성 검사를 두 관점으로 돌렸다.
+`기능·UI/UX를 바꾸지 않는다`가 이번 작업의 제약이라 **동작이 바뀌지 않는 것만** 적용했다.
+
+### 고친 것 — 반복
+
+- **`progress.tsx`의 쓰기 3줄 × 15**(D-164): `if (denied) return DENIED` → 쓰기 → `reload()`가
+  쓰기 함수마다 손으로 있었고 `DENIED` 문장을 인라인으로 다시 적은 곳이 넷이었다.
+  `mutate(run)`·`mutateLocal(apply, run)` 두 헬퍼로 **9곳**을 접었다(`mutate` 7 · `mutateLocal` 2).
+  나머지는 낙관적 갱신 앞에 자기 판단으로 끝내는 갈래가 있어(`dropFromQueue`·`addToQueue`)
+  일부러 두었다 — 문서도 그 범위대로 적었다.
+- **죽은 코드**: `buildAttempt`(27줄) · `classComparison`(단수) · `authenticateByPhone` ·
+  `signInWithKakaoDemo` · `DEMO_KAKAO_USER`. 전부 소스·테스트·E2E·스크립트에서 호출부 0을 확인.
+- **`TestDataNote`**를 `src/components/`로. 두 학원 화면에 글자 단위로 같은 함수가 있었다.
+- **중복 계산**: `admin/index.tsx`가 같은 인자로 `signupWeekly`를 두 번 계산하던 것,
+  `academy/index.tsx`가 `known(r.values)`를 한 셀에서 네 번 부르던 것, `Delta`가 `deltaText`와
+  같은 문자열을 다시 조립하던 것.
+
+### 고친 것 — 낭비
+
+- **반 비교 RPC**: `Object.keys(attemptRows)` 전부에 부르던 것을 학부모일 때만. 소비자가
+  `app/parent/*`와 `report.ts` 둘뿐인데, 운영자 로그인이 제출 기록 있는 학생 수만큼(seed 14명)
+  RPC를 부르고 전부 버렸다. 게다가 그 단계가 `setLoadedFor` 앞이라 **로그인마다 왕복 한 단계를
+  더 기다리게** 했다.
+- **감사 로그**: `audit_logs`의 select가 `is_admin()`이라 다른 역할에는 언제나 빈 배열이 온다.
+  그 사실을 확인하려고 앱 루트에서 왕복 한 번을 쓰던 것을 역할로 끊었다.
+- **`getUser()` → `getSession()` 13곳**: `getUser()`는 캐시 없이 매번 `GET /auth/v1/user`를
+  부른다(설치된 `@supabase/auth-js`의 `_getUser` 확인). `saveDraft`는 **답을 고를 때마다** 불려서
+  한 문항에 왕복 2회가 1회가 된다. uid는 컬럼 값으로만 쓰고 RLS가 `= auth.uid()`로 다시
+  판단하므로 신뢰 경계가 내려오지 않는다.
+- **렌더 루프의 O(n²)**: 막대 그래프 두 곳이 행마다 `Math.max(...)`를 다시 돌던 것.
+
+### 정확성 검사에서 나온 것
+
+두 검토가 **제 리팩터링에는 회귀가 없다**고 확인했다(9곳 접기 극성 전수 대조 · 의존성 검증 ·
+`getSession` 동등성을 auth-js 소스로 확인 · `Delta` 문자열이 모든 경우 동일 · U+2212 부호 확인).
+
+대신 **기존 버그 4건**을 찾았다.
+
+| 등급 | 무엇 | 조치 |
+|---|---|---|
+| P1 | **`/join`이 대리 보기 중에도 초대를 수락한다.** provider를 지나지 않고 `acceptInvite`를 직접 부르는 앱 안 유일한 쓰기였다. 대리 중 `auth.uid()`는 운영자라(M-DB-6) **운영자 계정에** 소속·역할이 붙고 초대가 소진되며, `tg_invites_immutable`(0031)이 되돌리기를 막는다 | `readOnly` 가드를 넣었다 |
+| P2 | **`nullLast` 불변식이 거짓이다.** 여섯 화면이 `어느 방향으로 세워도 맨 뒤`라고 적어 두고 값 없음을 상수로 고정하는데, `useTableSort`가 오름차순 뒤 `reverse()`라 내림차순에서 맨 앞으로 온다. `/admin/content`에서 지금 seed로 재현된다 | **고치면 정렬 순서가 눈에 보이게 바뀐다** — A-122로 남기고 거짓 주석 3곳만 사실대로 고쳤다 |
+| P2 잠재 | `hasPersonal`이 해지된 이용권을 세어, 운영자 화면은 `해지`인데 학생 화면은 카탈로그를 계속 연다 | `isActiveEntitlement`로 통일(지금 seed에 해지 행이 없어 동작 변화 없음) |
+| P2 잠재 | `academy_members`를 정렬 없이 읽어 다중 소속 계정의 학원을 비결정적으로 고른다. 서버는 0024에서 그 모호함을 없앴다 | 서버와 같은 순서로 접게 했다(지금 seed에 다중 소속이 없어 동작 변화 없음) |
+
+### 부정확한 주석을 사실로 고쳤다
+
+- `src/repo/content.ts`: `created_by`는 **RLS가 검사하지 않는다**(`content_sets_insert`는
+  `is_admin() or owner_academy_id = my_academy_id()`만 본다). 다른 12곳과 달라서 그 사실을 적었다.
+- `mutate` 문서가 "검사를 빠뜨릴 수 없다"고 약속했지만 16곳 중 9곳만 지난다 — 범위대로 고쳤다.
+- `app/admin/index.tsx`의 JSDoc이 엉뚱한 변수에 붙어 있던 것, `ClassComparison`이 사라진 함수의
+  RPC를 근거로 들던 것.
+
+### 적용하지 않은 것
+
+`LoadFailed`·`useStudentLoad`(A-116과 함께) · `EmptyState` 통합(같은 상황이 두 가지 타입 램프로
+보이는 것은 사실이나 **UI가 움직인다**) · `MetricTable` 통합(좋아진 값의 색이 두 화면에서 다른데
+그 차이가 의도다) · 학생 홈 히어로 재구성 · `ReassignDuePanel`(A-120) · E2E 재시드 재설계 ·
+세션 `error` 계약(A-116 계열) · 이용권 서버 조건(결제와 함께).
+
+### 검증
+
+| 검사 | 결과 |
+|---|---|
+| `npm run typecheck` | 통과 |
+| `npm run lint` | 0 오류 / 5 경고(기준선) |
+| `npm test` | 187/187 |
+| `npm run db:verify` | 166 통과 / 0 실패 |
+| `expo export` | 성공 |

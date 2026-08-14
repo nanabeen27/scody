@@ -17,8 +17,6 @@ export const DEMO_PASSWORD = '(개발 fixture)';
  */
 export const DEMO_PHONE_CODE = '000000';
 
-/** '카카오로 계속하기' 데모가 로그인시킬 계정. */
-export const DEMO_KAKAO_USER = 'u_student_both';
 
 /**
  * 결정적 테스트 계정. 새로고침·재실행에도 동일 상태를 재현한다.

@@ -41,7 +41,8 @@ interface ClassRow {
 
 /**
  * 열 정렬. **한 곳에 두고 컬럼과 정렬 훅이 같은 값을 가리킨다.** 오름차순으로 정의하고
- * 내림차순은 표가 뒤집는다. 배정이 없는 반(`rate == null`)은 어느 방향으로 세워도 맨 뒤다.
+ * 내림차순은 표가 뒤집는다. **그래서 배정이 없는 반(`rate == null`)은 내림차순에서 맨 앞으로 온다**
+ * (A-122) — 이 화면의 기본 정렬에서는 맨 뒤가 맞다.
  */
 const COMPARE: Record<string, (a: ClassRow, b: ClassRow) => number> = {
   students: (a, b) => a.students - b.students,
