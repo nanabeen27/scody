@@ -11,6 +11,7 @@ import {
 import type { AcademyClass, Account, Role } from '@/data/types';
 import { errorMessage, hasSupabaseConfig, supabase } from '@/lib/supabase';
 import { DEV_LOGIN_ENABLED, DEV_LOGIN_PASSWORD, devLoginEmail } from '@/session/devAccounts';
+import { staffEmail } from '@/session/staffEmail';
 import {
   loadDirectory,
   loadSelfRoles,
@@ -74,6 +75,14 @@ interface SessionValue {
    * 로그인 화면의 **테스트 계정 패널**만 이 함수를 쓴다 — 화면에 보이는 수단 구성은 그대로다.
    */
   signInWithTestAccount: (scodyId: string) => Promise<SignInResult>;
+  /**
+   * **스코디 아이디 + 비밀번호로 로그인한다**(D-165). `/staff`가 쓴다.
+   *
+   * `signInWithTestAccount`와 다른 점은 비밀번호를 **사람이 입력한다**는 것이다. 그래서
+   * `DEV_LOGIN_ENABLED` 스위치와 무관하게 운영 빌드에서도 동작한다 — 벽은 화면 숨김이 아니라
+   * Supabase 인증이고, 비밀번호는 공개 저장소에 없는 난수다(D-157).
+   */
+  signInWithScodyId: (scodyId: string, password: string) => Promise<SignInResult>;
   signOut: () => Promise<void>;
   /** 스냅샷을 다시 읽는다. 반·학생·소속을 바꾼 뒤 부른다. */
   reload: () => Promise<void>;
@@ -226,6 +235,54 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       sub.subscription.unsubscribe();
     };
   }, [hydrate]);
+
+  /**
+   * 스코디 아이디 + 비밀번호로 세션을 연다. 두 로그인 경로가 이 본문을 함께 쓴다.
+   *
+   * 이메일 주소를 만드는 곳은 `devLoginEmail` 하나다 — 여기 템플릿 리터럴을 두면 개발 로그인을
+   * 끈 빌드에서도 그 문자열이 번들에 남는다(D-145에서 실측했다).
+   */
+  const openSession = useCallback(
+    async (email: string, password: string): Promise<SignInResult> => {
+      if (!hasSupabaseConfig()) {
+        return { ok: false, error: 'Supabase 설정이 없어요.' };
+      }
+      if (!email) return { ok: false, error: '아이디를 확인해 주세요.' };
+      setLoading(true);
+      const { data, error } = await supabase().auth.signInWithPassword({ email, password });
+      if (error || !data.user) {
+        setLoading(false);
+        return { ok: false, error: errorMessage(error) || '로그인하지 못했어요.' };
+      }
+      setImpersonation(null);
+      setAcademyLinked(true);
+      try {
+        const [dir, drafts] = await Promise.all([
+          fetchDirectory(data.user.id, false),
+          loadDrafts(),
+        ]);
+        setAuthUid(data.user.id);
+        setDirectory(dir);
+        setAnswers(drafts);
+        return { ok: true, account: dir.me };
+      } catch (e) {
+        return { ok: false, error: errorMessage(e) };
+      } finally {
+        setLoading(false);
+      }
+    },
+    [fetchDirectory],
+  );
+
+  const signInWithScodyId = useCallback<SessionValue['signInWithScodyId']>(
+    (scodyId, password) => {
+      const id = scodyId.trim().toLowerCase();
+      if (!id) return Promise.resolve({ ok: false, error: '아이디를 적어 주세요.' });
+      if (!password) return Promise.resolve({ ok: false, error: '비밀번호를 적어 주세요.' });
+      return openSession(staffEmail(id), password);
+    },
+    [openSession],
+  );
 
   const signInWithTestAccount = useCallback<SessionValue['signInWithTestAccount']>(
     async (scodyId) => {
@@ -531,6 +588,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       loading,
       account,
       signInWithTestAccount,
+      signInWithScodyId,
       signOut,
       reload,
       accountOf,
@@ -556,6 +614,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       loading,
       account,
       signInWithTestAccount,
+      signInWithScodyId,
       signOut,
       reload,
       accountOf,

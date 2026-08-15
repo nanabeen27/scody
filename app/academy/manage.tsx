@@ -240,7 +240,7 @@ export default function AcademyManage() {
                     usable && Platform.OS === 'web' ? (
                       <Button
                         testID={`invite-copy-${i.token}`}
-                        variant="ghost"
+                        variant="secondary"
                         size="sm"
                         leading={<Icon name="copy" size={15} color={colors.ink} />}
                         label="링크 복사"
@@ -291,7 +291,7 @@ export default function AcademyManage() {
                       isSelf || removing ? undefined : (
                         <Button
                           testID={`teacher-remove-${t.scodyId}`}
-                          variant="ghost"
+                          variant="secondary"
                           leading={
                             <Icon name="minus-circle" size={16} color={colors.inkSecondary} />
                           }
@@ -356,7 +356,7 @@ export default function AcademyManage() {
               subtitle={inviteUrl(newInvite)}
               trailing={
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   hug
                   label="복사"

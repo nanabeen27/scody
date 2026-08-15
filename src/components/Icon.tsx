@@ -39,7 +39,11 @@ export type IconName =
   | 'bookmark'
   | 'copy'
   | 'link'
-  | 'trash-2';
+  | 'trash-2'
+  // 테마 전환(시스템·라이트·다크)
+  | 'monitor'
+  | 'sun'
+  | 'moon';
 
 export function Icon({
   name,

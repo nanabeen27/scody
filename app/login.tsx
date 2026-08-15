@@ -1,7 +1,17 @@
 import { useState } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { AppText, Button, Divider, Field, Group, Icon, Row } from '@/components';
+import {
+  AppText,
+  Button,
+  Divider,
+  Field,
+  Group,
+  Icon,
+  KakaoSymbol,
+  PhoneMark,
+  Row,
+} from '@/components';
 import {
   AuthError,
   AuthHeading,
@@ -203,7 +213,7 @@ export default function Login() {
               fullWidth
               label="휴대폰 번호로 로그인"
               accessibilityLabel="휴대폰 번호로 로그인"
-              leading={<Icon name="smartphone" size={18} color={colors.accentText} />}
+              leading={<PhoneMark size={18} color={colors.accentText} />}
               onPress={() => {
                 setStep('phone');
                 setError(null);
@@ -220,7 +230,8 @@ export default function Login() {
               fullWidth
               label="카카오로 로그인"
               accessibilityLabel="카카오로 로그인"
-              leading={<Icon name="message-circle" size={18} color={colors.kakaoText} />}
+              /* 카카오 공식 심볼. 범용 말풍선 아이콘이 아니다(D-165). */
+              leading={<KakaoSymbol size={18} />}
               onPress={onKakao}
             />
             {/*

@@ -640,7 +640,7 @@ function WeekSummary({
           */}
           <Button
             testID="week-summary-again"
-            variant="ghost"
+            variant="secondary"
             size="sm"
             tone="accent"
             hug
@@ -731,7 +731,7 @@ function Praise({ child }: { child: Account }) {
       ) : (
         <Button
           testID="praise-open"
-          variant="ghost"
+          variant="secondary"
           size="sm"
           tone="accent"
           hug

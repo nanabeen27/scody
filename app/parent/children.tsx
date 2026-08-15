@@ -157,7 +157,7 @@ function ChildBilling({
           </AppText>
           <Button
             testID={`billing-cancel-${child.userId}`}
-            variant="ghost"
+            variant="secondary"
             size="sm"
             hug
             label="표시 취소"

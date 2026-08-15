@@ -94,3 +94,18 @@ export function inviteToken(role: 'student' | 'parent' | 'teacher'): string {
   if (!token) throw new Error(`seed.sql에 ${role} 초대가 없어요. ${RESEED_HINT}`);
   return token;
 }
+
+/**
+ * 개발용 계정 비밀번호. **`.env`에서 읽는다** — 레포에 리터럴로 두지 않는다(D-157).
+ *
+ * `inviteToken()`이 seed에서 값을 읽는 것과 같은 자리다. Playwright 프로세스는 `.env`를 자동으로
+ * 읽지 않으므로(설정에 dotenv가 없다) 여기서 한 줄만 꺼낸다.
+ */
+export function devPassword(): string {
+  const line = readFileSync('.env', 'utf8')
+    .split('\n')
+    .find((l) => l.startsWith('EXPO_PUBLIC_DEV_LOGIN_PASSWORD='));
+  const value = line?.slice(line.indexOf('=') + 1).trim().replace(/^(['"])(.*)\1$/, '$2');
+  if (!value) throw new Error('`.env`에 `EXPO_PUBLIC_DEV_LOGIN_PASSWORD`가 필요해요.');
+  return value;
+}

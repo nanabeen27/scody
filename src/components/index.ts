@@ -42,3 +42,5 @@ export { SourceTag, type LearningSource } from './SourceTag';
 export { TestDataNote } from './TestDataNote';
 export { ThemeToggle } from './ThemeToggle';
 export { Toast, type ToastAction, type ToastKind } from './Toast';
+export { KakaoSymbol } from './KakaoSymbol';
+export { PhoneMark } from './PhoneMark';

@@ -1,6 +1,6 @@
 import { test, expect } from './_fixtures';
 import { login, loginHere, PHONE_BY_ID, PHONE_PENDING, SIGNUP_PENDING, DEMO_CODE } from './_auth';
-import { inviteToken } from './_seed';
+import { inviteToken , devPassword } from './_seed';
 
 /*
   초대 토큰은 seed 실행마다 난수다(A-103). 값을 테스트에 적으면 seed가 그 리터럴을 계속 심어야
@@ -10,6 +10,30 @@ const STUDENT_INVITE = inviteToken('student');
 const PARENT_INVITE = inviteToken('parent');
 
 const INTRO = 'Scody는 학생의 학습을 가장 효율적으로 만드는 학습 플랫폼입니다.';
+
+test.describe('내부 로그인 /staff', () => {
+  test('아이디와 비밀번호로 들어가고, 틀리면 어느 쪽인지 말하지 않는다', async ({ page }) => {
+    /*
+      공개 사이트에서 카카오·휴대폰이 아직 없어(M-DB-2) 아무도 로그인할 수 없다. 그렇다고 계정
+      목록을 띄우면 seed 계정이 원클릭이 된다(D-157이 닫은 구멍). 그래서 링크하지 않는 주소에서
+      **자격 증명을 받는다**(D-165). 벽은 주소가 아니라 Supabase 인증이다.
+    */
+    await page.goto('/staff');
+    await expect(page.getByTestId('staff-submit')).toBeVisible();
+
+    // 틀린 비밀번호는 거부된다 — 아이디가 있는지 없는지는 말하지 않는다.
+    await page.getByTestId('staff-id').fill('admin');
+    await page.getByTestId('staff-password').fill('wrong-password-1234');
+    await page.getByTestId('staff-submit').click();
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page).toHaveURL(/\/staff/);
+
+    // 맞으면 역할 홈으로 간다.
+    await page.getByTestId('staff-password').fill(devPassword());
+    await page.getByTestId('staff-submit').click();
+    await expect(page).toHaveURL(/\/admin/);
+  });
+});
 
 test.describe('M1 소개·로그인·역할 분기', () => {
   test('로그인하지 않으면 소개 페이지로 보낸다', async ({ page }) => {

@@ -505,7 +505,7 @@ export default function ClassDetail() {
                         <View style={endRow.action}>
                           <Button
                             testID={`class-student-out-${st.userId}`}
-                            variant="ghost"
+                            variant="secondary"
                             hug
                             leading={
                               <Icon name="minus-circle" size={16} color={colors.inkSecondary} />

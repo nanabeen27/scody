@@ -78,6 +78,8 @@ export function WebLanding() {
             {isMobile ? null : <VisitorToggle value={visitor} onChange={setVisitor} />}
           </View>
           <View style={styles.navRight}>
+            {/* 테마는 화면 전체에 걸리는 설정이라 상단 전역 영역에 아이콘 하나로 둔다(D-165). */}
+            <ThemeToggle />
             {account ? (
               <Button
                 testID="landing-mine"
@@ -89,10 +91,14 @@ export function WebLanding() {
                 {/*
                   히어로 CTA가 이 화면의 primary다. 상단 바까지 채운 버튼을 두면 같은 화면에
                   주인공이 둘이 된다 — 무게로 갈라 둔다(§8).
+
+                  **`ghost`는 쓰지 않는다.** 배경도 테두리도 없으면 버튼으로 보이지 않는다 —
+                  §8이 "`ghost`는 링크와 펼침에만, 진짜 명령은 `secondary`"라고 이미 정해 둔
+                  자리인데 여기만 어기고 있었다(D-165). 로그인은 이 화면의 두 번째 행동이다.
                 */}
                 <Button
                   testID="landing-login"
-                  variant="ghost"
+                  variant="secondary"
                   label="로그인"
                   onPress={() => router.push('/login' as never)}
                 />
@@ -146,19 +152,17 @@ export function WebLanding() {
                 </View>
               ))}
             </View>
+            {/*
+              **히어로에는 주 행동 하나만 둔다**(§8 · D-165). `이미 계정이 있어요`를 뺐다 —
+              로그인은 상단 바에 늘 있고, 여기서 두 버튼이 나란히 서면 처음 온 사람이 무엇을
+              눌러야 하는지 한 번 더 판단해야 했다.
+            */}
             {account ? null : (
               <View style={styles.heroActions}>
                 <Button
                   testID="hero-signup"
                   label={view.cta}
                   onPress={() => router.push(view.ctaHref as never)}
-                  style={styles.heroBtn}
-                />
-                <Button
-                  testID="hero-login"
-                  variant="secondary"
-                  label="이미 계정이 있어요"
-                  onPress={() => router.push('/login' as never)}
                   style={styles.heroBtn}
                 />
               </View>
@@ -234,9 +238,6 @@ export function WebLanding() {
           <AppText variant="caption" tone="tertiary">
             이용약관과 개인정보처리방침은 검토 전 초안이에요. 사업자 등록 정보는 아직 없어요.
           </AppText>
-          <View style={styles.footerTools}>
-            <ThemeToggle />
-          </View>
           {/*
             개발용 로그인이 꺼진 빌드에는 이 목록을 두지 않는다(D-135). 공개 소개
             페이지라서, 켜져 있으면 아무나 계정 목록을 보고 들어올 수 있다.

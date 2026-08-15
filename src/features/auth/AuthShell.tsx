@@ -50,7 +50,17 @@ export function AuthShell({
       ]}
     >
       <View style={[styles.column, !isMobile && styles.columnCenter]}>
-        <Brand center testID={exitTestID} accessibilityLabel={exitLabel} onPress={onExit} />
+        {/*
+          테마는 화면 전체에 걸리는 설정이라 본문이 아니라 상단 줄 오른쪽 끝에 둔다(D-165).
+          예전에는 약관 문구 **아래**, 화면 맨 끝에 있었다 — 로그인하러 온 사람이 화면을 끝까지
+          내렸을 때 마지막으로 만나는 것이 테마 전환이었다.
+        */}
+        <View style={styles.headRow}>
+          <Brand center testID={exitTestID} accessibilityLabel={exitLabel} onPress={onExit} />
+          <View style={styles.headTool}>
+            <ThemeToggle />
+          </View>
+        </View>
         <View style={[styles.panel, isMobile && styles.panelFlat]}>{children}</View>
         {below}
         <AuthFooter />
@@ -187,13 +197,15 @@ function AuthFooter() {
       <AppText variant="caption" tone="tertiary">
         이용약관과 개인정보처리방침은 검토 전 초안이에요.
       </AppText>
-      <ThemeToggle />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: colors.bg },
+  /* 워드마크는 가운데를 지키고 도구만 오른쪽 끝에 얹는다 — 절대 배치라 가운데 정렬이 흔들리지 않는다. */
+  headRow: { width: '100%', justifyContent: 'center' },
+  headTool: { position: 'absolute', right: 0, top: 0, bottom: 0, justifyContent: 'center' },
   page: { flexGrow: 1, paddingHorizontal: spacing.xl, alignItems: 'center' },
   column: { width: '100%', maxWidth: 420, gap: spacing.xl },
   // 넓은 화면에서는 컬럼을 위아래 가운데에 둔다. 모바일은 키보드 때문에 위에서 시작한다.
