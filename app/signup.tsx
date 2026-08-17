@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { View, StyleSheet, Pressable, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { AppText, Button, Field, Group, Icon } from '@/components';
+import { AppText, Button, Field, Group, Icon, KakaoSymbol, PhoneMark } from '@/components';
 import {
   AuthError,
   AuthHeading,
@@ -212,10 +212,11 @@ export default function Signup() {
               fullWidth
               label="휴대폰 번호로 가입하기"
               accessibilityLabel="휴대폰 번호로 가입하기"
-              leading={<Icon name="smartphone" size={18} color={colors.accentText} />}
+              /* 로그인 화면과 같은 마크를 쓴다 — 같은 수단이 화면마다 다른 그림이면 다른 것으로 읽힌다. */
+              leading={<PhoneMark size={18} color={colors.accentText} />}
               onPress={() => startWith('phone')}
             />
-            <AppText variant="caption" tone="tertiary">
+            <AppText variant="caption" tone="secondary">
               번호는 로그인·알림에만 쓰고, 학습 기록은 계정에 남아요.
             </AppText>
             <LabeledDivider label="또는" />
@@ -226,11 +227,16 @@ export default function Signup() {
               fullWidth
               label="카카오로 가입하기"
               accessibilityLabel="카카오로 가입하기"
-              leading={<Icon name="message-circle" size={18} color={colors.kakaoText} />}
+              /*
+                카카오 공식 심볼이다(D-165). 범용 말풍선 아이콘(`message-circle`)을 쓰고 있었는데,
+                로그인 화면은 공식 심볼이라 **같은 카카오가 두 화면에서 다른 그림**이었다.
+                브랜드 마크는 닮은 것으로 대체하지 않는다.
+              */
+              leading={<KakaoSymbol size={18} />}
               onPress={() => startWith('kakao')}
             />
             {/* 무엇이 실제로 일어나는지 휴대폰 안내와 같은 무게로 밝힌다. */}
-            <AppText variant="caption" tone="tertiary">
+            <AppText variant="caption" tone="secondary">
               프로토타입에서는 카카오 계정을 실제로 연결하지 않고 다음 단계로 넘어가요.
             </AppText>
           </View>
@@ -256,6 +262,7 @@ export default function Signup() {
               label="휴대폰 번호"
               testID="signup-phone-number"
               keyboardType="phone-pad"
+              autoComplete="tel"
               value={phone}
               onChangeText={setPhone}
               placeholder="010-0000-0000"
@@ -341,7 +348,7 @@ export default function Signup() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <AppText variant="label">{ROLE_LABEL[opt.role]}</AppText>
-                      <AppText variant="caption" tone="tertiary">
+                      <AppText variant="caption" tone="secondary">
                         {opt.desc}
                       </AppText>
                     </View>
@@ -352,9 +359,14 @@ export default function Signup() {
           </AuthSection>
 
           <AuthSection title="계정 정보" hint="이름은 학원·학부모에게 보이는 이름이에요.">
+            {/*
+              `autoComplete`를 준다 — 비밀번호 관리자와 브라우저 자동 채우기가 이것으로
+              무슨 칸인지 안다. 없으면 학생이 휴대폰에서 아이디·비밀번호를 손으로 다 적는다.
+            */}
             <Field
               label="이름"
               testID="signup-name"
+              autoComplete="name"
               value={name}
               onChangeText={setName}
               placeholder="이름"
@@ -363,6 +375,7 @@ export default function Signup() {
               label="스코디 아이디"
               testID="signup-id"
               autoCapitalize="none"
+              autoComplete="username"
               value={id}
               onChangeText={setId}
               placeholder="영문 아이디"
@@ -371,6 +384,7 @@ export default function Signup() {
               label="비밀번호"
               testID="signup-pw"
               secureTextEntry
+              autoComplete="new-password"
               value={pw}
               onChangeText={setPw}
               placeholder="비밀번호"
@@ -397,7 +411,7 @@ export default function Signup() {
               onPress={onSubmit}
             />
             <View style={styles.consent}>
-              <AppText variant="caption" tone="tertiary">
+              <AppText variant="caption" tone="secondary">
                 시작하면 이용약관과 개인정보처리방침에 동의하게 돼요. 두 문서는 아직 검토 전
                 초안이에요.
               </AppText>

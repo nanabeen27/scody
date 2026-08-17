@@ -215,7 +215,7 @@ test.describe('M3 학부모 흐름', () => {
     await expect(page.getByTestId('metric-personal-rate')).toBeVisible();
 
     // 정예린은 둘 다 있다
-    await page.getByRole('button', { name: '정예린' }).click();
+    await page.getByRole('radio', { name: '정예린' }).click();
     await openRecordedMonth(page);
     await expect(page.getByText(/월 학원 과제$/)).toBeVisible();
     await expect(page.getByText(/월 개인 학습$/)).toBeVisible();
@@ -376,9 +376,9 @@ test.describe('M3 학부모 흐름', () => {
       (`HAEUN_OFFSETS = [-2, -4, -30]`) 오늘이 무슨 요일인지에 따라 이번 주에 들어온다.
       여기서 확인할 성질은 **요약이 자녀별로 따로 남는다**는 것이고, 그건 날짜와 무관하다.
     */
-    await page.getByRole('button', { name: '이하은' }).click();
+    await page.getByRole('radio', { name: '이하은' }).click();
     await expect(page.getByTestId('week-summary-again')).toHaveCount(0);
-    await page.getByRole('button', { name: '정예린' }).click();
+    await page.getByRole('radio', { name: '정예린' }).click();
     await expect(page.getByTestId('week-summary-again')).toBeVisible();
   });
 
@@ -449,7 +449,7 @@ test.describe('M3 학부모 흐름', () => {
     await loginParent(page);
     await page.getByRole('link', { name: '리포트' }).click();
     await expect(page).toHaveURL(/\/parent\/report/);
-    await page.getByRole('button', { name: '정예린' }).click();
+    await page.getByRole('radio', { name: '정예린' }).click();
     await expect(page.getByText('정예린 님 리포트')).toBeVisible();
     await openRecordedMonth(page);
     await expect(page.getByText(/\d+월 학습$/)).toBeVisible();

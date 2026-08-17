@@ -3,7 +3,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle
 import { useRouter } from 'expo-router';
 import Svg, { Circle, Line, Path, Polyline } from 'react-native-svg';
 import { AppText, Brand, Button, Group, Icon, ProgressBar, Row, ThemeToggle, SegmentedControl } from '@/components';
-import { colors, control, spacing, radius, typeface } from '@/theme/tokens';
+import { colors, control, spacing, radius, touch, typeface } from '@/theme/tokens';
 import { useResponsive } from '@/theme/useResponsive';
 import { useSession } from '@/session';
 import { homeHrefFor, ROLE_LABEL } from '@/session/routing';
@@ -126,8 +126,14 @@ export function WebLanding() {
           <AppText variant="body" tone="secondary">
             고등 국어, 수능과 내신을 같이 준비해요
           </AppText>
+          {/*
+            페이지의 제목 하나(h1)다. 이 아래 띠의 제목이 모두 2단계다 — 예전에는 이 화면에
+            제목으로 인식되는 글이 **하나도 없어서**(실측 0개) 스크린리더 사용자가 목차로 훑거나
+            제목 사이를 건너뛸 수 없었다. 크기만 큰 글은 제목이 아니다.
+          */}
           <AppText
             variant="display"
+            headingLevel={1}
             style={[styles.introTitle, isMobile && styles.introTitleMobile]}
           >
             {INTRO}
@@ -136,7 +142,11 @@ export function WebLanding() {
 
         <View style={[styles.hero, heroTwoCol && styles.heroRow]}>
           <View style={[styles.heroText, heroTwoCol && styles.heroTextCol]}>
-            <AppText variant="title" style={[styles.heroTitle, isMobile && styles.heroTitleMobile]}>
+            <AppText
+              variant="title"
+              headingLevel={2}
+              style={[styles.heroTitle, isMobile && styles.heroTitleMobile]}
+            >
               {view.title}
             </AppText>
             <AppText variant="bodyLg" tone="secondary" style={styles.heroSub}>
@@ -161,6 +171,20 @@ export function WebLanding() {
               <View style={styles.heroActions}>
                 <Button
                   testID="hero-signup"
+                  /*
+                    높이·모서리는 `size="lg"`가 정한다. 예전에는 `style`로 52·`radius.lg`를 손으로
+                    적어 두어 라벨 무게만 `lg`와 달랐다(medium vs semibold) — 같은 값을 두 곳에 두면
+                    한쪽만 바뀐다(D-084).
+                  */
+                  size="lg"
+                  /*
+                    **모바일에서만 전폭이다.** 가입 화면으로 보내기만 하는 버튼이라 전폭이 아니고
+                    (§8 — "다른 화면으로 보내기만 하는 버튼은 절대 전폭이 아니다"), 실제로 데스크톱에서
+                    452px · 태블릿에서 **772px** 청록 덩어리가 되어 버튼보다 배너로 읽혔다.
+                    기준을 `heroTwoCol`(2단 레이아웃)로 잡으면 안 된다 — 820은 1단이지만 컬럼이
+                    772px라 그대로 배너가 된다. 화면이 곧 한 컬럼인 모바일만 전폭이다.
+                  */
+                  hug={!isMobile}
                   label={view.cta}
                   onPress={() => router.push(view.ctaHref as never)}
                   style={styles.heroBtn}
@@ -186,27 +210,39 @@ export function WebLanding() {
       {/* 마지막 CTA */}
       <Band tone="accent" pt={band.md} pb={band.md}>
         <Reveal style={styles.finalWrap}>
-          <AppText variant="title" style={styles.finalTitle}>
+          <AppText variant="title" headingLevel={2} style={styles.finalTitle}>
             오늘의 국어, 지금 시작해요
           </AppText>
           <AppText variant="bodyLg" style={styles.finalSub}>
             가입은 잠깐이면 돼요. 카카오나 휴대폰 번호로 시작할 수 있어요.
           </AppText>
+          {/*
+            **라벨은 히어로와 같은 말이다.** `회원가입`이라는 시스템 용어를 쓰고 있었는데, 그러면
+            바로 옆 `학원으로 가입하기`와 폭·색·무게가 같은 버튼 둘이 나란히 서고 둘 다 '가입'을
+            말해서 무엇이 다른지 읽어야 알 수 있었다. 지금은 위에서 고른 방문자 유형을 그대로
+            말한다(`학생으로 시작하기`·`학부모로 시작하기`·`학원으로 가입하기`).
+
+            선생님으로 보고 있으면 학원 버튼을 두지 않는다 — 주 행동이 이미 같은 곳으로 간다.
+          */}
           <View style={styles.finalActions}>
             <Button
               testID="final-signup"
               variant="secondary"
-              label="회원가입"
-              onPress={() => router.push('/signup' as never)}
+              size="lg"
+              label={view.cta}
+              onPress={() => router.push(view.ctaHref as never)}
               style={styles.finalBtn}
             />
-            <Button
-              testID="final-signup-academy"
-              variant="secondary"
-              label="학원으로 가입하기"
-              onPress={() => router.push('/signup?role=academy' as never)}
-              style={styles.finalBtn}
-            />
+            {visitor === 'teacher' ? null : (
+              <Button
+                testID="final-signup-academy"
+                variant="secondary"
+                size="lg"
+                label="학원으로 가입하기"
+                onPress={() => router.push('/signup?role=academy' as never)}
+                style={styles.finalBtn}
+              />
+            )}
           </View>
         </Reveal>
       </Band>
@@ -216,7 +252,7 @@ export function WebLanding() {
         <View style={styles.footerInner}>
           <View style={styles.footerTop}>
             <Brand small />
-            <AppText variant="caption" tone="tertiary">
+            <AppText variant="caption" tone="secondary">
               스코디 · 고등 국어 학습 플랫폼
             </AppText>
           </View>
@@ -235,7 +271,7 @@ export function WebLanding() {
               </Pressable>
             ))}
           </View>
-          <AppText variant="caption" tone="tertiary">
+          <AppText variant="caption" tone="secondary">
             이용약관과 개인정보처리방침은 검토 전 초안이에요. 사업자 등록 정보는 아직 없어요.
           </AppText>
           {/*
@@ -386,7 +422,7 @@ function StudentSections({ isDesktop }: { isDesktop: boolean }) {
             <AppText variant="body" tone="secondary">
               정답률만 보고 끝나면 무엇을 더 할지 모르겠어요
             </AppText>
-            <AppText variant="title" style={styles.centerTitle}>
+            <AppText variant="title" headingLevel={2} style={styles.centerTitle}>
               약점은 <Hi>비슷한 문제로</Hi> 고쳐요
             </AppText>
             <AppText variant="bodyLg" tone="secondary" style={styles.centerSub}>
@@ -584,7 +620,7 @@ function EvidenceBand() {
           <AppText variant="body" tone="secondary">
             공부법은 취향으로 고르지 않아요
           </AppText>
-          <AppText variant="title" style={styles.evidenceTitle}>
+          <AppText variant="title" headingLevel={2} style={styles.evidenceTitle}>
             성적을 올린다고{'\n'}
             <Hi>입증된 방법만</Hi> 담아요
           </AppText>
@@ -601,22 +637,31 @@ function EvidenceBand() {
           {EVIDENCE.map((e, i) => (
             <Reveal key={e.claim} delay={i * 80}>
               <View style={styles.evidenceItem}>
-                <AppText variant="subheading">{e.claim}</AppText>
+                {/* 이 띠 제목 아래의 항목이라 3단계다 — 단계를 건너뛰지 않는다. */}
+                <AppText variant="subheading" headingLevel={3}>
+                  {e.claim}
+                </AppText>
                 <AppText variant="body" tone="secondary">
                   {e.detail}
                 </AppText>
                 <View style={styles.evidenceMeta}>
-                  <AppText variant="caption" tone="accent" style={styles.aiName}>
+                  {/*
+                    **강조는 색이 아니라 무게로 한다.** 강조색 13px 글자가 `offset` 면 위에서
+                    3.85:1이라 AA(4.5)에 미달했다(실측). 이 숫자는 인용한 효과 크기라 읽히는 것이
+                    먼저이고, `accent`는 §3에서 주요 행동·선택·활성·링크의 색이다 — 수치는 그 어느
+                    것도 아니다.
+                  */}
+                  <AppText variant="caption" style={styles.aiName}>
                     {e.figure}
                   </AppText>
-                  <AppText variant="caption" tone="tertiary">
+                  <AppText variant="caption" tone="secondary">
                     {e.source}
                   </AppText>
                 </View>
               </View>
             </Reveal>
           ))}
-          <AppText variant="caption" tone="tertiary">
+          <AppText variant="caption" tone="secondary">
             숫자는 교육 연구에서 쓰는 효과 크기예요. 0.4 이상이면 의미 있는 차이로 봐요. 스코디를 쓴
             학생의 성적 변화는 아직 측정하지 않았어요.
           </AppText>
@@ -649,14 +694,14 @@ function FeatureRow({
       <View style={[styles.feature, row && (reverse ? styles.featureRowRev : styles.featureRow)]}>
         <Reveal style={row ? styles.featureHalf : undefined}>
           <View style={styles.featureIndexRow}>
-            <AppText variant="eyebrow" tone="accent" style={styles.featureIndex}>
+            <AppText variant="eyebrow" tone="secondary" style={styles.featureIndex}>
               {index}
             </AppText>
             <AppText variant="caption" tone="secondary">
               {lead}
             </AppText>
           </View>
-          <AppText variant="title" style={styles.featureTitle}>
+          <AppText variant="title" headingLevel={2} style={styles.featureTitle}>
             {title}
           </AppText>
           <AppText variant="bodyLg" tone="secondary" style={styles.featureBody}>
@@ -715,7 +760,7 @@ function MockHead({ title }: { title: string }) {
   return (
     <View style={styles.mockRow}>
       <AppText variant="label">{title}</AppText>
-      <AppText variant="caption" tone="tertiary">
+      <AppText variant="caption" tone="secondary">
         예시 화면
       </AppText>
     </View>
@@ -729,7 +774,7 @@ function PhoneMock() {
     <View style={styles.phone}>
       <View style={styles.phoneHeader}>
         <Brand small />
-        <AppText variant="caption" tone="tertiary">
+        <AppText variant="caption" tone="secondary">
           예시 화면
         </AppText>
       </View>
@@ -789,7 +834,7 @@ function PickMock() {
         <Row title="문법 · 음운의 변동" subtitle="문법형 · 해설 포함" meta="8문항" />
         <Row title="독서 · 과학 지문" subtitle="지문형 · 해설 포함" meta="10문항" />
       </Group>
-      <AppText variant="caption" tone="tertiary">
+      <AppText variant="caption" tone="secondary">
         시험 범위에 맞춰 영역과 유형을 골라 담아요.
       </AppText>
     </View>
@@ -878,7 +923,7 @@ function AssignMock() {
         <Row title="고2 A반" subtitle="문학 · 현대소설 12문항" meta="오늘 마감" />
         <Row title="고3 B반" subtitle="문법 · 음운의 변동 8문항" meta="내일 마감" />
       </Group>
-      <AppText variant="caption" tone="tertiary">
+      <AppText variant="caption" tone="secondary">
         반 단위로 배정하고, 학생별로 더 줄 수 있어요.
       </AppText>
     </View>
@@ -922,7 +967,7 @@ function SourceSplitMock() {
         <Row title="음운의 변동" subtitle="학원 학습 · 학원이 배정" meta="검사 대기" />
         <Row title="현대소설 독해" subtitle="개인 학습 · 학생이 고름" meta="완료" />
       </Group>
-      <AppText variant="caption" tone="tertiary">
+      <AppText variant="caption" tone="secondary">
         학원은 배정한 학습의 결과만 봐요. 개인 학습은 학생 것이에요.
       </AppText>
     </View>
@@ -1026,7 +1071,7 @@ function ReportMock() {
       <View style={styles.mockRow}>
         <View>
           <AppText variant="label">최근 6주 정답률</AppText>
-          <AppText variant="caption" tone="tertiary">
+          <AppText variant="caption" tone="secondary">
             비문학 영역 · 예시 화면
           </AppText>
         </View>
@@ -1096,7 +1141,7 @@ function CompareSection() {
           <AppText variant="body" tone="secondary">
             문제집만으로 국어를 준비하기는 어려워요
           </AppText>
-          <AppText variant="title" style={styles.centerTitle}>
+          <AppText variant="title" headingLevel={2} style={styles.centerTitle}>
             혼자 하던 국어, <Hi>이렇게 달라져요</Hi>
           </AppText>
         </View>
@@ -1145,14 +1190,28 @@ function DemoAccounts({ onEnter }: { onEnter: (scodyId: string) => void }) {
   const accounts = DEV_ACCOUNTS;
   return (
     <View style={styles.demoBox}>
-      <Pressable onPress={() => setShow((v) => !v)} accessibilityRole="button">
-        <AppText variant="caption" tone="tertiary">
-          {show ? '테스트 계정 숨기기' : '테스트 계정 보기'}
-        </AppText>
-      </Pressable>
+      {/*
+        로그인 화면의 같은 컨트롤과 같은 모양으로 둔다(`app/login.tsx`의 `login-demo-toggle`).
+        맨 `Pressable` + 캡션이라 누름 영역이 **20px**이었고 펼침 표시도 없었다.
+      */}
+      <Button
+        testID="landing-demo-toggle"
+        variant="ghost"
+        size="sm"
+        hug
+        leading={
+          <Icon
+            name={show ? 'chevron-down' : 'chevron-right'}
+            size={15}
+            color={colors.inkSecondary}
+          />
+        }
+        label={show ? '테스트 계정 숨기기' : '테스트 계정 보기'}
+        onPress={() => setShow((v) => !v)}
+      />
       {show ? (
         <>
-          <AppText variant="caption" tone="tertiary">
+          <AppText variant="caption" tone="secondary">
             개발용 계정이에요. 실제 사용자 데이터가 아니에요.
           </AppText>
           <Group>
@@ -1219,7 +1278,8 @@ const styles = StyleSheet.create({
   heroTitleMobile: { fontSize: 28, lineHeight: 40 },
   heroSub: { maxWidth: 460, marginTop: spacing.xs },
   heroActions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.lg },
-  heroBtn: { height: 52, borderRadius: radius.lg, paddingHorizontal: spacing.xl },
+  // 높이·모서리는 `size="lg"`가 정한다. 좌우 여백만 소개 페이지 쪽이 더 넉넉하다.
+  heroBtn: { paddingHorizontal: spacing.xl },
 
   heroVisual: { alignItems: 'center' },
   heroVisualCol: { flex: 1 },
@@ -1304,7 +1364,11 @@ const styles = StyleSheet.create({
   featureHalf: { flex: 1 },
   featureVisualMobile: { alignItems: 'center' },
   featureIndexRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  featureIndex: { opacity: 0.6 },
+  /*
+    불투명도를 걷어냈다. `accent` + `opacity: 0.6`이라 12px 글자가 배경과 **2.25:1**이었다(실측).
+    순서를 말하는 표시라 장식이 아니고, 그래서 읽혀야 한다.
+  */
+  featureIndex: {},
   featureTitle: {
     ...keepAll,
     marginTop: spacing.md,
@@ -1422,7 +1486,11 @@ const styles = StyleSheet.create({
     lineHeight: 44,
     letterSpacing: -0.2,
   },
-  finalSub: { color: colors.accentText, opacity: 0.9, textAlign: 'center', maxWidth: 480 },
+  /*
+    불투명도 0.9를 걷어냈다. 흰 글자가 강조색 면 위에서 4.63:1인데 0.9를 곱하면 4.08:1로
+    AA(4.5) 아래로 내려간다 — 16px 본문이라 큰 글자 예외도 못 받는다(실측).
+  */
+  finalSub: { color: colors.accentText, textAlign: 'center', maxWidth: 480 },
   finalActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1430,7 +1498,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
     justifyContent: 'center',
   },
-  finalBtn: { height: 52, borderRadius: radius.lg, paddingHorizontal: spacing.xl },
+  finalBtn: { paddingHorizontal: spacing.xl },
 
   footer: {
     width: '100%',
@@ -1448,7 +1516,11 @@ const styles = StyleSheet.create({
   },
   footerTop: { gap: spacing.xs },
   footerLinks: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.lg },
-  footerLink: { paddingVertical: 2 },
-  footerTools: { alignSelf: 'flex-start' },
+  /*
+    푸터 링크는 휴대폰에서 손가락으로 누른다. `paddingVertical: 2`라 실제 높이가 **24px**이었다
+    (§10 하한 44 미달, 실측). `AuthShell`의 푸터가 이미 답을 갖고 있었다 — 누름 영역만 44로 키우고
+    커진 만큼 음수 마진으로 되돌려 줄 간격은 그대로 둔다.
+  */
+  footerLink: { minHeight: touch.min, justifyContent: 'center', marginVertical: -spacing.md },
   demoBox: { gap: spacing.md, alignItems: 'flex-start' },
 });

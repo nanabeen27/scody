@@ -56,6 +56,10 @@ export default function StaffLogin() {
       <AuthHeading title="내부 로그인" sub="아이디와 비밀번호로 들어가요." />
       <View style={styles.form}>
         {error ? <AuthError>{error}</AuthError> : null}
+        {/*
+          `autoComplete`를 준다 — 지금 실제로 로그인이 되는 자리는 여기뿐이라(M-DB-2),
+          비밀번호 관리자가 채워 주지 못하면 32자 난수를 매번 손으로 옮겨 적어야 한다.
+        */}
         <Field
           testID="staff-id"
           label="스코디 아이디"
@@ -64,6 +68,7 @@ export default function StaffLogin() {
           placeholder="예: admin"
           autoCapitalize="none"
           autoCorrect={false}
+          autoComplete="username"
         />
         <Field
           testID="staff-password"
@@ -73,6 +78,7 @@ export default function StaffLogin() {
           secureTextEntry
           autoCapitalize="none"
           autoCorrect={false}
+          autoComplete="current-password"
           onSubmitEditing={() => void submit()}
         />
         <Button
@@ -83,7 +89,7 @@ export default function StaffLogin() {
           label={busy ? '들어가는 중이에요' : '로그인'}
           onPress={() => void submit()}
         />
-        <AppText variant="caption" tone="tertiary">
+        <AppText variant="caption" tone="secondary">
           운영·개발용 계정으로 들어가는 자리예요. 학생·학부모는 처음 화면에서 시작해 주세요.
         </AppText>
       </View>

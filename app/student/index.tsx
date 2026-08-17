@@ -19,14 +19,26 @@ import { useContent } from '@/features/content';
 import { useProgress, PRAISE_LABEL } from '@/features/progress';
 import { useToast } from '@/features/toast';
 import { endRow } from '@/theme/styles';
-import { colors, spacing, radius, typeface, font } from '@/theme/tokens';
+import { colors, spacing, radius, typeface, font, touch } from '@/theme/tokens';
 
 /** 홈 목록은 다섯 줄까지만. 그 아래는 전체 목록으로 넘긴다. */
 const PREVIEW = 5;
 
 /**
- * 학생 홈. 3초 안에 "오늘 뭘 해야 하는지" 이해되도록 시선이 흐른다:
- * 오늘의 학습 → 진행 상황 → Scody AI → 학원 과제 → 담아 둔 학습.
+ * 학생 홈. 3초 안에 "오늘 뭘 해야 하는지" 이해되도록 **세 덩어리**로 흐른다.
+ *
+ * 1. **확인할 것** — 칭찬 · 새 과제 · 조회 실패. 조용한 한 줄들이고, 확인하면 사라진다.
+ * 2. **할 일** — 오늘의 학습(히어로) → 진행 상황 → 남은 학원 과제 → 담아 둔 학습.
+ * 3. **막혔을 때** — Scody AI에게 물어보기.
+ *
+ * 이 순서가 규칙이다. 예전에는 AI 입력창이 2번 덩어리 **중간**(진행 상황과 학원 과제 사이)에
+ * 있어서 할 일을 훑는 시선이 큰 입력 박스에 걸려 끊겼다.
+ *
+ * **한 사실은 한 자리에서만 말한다.** 이 화면은 그 규칙을 세 자리에서 어기고 있었다 —
+ * 남은 과제가 하나인 학생에게 그 하나를 네 번 말했고(히어로 · 진행 상황 · 섹션 제목 ·
+ * `위에 있는 과제 하나가 남았어요.`), 아무것도 시작하지 않은 학생에게 같은 목적지로 가는
+ * `문제 담으러 가기`를 두 번 줬고, 다 끝낸 학생에게 `개인 학습 고르기`와 `문제 담으러 가기`가
+ * 같은 곳으로 가는 다른 이름의 버튼으로 함께 서 있었다.
  *
  * **오답노트로 가는 길은 여기 없다**(D-132). 다시 푸는 일은 학습 탭이 맡는다(D-130) —
  * 홈은 오늘 할 일을 말하는 곳이라, 이미 푼 것을 다시 하라는 말이 그 아래에 붙으면
@@ -166,6 +178,16 @@ export default function StudentHome() {
    * 이미 열린 길만 가리켜 말한다.
    */
   const nothingYet = goalTotal === 0 && Object.keys(attempts).length === 0;
+  /**
+   * 히어로가 `문제 담으러 가기`를 내놓는 상태. 그러면 아래 `담아 둔 학습` 빈 상태에서는
+   * 같은 버튼을 두지 않는다 — 같은 목적지로 가는 같은 이름의 버튼이 한 화면에 둘이 된다.
+   */
+  const heroOffersPick = nothingYet && hasPersonal;
+  /**
+   * `학원에서 내준 과제물을 모두 마쳤어요.` 한 줄이 그려지는 상태. 그 줄은 스스로 경계선이
+   * 없어서 뒤에 오는 블록과 맞닿으면 구분이 사라진다 — 그때만 뒤 섹션에 hairline을 준다(§6).
+   */
+  const academyCleared = hasAcademy && academyTodo.length === 0;
   // 히어로에 올린 학습은 아래 목록에서 뺀다. 같은 것이 두 번 보이지 않게.
   const academyList = academyTodo.filter((i) => i.id !== next?.id);
   const queueList = queued.items.filter((i) => i.id !== next?.id);
@@ -229,9 +251,9 @@ export default function StudentHome() {
         오늘 할 일보다 무거워진다. 확인하면 사라지므로 화면에 영구히 박히지 않는다.
       */}
       {praise[0] ? (
-        <View style={styles.praise}>
+        <View style={styles.notice}>
           <Icon name="star" size={15} color={colors.accent} />
-          <AppText variant="caption" tone="accent" style={{ flex: 1 }}>
+          <AppText variant="caption" tone="accent" style={styles.noticeText}>
             {praise[0].from} 님이 칭찬을 보냈어요 · {PRAISE_LABEL[praise[0].kind]}
             {praise.length > 1 ? ` 외 ${praise.length - 1}개` : ''}
           </AppText>
@@ -244,6 +266,28 @@ export default function StudentHome() {
           >
             <Icon name="check" size={15} color={colors.accent} />
           </Pressable>
+        </View>
+      ) : null}
+
+      {/*
+        **새로 온 과제는 히어로가 대신 말할 수 없다.**
+
+        히어로는 *무엇을* 할지 말하고, 이 줄은 *무엇이 달라졌는지* 말한다 — 어제 `마감이
+        지났어요`를 봤던 학생이 오늘 다시 열렸다는 사실을 아는 곳이다. 예전에는 이 줄이 학원 과제
+        **섹션 안**에 있어서, 새로 온 과제가 히어로에 올라가면(= 배정이 그것 하나면) 목록이 비어
+        섹션째로 사라지거나 `위에 있는 과제 하나가 남았어요.` 옆에 붙어 있었다.
+
+        그래서 칭찬과 같은 자리로 올린다. 화면 맨 위는 **확인할 것**이고 그 아래가 할 일이다.
+        카드로 만들지 않는다 — 조용한 한 줄이어야 오늘 할 일보다 무거워지지 않는다.
+      */}
+      {!reading && !loadError && freshAcademy.length > 0 ? (
+        <View style={styles.notice}>
+          <Icon name="file-plus" size={15} color={colors.accent} />
+          <AppText testID="home-academy-new" variant="caption" tone="accent" style={styles.noticeText}>
+            {freshAcademy.length > 1
+              ? `새 과제가 ${freshAcademy.length}개 배정되었어요`
+              : '새 과제가 배정되었어요'}
+          </AppText>
         </View>
       ) : null}
 
@@ -329,7 +373,7 @@ export default function StudentHome() {
             (담아 둔 것도 학원 배정도 없는 계정 — seed의 김서준이 그렇다). 그 학생에게는
             고르러 가는 것이 실제로 다음 행동이다.
           */}
-          {hasPersonal ? (
+          {heroOffersPick ? (
             <View style={styles.heroCta}>
               {/*
                 `문제 담으러 가기`의 무게는 앱 어디서나 같다: **강조색 + `hug` + 화살표**
@@ -380,11 +424,25 @@ export default function StudentHome() {
         <View style={styles.progressBlock}>
           <View testID="home-progress" style={styles.progress}>
             <View style={styles.progressText}>
+              {/*
+                **다 끝낸 화면에서는 남은 개수를 말하지 않는다.** 바로 위 히어로가 이미
+                `오늘 할 일을 다 끝냈어요`라고 말하는데 여기서 `남은 학습이 없어요`라고 또 하면
+                같은 사실이 두 번이다. 그때 이 줄이 말할 것은 **얼마나 했는지**다.
+              */}
               <AppText variant="label">
-                {goalTodo === 0 ? '남은 학습이 없어요' : `남은 학습 ${goalTodo}개`}
+                {goalTodo === 0 ? '마친 학습' : `남은 학습 ${goalTodo}개`}
               </AppText>
+              {/*
+                **한 종류만 남아도 그 종류를 말한다.** `학원 과제 1개` 아래 `남은 학습 1개`가
+                같은 숫자를 두 번 말하는 것처럼 보여 한때 이 줄을 두 종류일 때만 그렸는데,
+                이 줄의 일은 숫자가 아니라 **출처**다 — `남은 학습 1개`만으로는 그것이 학원이
+                내준 것인지 내가 담은 것인지 알 수 없다. 확정 정책 4절이 "남은 개수는 학원 과제와
+                개인 학습을 따로 센다"고 정해 두었고, E2E 둘이 그 계약을 지키고 있었다
+                (`auth-flow` 학생 홈은 남은 학습을 출처별로 센다 · `student-flow` 진행 상황은
+                학원 과제와 담아 둔 학습만 센다).
+              */}
               {goalParts.length > 0 ? (
-                <AppText variant="caption" tone="tertiary">
+                <AppText variant="caption" tone="secondary">
                   {goalParts.join(' · ')}
                 </AppText>
               ) : null}
@@ -399,27 +457,14 @@ export default function StudentHome() {
           {/*
             비율 막대가 아니라 **칸**이다. 옆에 `3 / 5 완료`라고 이미 적혀 있어서 같은 비율을
             막대로 또 그리면 같은 말이 두 번이 된다. 칸은 개수를 말한다 — 몇 개 남았는지가 보인다.
+
+            **한 칸은 그리지 않는다.** 셀 것이 하나면 칸이 개수를 말해 주지 못하고, 옆의
+            `0 / 1 완료`가 이미 같은 말을 한다 — 남는 것은 폭만 채운 선 하나다.
           */}
-          <Steps done={goalDone} total={goalTotal} />
+          {goalTotal > 1 ? <Steps done={goalDone} total={goalTotal} /> : null}
         </View>
       ) : null}
 
-      {/* Scody AI — 버튼이 아니라 물어볼 곳. */}
-      <View style={styles.askBox}>
-        <View style={styles.askHead}>
-          <Icon name="message-circle" size={16} color={colors.accent} />
-          <AppText variant="label">Scody AI에게 물어보기</AppText>
-        </View>
-        <AskField
-          testID="home-ask"
-          sendTestID="home-ask-send"
-          accessibilityLabel="Scody AI에게 질문 입력"
-          value={ask}
-          onChangeText={setAsk}
-          onSubmit={sendAsk}
-          placeholder="국어 공부하다 막힌 곳을 물어보세요"
-        />
-      </View>
 
       {/*
         학원 과제. 조회 중에도, 조회가 실패했을 때도 이 면을 두지 않는다 — 배정을 못 읽은
@@ -428,84 +473,65 @@ export default function StudentHome() {
       */}
       {!reading && !loadError && hasAcademy ? (
         academyTodo.length > 0 ? (
-          <Section
-            title="학원에서 내준 과제가 있어요"
-            action={
-              academyFirst ? (
-                <Button
-                  testID="home-academy-first"
-                  variant="secondary"
-                  size="sm"
-                  label="과제 먼저 하기"
-                  tone="accent"
-                  trailing={<Icon name="arrow-right" size={15} color={colors.accent} />}
-                  onPress={() => go(academyFirst.id)}
-                />
-              ) : null
-            }
-          >
-            {/* 새로 받은 과제가 있으면 먼저 알린다. 한 문항이라도 풀면 사라진다. */}
-            {freshAcademy.length > 0 ? (
-              <AppText testID="home-academy-new" variant="label" tone="accent">
-                {freshAcademy.length > 1
-                  ? `새 과제가 ${freshAcademy.length}개 배정되었어요`
-                  : '새 과제가 배정되었어요'}
-              </AppText>
-            ) : null}
-            {academyList.length > 0 ? (
-              <>
-                <Group>
-                  {visibleAcademy.map((i) => (
-                    <LearningRow key={i.id} item={i} onPress={() => go(i.id)} />
-                  ))}
-                </Group>
-                {!showAllAcademy && academyList.length > PREVIEW ? (
+          /*
+            **목록이 있을 때만 섹션을 둔다.**
+
+            예전에는 남은 과제가 하나(= 히어로에 올라간 그것)뿐인 학생에게도 이 섹션이 그려져
+            `학원에서 내준 과제가 있어요` 제목 아래 `위에 있는 과제 하나가 남았어요.`가 남았다.
+            둘 다 히어로를 보면 아는 사실이라, 과제 1개인 화면이 그 하나를 **네 번** 말하고 있었다
+            (히어로 · 진행 상황 · 이 제목 · 이 문장).
+
+            새로 온 과제 알림은 화면 맨 위로 올렸다 — 히어로에 올라갔든 아니든 보여야 하는
+            상태 변화이기 때문이다.
+          */
+          academyList.length > 0 ? (
+            <Section
+              title="학원에서 내준 과제"
+              action={
+                academyFirst ? (
                   <Button
-                    testID="home-academy-more"
-                    variant="ghost"
-                    label={`과제 ${academyList.length - PREVIEW}개 더 보기`}
-                    onPress={() => setShowAllAcademy(true)}
-                  />
-                ) : null}
-              </>
-            ) : (
-              <AppText variant="caption" tone="secondary">
-                위에 있는 과제 하나가 남았어요.
-              </AppText>
-            )}
-          </Section>
-        ) : (
-          <View testID="academy-cleared" style={styles.cleared}>
-            <AppText variant="label">학원에서 내준 과제물을 모두 마쳤어요.</AppText>
-            {/*
-              **개인 학습을 권하는 것은 고를 수 있는 학생에게만**이다(D-141). 이용권이 없으면
-              `개인 학습을 해볼까요?`와 그 행동을 두지 않는다 — 목적지에서 누를 수 있는 것이
-              0개다. 그 학생이 지금 무엇을 할 수 있는지는 위 히어로 캡션이 말하므로(`restCaption`)
-              같은 말을 두 번 두지 않는다.
-            */}
-            {hasPersonal ? (
-              <>
-                <AppText variant="caption" tone="secondary">
-                  개인 학습을 해볼까요?
-                </AppText>
-                {/*
-                  면 안 마지막 줄의 행동은 오른쪽 끝이다(§8 규칙 ③). 위 두 줄은 글자라
-                  왼쪽에 그대로 두고 이 줄만 감싼다 — `cleared`째로 오른쪽에 붙이면 문장까지 따라간다.
-                  `hug`을 함께 준다: 부모의 `alignItems: 'flex-start'`에 기대고 있던 폭이라
-                  감싸는 줄 안에서는 늘어난다.
-                */}
-                <View style={[styles.clearedAction, endRow.action]}>
-                  <Button
-                    testID="home-go-learn"
+                    testID="home-academy-first"
                     variant="secondary"
-                    hug
-                    label="개인 학습 고르기"
-                    onPress={() => router.push('/student/learn' as never)}
+                    size="sm"
+                    label="과제 먼저 하기"
+                    tone="accent"
+                    trailing={<Icon name="arrow-right" size={15} color={colors.accent} />}
+                    onPress={() => go(academyFirst.id)}
                   />
-                </View>
-              </>
-            ) : null}
-          </View>
+                ) : null
+              }
+            >
+              <Group>
+                {visibleAcademy.map((i) => (
+                  <LearningRow key={i.id} item={i} onPress={() => go(i.id)} />
+                ))}
+              </Group>
+              {!showAllAcademy && academyList.length > PREVIEW ? (
+                <Button
+                  testID="home-academy-more"
+                  variant="ghost"
+                  label={`과제 ${academyList.length - PREVIEW}개 더 보기`}
+                  onPress={() => setShowAllAcademy(true)}
+                />
+              ) : null}
+            </Section>
+          ) : null
+        ) : (
+          /*
+            **다 마쳤다는 사실은 한 줄이다.**
+
+            카드였고 그 안에 `개인 학습을 해볼까요?`와 `개인 학습 고르기` 버튼이 있었다. 그런데
+            그 버튼의 목적지(`/student/learn`)는 바로 아래 `담아 둔 학습`의 `문제 담으러 가기`와
+            **같은 곳**이다 — 이름만 다른 같은 행동이 한 화면에 둘이었고, 그 위 히어로 캡션까지
+            같은 길을 글로 가리켜 셋이 됐다. 새로 고르는 행동은 `담아 둔 학습`이 맡는다(거기가
+            담긴 것을 보여 주는 자리이므로 비었을 때 채우라고 말하는 것이 자연스럽다).
+
+            면도 벗겼다. 없다는 사실을 카드로 감싸면 있는 것보다 무거워진다(§6 — 단순한 구분은
+            여백·타이포가 한다).
+          */
+          <AppText testID="academy-cleared" variant="label">
+            학원에서 내준 과제물을 모두 마쳤어요.
+          </AppText>
         )
       ) : null}
 
@@ -515,9 +541,25 @@ export default function StudentHome() {
         이 면을 두면 담아 둔 학습이 있는 학생에게 `담아 둔 학습이 없어요.`를 보여 준다.
         실패했을 때도 같다 — 못 읽은 목록을 없는 목록으로 말하지 않는다.
       */}
-      {!reading && !loadError && (hasPersonal || queued.items.length > 0) ? (
+      {/*
+        **히어로가 이미 이 자리의 말을 다 했으면 섹션을 두지 않는다.**
+
+        아직 아무것도 시작하지 않은 학생(`heroOffersPick`)에게 히어로는 `아직 시작한 학습이
+        없어요` · `새 학습을 골라볼까요?` · `문제 담으러 가기`를 말한다. 그 아래 이 섹션이
+        `담아 둔 학습이 없어요.` · `담아 두면 여기에 모여요.`를 또 두면 **없다는 말을 두 번**
+        하는 것이다(실측: 김서준의 홈). 그 상태에서 담아 둔 목록은 반드시 0개이므로(`goalTotal`에
+        들어간다) 감춰도 잃는 정보가 없고, 하나라도 담으면 섹션이 나타난다.
+      */}
+      {!reading && !loadError && !heroOffersPick && (hasPersonal || queued.items.length > 0) ? (
         <Section
           title="담아 둔 학습"
+          /*
+            앞이 `학원에서 내준 과제물을 모두 마쳤어요.` 한 줄일 때만 hairline을 둔다.
+            그 줄과 이 섹션의 빈 상태는 **둘 다 스스로 경계선이 없어서** 맞닿으면 어디서
+            끊기는지 보이지 않는다 — §6이 정한 유일한 예외가 정확히 이 경우다.
+            목록(`Group`)이 있을 때는 그 선과 두 겹이 되므로 두지 않는다.
+          */
+          separated={academyCleared && queued.items.length === 0}
           action={
             queued.items.length > 0 ? (
               <Pressable
@@ -536,22 +578,35 @@ export default function StudentHome() {
           }
         >
           {queued.items.length === 0 ? (
-            <View style={styles.cleared}>
+            /* 면을 벗겼다 — 없다는 사실이 카드가 되면 있는 것보다 무거워진다(위 주석과 같은 이유). */
+            <View style={styles.empty}>
               <AppText variant="label">담아 둔 학습이 없어요.</AppText>
               <AppText variant="caption" tone="secondary">
                 학습 탭에서 풀고 싶은 학습을 담아 두면 여기에 모여요.
               </AppText>
-              {/* 같은 이름의 같은 행동은 같은 무게다(위 히어로 주석). 자리도 같다 — 마지막 줄 오른쪽 끝. */}
-              <View style={[styles.clearedAction, endRow.action]}>
-                <Button
-                  testID="home-queue-empty-start"
-                  hug
-                  size="sm"
-                  label="문제 담으러 가기"
-                  trailing={<Icon name="arrow-right" size={15} color={colors.accentText} />}
-                  onPress={() => router.push('/student/learn' as never)}
-                />
-              </View>
+              {/*
+                **히어로가 이미 같은 버튼을 주고 있으면 두지 않는다.** 아무것도 시작하지 않은
+                학생의 화면에서는 히어로가 `문제 담으러 가기`를 내놓는데, 여기에 또 두면 처음
+                온 학생이 **같은 목적지로 가는 같은 버튼을 두 개** 받는다(실측: 김서준의 홈).
+                그때는 위 문장 두 줄이 이 자리가 무엇인지 설명하는 몫만 한다.
+              */}
+              {heroOffersPick ? null : (
+                <View style={[styles.emptyAction, endRow.action]}>
+                  <Button
+                    testID="home-queue-empty-start"
+                    hug
+                    /*
+                      **`sm`을 쓰지 않는다.** 같은 이름의 이 버튼이 놓인 다섯 자리 중 빈 상태 넷
+                      (`home-empty-start` · `queue-empty-start` · `records-empty-start`)은 기본
+                      크기(44)이고 `sm`은 목록 아래 보조 행동(`queue-go-learn`)에만 쓴다 —
+                      여기만 32px이라 패턴에서도 벗어나고 §10의 터치 하한에도 미달했다(실측).
+                    */
+                    label="문제 담으러 가기"
+                    trailing={<Icon name="arrow-right" size={16} color={colors.accentText} />}
+                    onPress={() => router.push('/student/learn' as never)}
+                  />
+                </View>
+              )}
             </View>
           ) : queueList.length > 0 ? (
             <Group>
@@ -571,6 +626,29 @@ export default function StudentHome() {
           )}
         </Section>
       ) : null}
+      {/*
+        Scody AI — 버튼이 아니라 물어볼 곳.
+
+        **할 일 목록 아래다.** 예전에는 진행 상황과 학원 과제 사이에 있어서, 오늘 할 일을 훑는
+        시선이 화면 중앙의 큰 입력 박스에 걸려 끊겼다(실측: 마감이 지난 과제 하나뿐인 홈에서
+        두 번째로 큰 요소가 이 입력창이었다). 물어보는 일은 **막혔을 때** 하는 일이라 할 일보다
+        앞에 설 이유가 없다 — 홈의 순서는 확인할 것 → 할 일 → 막혔을 때다.
+      */}
+      <View style={styles.askBox}>
+        <View style={styles.askHead}>
+          <Icon name="message-circle" size={16} color={colors.accent} />
+          <AppText variant="label">Scody AI에게 물어보기</AppText>
+        </View>
+        <AskField
+          testID="home-ask"
+          sendTestID="home-ask-send"
+          accessibilityLabel="Scody AI에게 질문 입력"
+          value={ask}
+          onChangeText={setAsk}
+          onSubmit={sendAsk}
+          placeholder="국어 공부하다 막힌 곳을 물어보세요"
+        />
+      </View>
     </Screen>
   );
 }
@@ -598,8 +676,12 @@ const styles = StyleSheet.create({
     무거운 것이 될 이유는 없다. 버튼이 `hug`이라 줄을 왼쪽으로 모은다.
   */
   loadFailed: { gap: spacing.sm, alignItems: 'flex-start' },
-  // 조용한 한 줄. 카드가 아니다 — 오늘 할 일보다 무거워지면 안 된다.
-  praise: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  /*
+    화면 맨 위 **확인할 것** 줄(칭찬 · 새 과제). 카드가 아니다 — 오늘 할 일보다 무거워지면
+    안 되고, 둘이 같은 종류라 같은 모양을 쓴다.
+  */
+  notice: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  noticeText: { flex: 1 },
   praiseClose: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
   /*
     히어로 카드 안 마지막 줄. **행동은 오른쪽 끝**이다(§8 규칙 ③ · `endRow`).
@@ -635,25 +717,39 @@ const styles = StyleSheet.create({
   },
   progressTotal: { fontFamily: typeface.medium },
 
-  askBox: { gap: spacing.sm },
+  /*
+    **여기서 덩어리가 바뀐다.** 위는 할 일이고 이 아래는 막혔을 때 하는 일이다.
+    `Screen`의 컬럼 간격은 가로 여백과 같은 값(모바일 16)이라 모든 경계가 같은 무게인데,
+    그러면 세 덩어리(확인할 것 · 할 일 · 막혔을 때)가 한 줄기로 읽힌다. 8을 더해 24 —
+    §5가 정한 섹션 간격 `xl`이 되게 한다. 앞 블록이 무엇이든(진행 상황 · 담아 둔 학습) 같다.
+  */
+  askBox: { gap: spacing.sm, marginTop: spacing.sm },
   askHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
 
-  // 섹션 제목 옆 작은 링크·버튼. 화면의 주요 행동('시작하기')과 무게를 다르게 둔다.
-  linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  /*
+    섹션 제목 옆 작은 링크·버튼. 화면의 주요 행동('시작하기')과 무게를 다르게 둔다.
+
+    글자 높이가 20px이라 §10의 하한 44에 미달했다 — 이 화면에서 유일하게 모자란 누름 영역이었다
+    (실측). 커진 만큼 음수 마진으로 되돌려 제목 줄 높이는 그대로 둔다(`AuthShell`의 링크와 같은 방법).
+  */
+  linkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    minHeight: touch.min,
+    marginVertical: -spacing.md,
+  },
   linkText: { fontFamily: typeface.medium },
 
-  cleared: {
-    gap: spacing.sm,
-    alignItems: 'flex-start',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    borderRadius: radius.xl,
-    backgroundColor: colors.surface,
-    padding: spacing.lg,
-  },
   /*
-    `cleared`가 `alignItems: 'flex-start'`(글자를 왼쪽에 두기 위한 값)라 그 안의 줄도
-    내용폭으로 줄어든다. 오른쪽 끝까지 닿으려면 이 줄만 면 폭으로 편다.
+    빈 상태. **카드가 아니다** — 테두리와 면을 두르면 `없어요`가 화면에서 가장 무거운 것이 되고,
+    히어로까지 합쳐 카드가 셋·넷으로 쌓인다(§6 · §13 `모든 내용을 카드로 감싸기`).
+    구분은 섹션 제목과 여백이 이미 하고 있다.
   */
-  clearedAction: { alignSelf: 'stretch' },
+  empty: { gap: spacing.sm, alignItems: 'flex-start' },
+  /*
+    `empty`가 `alignItems: 'flex-start'`(글자를 왼쪽에 두기 위한 값)라 그 안의 줄도
+    내용폭으로 줄어든다. 오른쪽 끝까지 닿으려면 이 줄만 폭을 편다.
+  */
+  emptyAction: { alignSelf: 'stretch' },
 });

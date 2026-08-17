@@ -310,7 +310,12 @@ test.describe('총괄관리자 문제 등록', () => {
     await expect(page.getByText('다음 중 맞춤법이 바른 것은?').first()).toBeVisible();
 
     // 등록할 때 쓴 해설이 결과 화면에 그대로 보인다
-    await page.getByRole('radio').first().click();
+    /*
+      **이름으로 고른다.** `getByRole('radio').first()`였는데, 풀이 화면 맨 위의
+      `5문항씩 / 한 문항씩` 보기 방식 토글도 라디오 묶음이라 첫 라디오가 보기가 아니었다.
+      `_solve.ts`의 `answerAll`과 같은 이름 규칙을 쓴다.
+    */
+    await page.getByRole('radio', { name: /보기 1$/ }).first().click();
     await page.getByTestId('solve-submit').click();
     await expect(page).toHaveURL(/\/student\/result\//);
     await expect(page.getByText('"오랜만에"가 바른 표기예요.')).toBeVisible();

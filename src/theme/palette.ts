@@ -102,7 +102,14 @@ function vars(p: Record<ColorName, string>): string {
 export const FOCUS_CSS = `
 :focus-visible{outline:2px solid var(--sc-accent);outline-offset:2px;border-radius:inherit}
 :focus:not(:focus-visible){outline:none}
+::selection{background:var(--sc-accentSoft);color:var(--sc-ink)}
 `;
+
+/*
+  `::selection`도 같은 자리에서 정한다. 브라우저 기본 선택색은 어느 팔레트에도 속하지 않는
+  파랑이라, 지문을 드래그해 읽는 순간 화면에 우리 색이 아닌 색이 한 덩어리 생긴다. 값이 CSS
+  변수라 다크에서도 알아서 갈린다(`accentSoft` 위의 `ink`는 라이트·다크 모두 대비가 넉넉하다).
+*/
 
 export const THEME_CSS = `
 :root{${vars(PALETTE_LIGHT)}}

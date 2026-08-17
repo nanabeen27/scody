@@ -168,7 +168,12 @@ test.describe('M4 학원 흐름', () => {
     // 풀이 화면은 집중 모드라 탭이 없다. 들어온 길로 나와 홈으로 간다.
     await page.getByTestId('focus-exit').click();
     await page.getByTestId('brand-home').click();
-    await expect(page.getByText('학원에서 내준 과제가 있어요')).toBeVisible();
+    /*
+      **히어로를 본다.** 예전에는 `학원에서 내준 과제가 있어요` 섹션 제목을 봤는데, 남은 과제가
+      하나면 그것이 히어로에 올라가 목록이 비고 섹션은 그려지지 않는다(D-167) — 같은 사실을
+      네 번 말하던 블록을 없앴다. 확인할 성질은 그대로다: **그 과제가 아직 할 일로 남아 있다.**
+    */
+    await expect(page.getByTestId('today-primary')).toContainText('헷갈리는 맞춤법·어법');
     await expect(page.getByTestId('home-academy-new')).toHaveCount(0);
   });
 
@@ -178,7 +183,12 @@ test.describe('M4 학원 흐름', () => {
     // 박도윤: 현대소설 점검(2026-07-24 마감)이 미제출로 남아 있다.
     await page.goto('/login');
     await loginHere(page, 'doyun');
-    await expect(page.getByText('학원에서 내준 과제가 있어요')).toBeVisible();
+    /*
+      **히어로를 본다.** 예전에는 `학원에서 내준 과제가 있어요` 섹션 제목을 봤는데, 남은 과제가
+      하나면 그것이 히어로에 올라가 목록이 비고 섹션은 그려지지 않는다(D-167) — 같은 사실을
+      네 번 말하던 블록을 없앴다. 확인할 성질은 그대로다: **그 과제가 아직 할 일로 남아 있다.**
+    */
+    await expect(page.getByTestId('today-primary')).toContainText('현대소설 점검');
     await expect(page.getByTestId('home-academy-new')).toHaveCount(0);
 
     await page.getByRole('link', { name: '내 정보' }).click();

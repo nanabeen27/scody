@@ -73,7 +73,10 @@ export function AuthShell({
 export function AuthHeading({ title, sub }: { title: string; sub?: string }) {
   return (
     <View style={styles.heading}>
-      <AppText variant="title">{title}</AppText>
+      {/* 이 화면의 제목이라 1단계다 — 인증 화면에는 이 위에 다른 제목이 없다. */}
+      <AppText variant="title" headingLevel={1}>
+        {title}
+      </AppText>
       {sub ? (
         <AppText variant="bodyLg" tone="secondary">
           {sub}
@@ -83,10 +86,23 @@ export function AuthHeading({ title, sub }: { title: string; sub?: string }) {
   );
 }
 
-/** 단계형 화면의 진행 표시. 몇 단계가 남았는지 먼저 알려준다. */
+/**
+ * 단계형 화면의 진행 표시. 몇 단계가 남았는지 먼저 알려준다.
+ *
+ * **역할이 있어야 이름이 읽힌다.** 예전에는 이름만 붙인 맨 `View`였는데, 역할 없는 요소의
+ * `aria-label`은 보조기술이 무시한다 — 막대 두 개가 눈에만 보이고 "2단계 중 1단계"는
+ * 어디에도 없었다. `ProgressBar`와 같은 방식으로 둔다.
+ */
 export function AuthSteps({ step, total }: { step: number; total: number }) {
   return (
-    <View style={styles.steps} accessibilityLabel={`${total}단계 중 ${step}단계`}>
+    <View
+      style={styles.steps}
+      accessibilityRole="progressbar"
+      accessibilityLabel={`${total}단계 중 ${step}단계`}
+      aria-valuenow={step}
+      aria-valuemin={1}
+      aria-valuemax={total}
+    >
       {Array.from({ length: total }, (_, i) => (
         <View key={i} style={[styles.stepBar, i < step && styles.stepBarOn]} />
       ))}
@@ -107,9 +123,12 @@ export function AuthSection({
   return (
     <View style={styles.section}>
       <View style={styles.sectionHead}>
-        <AppText variant="subheading">{title}</AppText>
+        {/* 화면 제목 아래의 묶음이라 2단계다(가입 마지막 단계의 `역할`·`계정 정보`). */}
+        <AppText variant="subheading" headingLevel={2}>
+          {title}
+        </AppText>
         {hint ? (
-          <AppText variant="caption" tone="tertiary">
+          <AppText variant="caption" tone="secondary">
             {hint}
           </AppText>
         ) : null}
@@ -124,7 +143,7 @@ export function LabeledDivider({ label }: { label: string }) {
   return (
     <View style={styles.labeled}>
       <View style={styles.labeledLine} />
-      <AppText variant="caption" tone="tertiary">
+      <AppText variant="caption" tone="secondary">
         {label}
       </AppText>
       <View style={styles.labeledLine} />
@@ -194,7 +213,12 @@ function AuthFooter() {
           </Pressable>
         ))}
       </View>
-      <AppText variant="caption" tone="tertiary">
+      {/*
+        **`tertiary`가 아니다.** 초안이라는 사실을 알리는 문장이라 반드시 읽혀야 하는데
+        `inkTertiary`는 배경과 **2.96:1**(라이트, 실측)로 AA 4.5:1에 크게 미달했다.
+        `inkSecondary`는 같은 자리에서 7:1 이상이다. 이 화면들의 안내 문구는 모두 이 톤이다.
+      */}
+      <AppText variant="caption" tone="secondary">
         이용약관과 개인정보처리방침은 검토 전 초안이에요.
       </AppText>
     </View>

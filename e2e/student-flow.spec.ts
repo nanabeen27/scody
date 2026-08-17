@@ -290,7 +290,11 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
     await expect(page.getByTestId('detail-start')).toContainText('이어서 풀기');
     await page.getByTestId('detail-start').click();
-    await expect(page.locator('[role="radio"][aria-checked="true"]')).toHaveCount(1);
+    /*
+      보기 중에서 센다. 화면 맨 위 `5문항씩 / 한 문항씩` 토글도 하나를 고르는 라디오 묶음이라
+      골라진 라디오를 전부 세면 답이 아닌 것까지 들어온다.
+    */
+    await expect(page.getByRole('radio', { name: /보기 \d+$/, checked: true })).toHaveCount(1);
   });
 
   test('학습 상세에서 뒤로 버튼으로 들어온 화면으로 돌아간다', async ({ page }) => {
@@ -565,7 +569,12 @@ test.describe('M2 학생 국어 학습 흐름', () => {
   test('학원 과제가 남았으면 알려주고, 다 끝내면 할 수 있는 일만 말한다', async ({ page }) => {
     await page.goto('/login');
     await loginHere(page, 'doyun'); // 박도윤: 학원 이용권, 미제출 과제 1개
-    await expect(page.getByText('학원에서 내준 과제가 있어요')).toBeVisible();
+    /*
+      **히어로를 본다.** 예전에는 `학원에서 내준 과제가 있어요` 섹션 제목을 봤는데, 남은 과제가
+      하나면 그것이 히어로에 올라가 목록이 비고 섹션은 그려지지 않는다(D-167) — 같은 사실을
+      네 번 말하던 블록을 없앴다. 확인할 성질은 그대로다: **그 과제가 아직 할 일로 남아 있다.**
+    */
+    await expect(page.getByTestId('today-primary')).toContainText('현대소설 점검');
 
     // 과제를 끝내면 안내가 바뀐다
     await page.getByText('시작하기').click();
@@ -575,7 +584,8 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await page.getByTestId('result-done').click();
     await expect(page.getByTestId('academy-cleared')).toBeVisible();
     await expect(page.getByText('학원에서 내준 과제물을 모두 마쳤어요.')).toBeVisible();
-    await expect(page.getByText('학원에서 내준 과제가 있어요')).toHaveCount(0);
+    // 섹션 제목은 이제 `학원에서 내준 과제`다. `exact`를 주지 않으면 `과제물을 모두 마쳤어요`에도 걸린다.
+    await expect(page.getByText('학원에서 내준 과제', { exact: true })).toHaveCount(0);
 
     /*
       **개인 이용권이 없는 학생에게 개인 학습을 권하지 않는다**(D-141). 박도윤에게 학습 탭의
@@ -592,7 +602,8 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await page.getByText('로그아웃').click();
     await loginHere(page, 'seojun');
     await expect(page.getByTestId('student-home')).toBeVisible();
-    await expect(page.getByText('학원에서 내준 과제가 있어요')).toHaveCount(0);
+    // 섹션 제목은 이제 `학원에서 내준 과제`다. `exact`를 주지 않으면 `과제물을 모두 마쳤어요`에도 걸린다.
+    await expect(page.getByText('학원에서 내준 과제', { exact: true })).toHaveCount(0);
     await expect(page.getByTestId('academy-cleared')).toHaveCount(0);
   });
 
@@ -745,7 +756,8 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await expect(page.getByText(/^0 \/ \d+ 풀었어요$/)).toBeVisible();
-    await page.getByRole('radio').nth(1).click();
+    // 보기를 이름으로 고른다 — 화면 맨 위 보기 방식 토글도 라디오 묶음이라 순서로 세지 않는다.
+    await page.getByRole('radio', { name: /보기 2$/ }).first().click();
     await expect(page.getByText(/^1 \/ \d+ 풀었어요$/)).toBeVisible();
     await page.goBack();
     await page.getByTestId('detail-start').click();

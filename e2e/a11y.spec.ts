@@ -43,7 +43,11 @@ test.describe('M6 접근성', () => {
     await login(page, 'seojun');
     await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
-    const radios = page.getByRole('radio');
+    /*
+      보기만 센다. 화면 맨 위의 보기 방식 토글도 라디오 묶음이라 이름을 걸지 않으면
+      이 검사가 **보기가 아닌 것**을 보고 통과할 수 있다.
+    */
+    const radios = page.getByRole('radio', { name: /보기 \d+$/ });
     expect(await radios.count()).toBeGreaterThan(0);
     await expect(radios.first()).toBeVisible();
   });

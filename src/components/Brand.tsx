@@ -1,5 +1,5 @@
 import { Text, Pressable, StyleSheet } from 'react-native';
-import { colors, typeface, font } from '@/theme/tokens';
+import { colors, typeface, font, touch } from '@/theme/tokens';
 
 /**
  * 스코디 워드마크. "Scody"를 Space Grotesk 폰트로 표기한 로고.
@@ -42,7 +42,17 @@ export function Brand({
 }
 
 const styles = StyleSheet.create({
-  link: { alignSelf: 'flex-start' },
+  /*
+    누를 수 있는 워드마크는 인증 화면에서 **나가는 유일한 길**이다(`AuthShell`의 `onExit`).
+    글자 높이가 34라 누름 영역이 §10의 하한 44에 미달했다 — 커진 만큼 음수 마진으로 되돌려
+    줄 높이는 그대로 둔다(`AuthShell`의 링크·푸터가 쓰는 방법과 같다).
+  */
+  link: {
+    alignSelf: 'flex-start',
+    minHeight: touch.min,
+    justifyContent: 'center',
+    marginVertical: -5,
+  },
   linkCenter: { alignSelf: 'center' },
   logo: {
     fontFamily: typeface.wordmark,

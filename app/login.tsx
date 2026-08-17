@@ -168,7 +168,7 @@ export default function Login() {
           />
           {showDemo ? (
             <>
-              <AppText variant="caption" tone="tertiary">
+              <AppText variant="caption" tone="secondary">
                 개발용 계정이에요. 실제 사용자 데이터가 아니에요.
               </AppText>
               <Group>
@@ -219,7 +219,7 @@ export default function Login() {
                 setError(null);
               }}
             />
-            <AppText variant="caption" tone="tertiary">
+            <AppText variant="caption" tone="secondary">
               번호는 로그인과 알림에만 써요.
             </AppText>
             <LabeledDivider label="또는" />
@@ -238,7 +238,7 @@ export default function Login() {
               눌렀을 때 무엇이 열리는지 휴대폰 안내와 같은 무게로 밝힌다. 개발용 로그인이 꺼진
               빌드에서는 데모 계정으로 가지 않으므로 그 문장을 두지 않는다(D-135).
             */}
-            <AppText variant="caption" tone="tertiary">
+            <AppText variant="caption" tone="secondary">
               {DEV_LOGIN_ENABLED
                 ? '프로토타입에서는 카카오로 들어가면 정해진 데모 계정으로 연결돼요. 그 계정의 기록은 실제 사용자 데이터가 아니에요.'
                 : '카카오 로그인은 아직 연결되지 않았어요.'}
@@ -274,6 +274,8 @@ export default function Login() {
                   label="휴대폰 번호"
                   testID="login-phone-number"
                   keyboardType="phone-pad"
+                  /* 브라우저·비밀번호 관리자가 번호 칸임을 알아야 자동으로 채워 준다. */
+                  autoComplete="tel"
                   value={phone}
                   onChangeText={setPhone}
                   placeholder="010-0000-0000"
