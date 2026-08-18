@@ -1,6 +1,6 @@
 import { test, expect } from './_fixtures';
 import { login, PHONE_BY_ID, PHONE_PENDING } from './_auth';
-import { answerAll, openFirstPersonal } from './_solve';
+import { answerAll, choices, openFirstPersonal } from './_solve';
 
 test.describe('M6 접근성', () => {
   test('로그인 폼 요소에 접근 가능한 라벨이 있다', async ({ page }) => {
@@ -43,11 +43,8 @@ test.describe('M6 접근성', () => {
     await login(page, 'seojun');
     await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
-    /*
-      보기만 센다. 화면 맨 위의 보기 방식 토글도 라디오 묶음이라 이름을 걸지 않으면
-      이 검사가 **보기가 아닌 것**을 보고 통과할 수 있다.
-    */
-    const radios = page.getByRole('radio', { name: /보기 \d+$/ });
+    // 보기만 센다 — 이름 규칙은 `_solve.ts`의 `choices`가 갖는다.
+    const radios = choices(page);
     expect(await radios.count()).toBeGreaterThan(0);
     await expect(radios.first()).toBeVisible();
   });

@@ -1,7 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { View } from 'react-native';
-import { Screen, Section, Group, Row, LearningRow, AppText, Button } from '@/components';
+import {
+  AppText,
+  Button,
+  Group,
+  LearningRow,
+  LoadFailed,
+  Row,
+  Screen,
+  Section,
+} from '@/components';
 import { useContent } from '@/features/content';
 import { useProgress } from '@/features/progress';
 import { useStudentItems, useQueuedItems, byTodoThenDue } from '@/features/learning';
@@ -30,10 +39,16 @@ export default function StudentLearn() {
   const {
     wrongNotes,
     loading: progressLoading,
+    loaded: progressLoaded,
     error: progressError,
     reload: reloadProgress,
   } = useProgress();
-  const { loading: contentLoading, error: contentError, reload: reloadContent } = useContent();
+  const {
+    loading: contentLoading,
+    loaded: contentLoaded,
+    error: contentError,
+    reload: reloadContent,
+  } = useContent();
   const [showAllAcademy, setShowAllAcademy] = useState(false);
   const account = useCurrentAccount();
   const { academyLinked } = useSession();
@@ -55,7 +70,18 @@ export default function StudentLearn() {
     이제 두 provider가 `error`를 내보내므로 실패는 실패라고 말하고 다시 시도할 행동을 둔다.
     홈과 같은 규칙이다(`app/student/index.tsx`).
   */
-  const reading = progressLoading || contentLoading;
+  /*
+    **게이트는 첫 조회에만 건다**(A-126 · D-168). provider의 `loading`은 `reading || !loaded`라
+    **재조회마다** 참이 되고, 쓰기가 실패하면 `reload()`가 돈다 — 그때 손에 있는 목록이 사라진다.
+    `loaded`(첫 조회가 끝났는지)를 보면 그 창에서 화면이 그대로 남는다. 실패했을 때 개수를 세지
+    않고 `없어요`도 말하지 않는 것은 D-136 그대로다.
+  */
+  const reading = !progressLoaded || !contentLoaded;
+  /**
+   * **다시 조회가 도는 중**(첫 조회가 아니다). 실패 줄의 버튼이 그 사이 라벨로 진행을 말한다 —
+   * 언마운트하면 웹에서 포커스가 `<body>`로 떨어진다(A-130).
+   */
+  const retrying = (progressLoading || contentLoading) && !reading;
   /** 조회 실패 문장. 다시 읽는 중에는 감춘다(홈과 같다 — 실패와 로딩을 함께 세우지 않는다). */
   const loadError = reading ? null : (progressError ?? contentError);
 
@@ -91,18 +117,14 @@ export default function StudentLearn() {
         실패가 어디에도 남지 않고, 이 화면의 개인 학습·오답노트도 같은 조회에 매달려 있다.
       */}
       {loadError ? (
-        <View style={{ gap: spacing.sm, alignItems: 'flex-start' }} testID="learn-load-failed">
-          <AppText variant="caption" tone="danger">
-            학습을 불러오지 못했어요. {loadError}
-          </AppText>
-          <Button
-            testID="learn-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void retryLoad()}
-          />
-        </View>
+        <LoadFailed
+          testID="learn-load-failed"
+          retryTestID="learn-load-retry"
+          what="학습"
+          message={loadError}
+          retrying={retrying}
+          onRetry={() => void retryLoad()}
+        />
       ) : null}
 
       {/*

@@ -1,7 +1,17 @@
 import { useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { View } from 'react-native';
-import { Screen, Group, Row, LearningRow, IconButton, AppText, Button, ActionBar } from '@/components';
+import {
+  ActionBar,
+  AppText,
+  Button,
+  Group,
+  IconButton,
+  LearningRow,
+  LoadFailed,
+  Row,
+  Screen,
+} from '@/components';
 import { useStudentItems } from '@/features/learning';
 import { useContent } from '@/features/content';
 import { useProgress } from '@/features/progress';
@@ -32,7 +42,25 @@ export default function StudentPick() {
   const params = useLocalSearchParams<{ grade?: string; area?: string; topic?: string }>();
   const { personal, academy, hasPersonal } = useStudentItems();
   const { addToQueue, removeFromQueue, isQueued } = useProgress();
-  const { sets, loading: contentLoading, error: contentError, reload: reloadContent } = useContent();
+  const {
+    sets,
+    loading: contentLoading,
+    loaded: contentLoaded,
+    error: contentError,
+    reload: reloadContent,
+  } = useContent();
+  /*
+    **게이트는 첫 조회에만 건다**(A-126 · D-168). provider의 `loading`은 `reading || !loaded`라
+    **재조회마다** 참이 되고, 쓰기가 실패하면 `reload()`가 돈다 — 그때 손에 있는 목록이 사라진다.
+    `loaded`(첫 조회가 끝났는지)를 보면 그 창에서 화면이 그대로 남는다. 실패했을 때 개수를 세지
+    않고 `없어요`도 말하지 않는 것은 D-136 그대로다.
+  */
+  const reading = !contentLoaded;
+  /**
+   * **다시 조회가 도는 중**(첫 조회가 아니다). 실패 줄의 버튼이 그 사이 라벨로 진행을 말한다 —
+   * 언마운트하면 웹에서 포커스가 `<body>`로 떨어진다(A-130).
+   */
+  const retrying = contentLoading && !reading;
   const { show } = useToast();
   const account = useCurrentAccount();
   const { academyLinked, readOnly } = useSession();
@@ -44,7 +72,7 @@ export default function StudentPick() {
    * **실패와 `아직 준비 중이에요`는 다른 말이다**(M-DB-16). 실패한 조회는 모든 칸을 0개로
    * 만들어서, 콘텐츠가 준비되지 않았다고 잘못 말하고 그 줄들은 눌리지도 않는다.
    */
-  const loadError = contentLoading ? null : contentError;
+  const loadError = reading ? null : contentError;
 
   const grade = params.grade ? (Number(params.grade) as Grade) : undefined;
   const area = params.area as KoreanArea | undefined;
@@ -173,7 +201,7 @@ export default function StudentPick() {
         화면 전체를 기다리게 두지는 않는다 — 역할 레이아웃에서 막아 봤더니 단계형 화면이
         쿼리 파라미터를 잃었다. 개수를 말하는 이 자리만 기다린다.
       */}
-      {contentLoading ? (
+      {reading ? (
         <AppText variant="caption" tone="secondary">
           학습을 불러오고 있어요.
         </AppText>
@@ -183,22 +211,18 @@ export default function StudentPick() {
           0개인 칸을 `아직 준비 중이에요`로 두면 조회 실패를 콘텐츠 문제로 잘못 말한다 —
           이용권이 없을 때 단계를 그리지 않는 것과 같은 판단이다(위 `hasPersonal`).
         */
-        <View style={{ gap: spacing.sm, alignItems: 'flex-start' }} testID="pick-load-failed">
-          <AppText variant="caption" tone="danger">
-            학습을 불러오지 못했어요. {loadError}
-          </AppText>
-          <Button
-            testID="pick-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void reloadContent()}
-          />
-        </View>
+        <LoadFailed
+          testID="pick-load-failed"
+          retryTestID="pick-load-retry"
+          what="학습"
+          message={loadError}
+          retrying={retrying}
+          onRetry={() => void reloadContent()}
+        />
       ) : null}
 
       {/* 1단계: 학년 */}
-      {!grade && !contentLoading && !loadError ? (
+      {!grade && !reading && !loadError ? (
         <>
           <AppText variant="caption" tone="secondary">
             학년 → 영역 → 유형 순으로 좁혀 가요. 원하는 문제만 딱 찾을 수 있어요.
@@ -223,7 +247,7 @@ export default function StudentPick() {
       ) : null}
 
       {/* 2단계: 영역 */}
-      {grade && !area && !contentLoading && !loadError ? (
+      {grade && !area && !reading && !loadError ? (
         <Group>
           {AREAS.map((a) => {
             const n = countFor(grade, a);
@@ -242,7 +266,7 @@ export default function StudentPick() {
       ) : null}
 
       {/* 3단계: 세부 유형 */}
-      {grade && area && !topic && !contentLoading && !loadError ? (
+      {grade && area && !topic && !reading && !loadError ? (
         <Group>
           {topicsFor(area).map((t) => {
             const n = countFor(grade, area, t);

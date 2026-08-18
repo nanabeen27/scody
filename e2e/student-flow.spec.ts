@@ -2,7 +2,7 @@ import { test, expect } from './_fixtures';
 import { type Page } from '@playwright/test';
 import { loginHere } from './_auth';
 import { actThenToast, waitForQuietToast } from './_toast';
-import { answerAll, keepWrongNotes, openFirstPersonal, pickTopic } from './_solve';
+import { answerAll, choices, keepWrongNotes, openFirstPersonal, pickTopic } from './_solve';
 import { assignLearning, expectAssigned } from './_assign';
 import { dayFromToday, sid } from './_ids';
 
@@ -290,11 +290,8 @@ test.describe('M2 학생 국어 학습 흐름', () => {
 
     await expect(page.getByTestId('detail-start')).toContainText('이어서 풀기');
     await page.getByTestId('detail-start').click();
-    /*
-      보기 중에서 센다. 화면 맨 위 `5문항씩 / 한 문항씩` 토글도 하나를 고르는 라디오 묶음이라
-      골라진 라디오를 전부 세면 답이 아닌 것까지 들어온다.
-    */
-    await expect(page.getByRole('radio', { name: /보기 \d+$/, checked: true })).toHaveCount(1);
+    // 보기 중에서 센다 — 화면 맨 위 보기 방식 토글도 골라진 라디오다.
+    await expect(choices(page).and(page.getByRole('radio', { checked: true }))).toHaveCount(1);
   });
 
   test('학습 상세에서 뒤로 버튼으로 들어온 화면으로 돌아간다', async ({ page }) => {
@@ -569,11 +566,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
   test('학원 과제가 남았으면 알려주고, 다 끝내면 할 수 있는 일만 말한다', async ({ page }) => {
     await page.goto('/login');
     await loginHere(page, 'doyun'); // 박도윤: 학원 이용권, 미제출 과제 1개
-    /*
-      **히어로를 본다.** 예전에는 `학원에서 내준 과제가 있어요` 섹션 제목을 봤는데, 남은 과제가
-      하나면 그것이 히어로에 올라가 목록이 비고 섹션은 그려지지 않는다(D-167) — 같은 사실을
-      네 번 말하던 블록을 없앴다. 확인할 성질은 그대로다: **그 과제가 아직 할 일로 남아 있다.**
-    */
+    // 그 과제가 아직 할 일로 남아 있다 — 남은 과제가 하나면 섹션이 아니라 히어로가 말한다(D-167).
     await expect(page.getByTestId('today-primary')).toContainText('현대소설 점검');
 
     // 과제를 끝내면 안내가 바뀐다
@@ -583,8 +576,8 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await page.getByTestId('solve-submit').click();
     await page.getByTestId('result-done').click();
     await expect(page.getByTestId('academy-cleared')).toBeVisible();
-    await expect(page.getByText('학원에서 내준 과제물을 모두 마쳤어요.')).toBeVisible();
-    // 섹션 제목은 이제 `학원에서 내준 과제`다. `exact`를 주지 않으면 `과제물을 모두 마쳤어요`에도 걸린다.
+    await expect(page.getByText('학원에서 내준 과제를 모두 마쳤어요.')).toBeVisible();
+    // `exact` 없이는 `과제물을 모두 마쳤어요`에도 걸린다.
     await expect(page.getByText('학원에서 내준 과제', { exact: true })).toHaveCount(0);
 
     /*
@@ -602,7 +595,6 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await page.getByText('로그아웃').click();
     await loginHere(page, 'seojun');
     await expect(page.getByTestId('student-home')).toBeVisible();
-    // 섹션 제목은 이제 `학원에서 내준 과제`다. `exact`를 주지 않으면 `과제물을 모두 마쳤어요`에도 걸린다.
     await expect(page.getByText('학원에서 내준 과제', { exact: true })).toHaveCount(0);
     await expect(page.getByTestId('academy-cleared')).toHaveCount(0);
   });
@@ -651,7 +643,8 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await page.getByRole('checkbox', { name: '담아 두기' }).first().click();
 
     await page.getByTestId('brand-home').click();
-    await expect(page.getByTestId('today-primary').getByText('담아 둔 학습')).toBeVisible();
+    // 히어로 라벨은 상태와 무관하게 `오늘의 학습`이다(A-128) — 왜 이 항목인지는 출처 태그가 말한다.
+    await expect(page.getByTestId('today-primary').getByText('개인 학습')).toBeVisible();
 
     // 히어로가 개인 학습을 가리키면 마감이 가장 이른 과제로 바로 갈 수 있다
     const first = page.getByTestId('home-academy-first');
@@ -659,6 +652,27 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await first.click();
     await expect(page.getByText('헷갈리는 맞춤법·어법').first()).toBeVisible();
     await expect(page.getByTestId('detail-start')).toBeVisible();
+  });
+
+  test('오늘 낸 것이 없으면 `오늘 다 끝냈다`고 말하지 않는다', async ({ page }) => {
+    /*
+      M9-15 ②. `오늘 할 일을 다 끝냈어요`의 조건에는 시점이 없어서, 약속된 일이 0개이고 과거
+      제출이 있으면 **영구 상태**였다 — 마지막 제출이 며칠 전인 학생이 오늘 아무것도 하지 않아도
+      홈의 가장 큰 글자가 그 문장이었다. `약속된 일이 없다`와 `오늘 할 일을 끝냈다`는 다른 사실이다.
+
+      정예린: seed의 제출이 모두 과거이고 배정 4건을 다 냈고 담아 둔 것이 없다.
+    */
+    await loginAs(page, 'yerin');
+    await expect(page.getByText('지금 해야 할 학습이 없어요')).toBeVisible();
+    await expect(page.getByText('오늘 할 일을 다 끝냈어요')).toHaveCount(0);
+
+    // 오늘 한 세트를 내면 같은 자리가 `오늘`을 말한다.
+    await openFirstPersonal(page);
+    await page.getByTestId('detail-start').click();
+    await answerAll(page);
+    await page.getByTestId('solve-submit').click();
+    await page.getByTestId('result-done').click();
+    await expect(page.getByText('오늘 할 일을 다 끝냈어요')).toBeVisible();
   });
 
   test('진행 상황은 학원 과제와 담아 둔 학습만 센다', async ({ page }) => {
@@ -689,9 +703,15 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await expect(page.getByTestId('home-progress')).toBeVisible();
     await expect(page.getByText('남은 학습 1개')).toBeVisible();
     await expect(page.getByText('담아 둔 학습 1개')).toBeVisible();
-    await expect(page.getByText('/ 1 완료')).toBeVisible();
+    /*
+      **개인 학습만 하는 학생에게는 완료 숫자를 두지 않는다**(M9-16 ①). `rpc_submit_attempt`가
+      제출 시 담아 둔 목록에서 세트를 지우므로 그 학생의 분자는 정의상 항상 0이다 — `0 / 1 완료`와
+      전부 회색인 칸은 정보가 아니라 오해다. 왼쪽 두 줄이 말할 것을 다 말한다.
+    */
+    await expect(page.getByText(/\/ \d+ 완료/)).toHaveCount(0);
     // 담아 두면 그것이 히어로가 된다 — 분모에 들어온 것이 곧 오늘의 학습이다
-    await expect(page.getByTestId('today-primary').getByText('담아 둔 학습')).toBeVisible();
+    // 히어로 라벨은 상태와 무관하게 `오늘의 학습`이다(A-128) — 왜 이 항목인지는 출처 태그가 말한다.
+    await expect(page.getByTestId('today-primary').getByText('개인 학습')).toBeVisible();
   });
 
   test('학습이 하나도 없는 계정에는 다 끝냈다고 말하지 않는다', async ({ page }) => {
@@ -756,8 +776,7 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await openFirstPersonal(page);
     await page.getByTestId('detail-start').click();
     await expect(page.getByText(/^0 \/ \d+ 풀었어요$/)).toBeVisible();
-    // 보기를 이름으로 고른다 — 화면 맨 위 보기 방식 토글도 라디오 묶음이라 순서로 세지 않는다.
-    await page.getByRole('radio', { name: /보기 2$/ }).first().click();
+    await choices(page, 2).first().click();
     await expect(page.getByText(/^1 \/ \d+ 풀었어요$/)).toBeVisible();
     await page.goBack();
     await page.getByTestId('detail-start').click();

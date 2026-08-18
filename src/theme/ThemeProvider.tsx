@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Platform } from 'react-native';
-import { FOCUS_CSS, THEME_CSS } from './palette';
+import { GLOBAL_CSS, THEME_CSS } from './palette';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 
@@ -19,8 +19,8 @@ function injectCss() {
   if (document.getElementById('sc-theme-vars')) return;
   const style = document.createElement('style');
   style.id = 'sc-theme-vars';
-  // 팔레트와 포커스 링을 같은 자리에서 넣는다. 둘 다 CSS 변수를 쓰므로 테마 전환이 그대로 먹는다.
-  style.textContent = THEME_CSS + FOCUS_CSS;
+  // 팔레트와 전역 규칙을 같은 자리에서 넣는다. 둘 다 CSS 변수를 쓰므로 테마 전환이 그대로 먹는다.
+  style.textContent = THEME_CSS + GLOBAL_CSS;
   document.head.appendChild(style);
 }
 

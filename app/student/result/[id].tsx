@@ -44,7 +44,13 @@ export default function ResultScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { readOnly } = useSession();
   const { all } = useStudentItems();
-  const { sets, loading: contentLoading, error: contentError, reload: reloadContent } = useContent();
+  const {
+    sets,
+    loading: contentLoading,
+    loaded: contentLoaded,
+    error: contentError,
+    reload: reloadContent,
+  } = useContent();
   const {
     attempts,
     addWrongNote,
@@ -55,6 +61,7 @@ export default function ResultScreen() {
     removeFromQueue,
     isQueued,
     loading: progressLoading,
+    loaded: progressLoaded,
     error: progressError,
     reload: reloadProgress,
   } = useProgress();
@@ -77,7 +84,18 @@ export default function ResultScreen() {
     조회가 **실패해도** 같은 문장이 나왔다(M-DB-16). 못 읽은 것과 없는 것은 다르다 —
     없다고 하면 학생은 방금 푼 기록이 사라졌다고 믿는다.
   */
-  const reading = progressLoading || contentLoading;
+  /*
+    **게이트는 첫 조회에만 건다**(A-126 · D-168). provider의 `loading`은 `reading || !loaded`라
+    **재조회마다** 참이 되고, 쓰기가 실패하면 `reload()`가 돈다 — 그때 손에 있는 목록이 사라진다.
+    `loaded`(첫 조회가 끝났는지)를 보면 그 창에서 화면이 그대로 남는다. 실패했을 때 개수를 세지
+    않고 `없어요`도 말하지 않는 것은 D-136 그대로다.
+  */
+  const reading = !progressLoaded || !contentLoaded;
+  /**
+   * **다시 조회가 도는 중**(첫 조회가 아니다). 실패 줄의 버튼이 그 사이 라벨로 진행을 말한다 —
+   * 언마운트하면 웹에서 포커스가 `<body>`로 떨어진다(A-130).
+   */
+  const retrying = (progressLoading || contentLoading) && !reading;
   /** 조회 실패 문장. 다시 읽는 중에는 감춘다. */
   const loadError = reading ? null : (progressError ?? contentError);
 
@@ -117,8 +135,12 @@ export default function ResultScreen() {
             <ActionBar>
               <Button
                 testID="result-load-retry"
-                label="다시 불러오기"
-                onPress={() => void retryLoad()}
+                /* 라벨이 진행을 말한다 — 버튼을 지우면 포커스가 사라진다(A-130 · `LoadFailed`와 같은 방법). */
+                label={retrying ? '다시 불러오고 있어요' : '다시 불러오기'}
+                onPress={() => {
+                  if (retrying) return;
+                  void retryLoad();
+                }}
               />
             </ActionBar>
           </>

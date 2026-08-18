@@ -23,6 +23,17 @@ async function loginParent(page: Page) {
  * 이 함수는 그 버튼을 사람과 똑같이 누른다 — 없으면(이번 달에 기록이 있으면) 아무것도 하지 않는다.
  * 달 자체를 확인하는 테스트는 이 함수를 쓰지 않고 화살표를 직접 누른다.
  */
+/**
+ * 리포트 탭에서 볼 자녀를 바꾼다.
+ *
+ * 자녀 고르기는 `SegmentedControl`이라 역할이 `radio`다(D-166) — `button`으로 찾으면 못 찾는다.
+ * 여덟 자리가 이 동작을 두 가지 방식(`getByRole` · `getByText`)으로 적고 있었고, 컴포넌트의
+ * 역할이 바뀌자 절반을 손봐야 했다.
+ */
+async function switchChild(page: Page, name: string) {
+  await page.getByRole('radio', { name }).click();
+}
+
 async function openRecordedMonth(page: Page) {
   const jump = page.getByTestId('report-latest-month');
   if ((await jump.count()) > 0) await jump.click();
@@ -215,7 +226,7 @@ test.describe('M3 학부모 흐름', () => {
     await expect(page.getByTestId('metric-personal-rate')).toBeVisible();
 
     // 정예린은 둘 다 있다
-    await page.getByRole('radio', { name: '정예린' }).click();
+    await switchChild(page, '정예린');
     await openRecordedMonth(page);
     await expect(page.getByText(/월 학원 과제$/)).toBeVisible();
     await expect(page.getByText(/월 개인 학습$/)).toBeVisible();
@@ -376,9 +387,9 @@ test.describe('M3 학부모 흐름', () => {
       (`HAEUN_OFFSETS = [-2, -4, -30]`) 오늘이 무슨 요일인지에 따라 이번 주에 들어온다.
       여기서 확인할 성질은 **요약이 자녀별로 따로 남는다**는 것이고, 그건 날짜와 무관하다.
     */
-    await page.getByRole('radio', { name: '이하은' }).click();
+    await switchChild(page, '이하은');
     await expect(page.getByTestId('week-summary-again')).toHaveCount(0);
-    await page.getByRole('radio', { name: '정예린' }).click();
+    await switchChild(page, '정예린');
     await expect(page.getByTestId('week-summary-again')).toBeVisible();
   });
 
@@ -414,13 +425,106 @@ test.describe('M3 학부모 흐름', () => {
     */
     const line = page.getByText(/님이 칭찬을 보냈어요/);
     const praise = await line.boundingBox();
-    const hero = await page.getByText('오늘 할 일을 다 끝냈어요').boundingBox();
+    /*
+      히어로를 **1단계 제목**으로 잡는다(D-168). 문장으로 잡으면 `오늘 할 일을 다 끝냈어요`와
+      `지금 해야 할 학습이 없어요`가 오늘 낸 것이 있는지에 따라 갈리므로(M9-15) 날짜에 매달린다.
+      제목은 세 상태 모두에 하나뿐이라 자리를 확인하는 데 그것이 맞다.
+    */
+    const hero = await page.getByRole('heading', { level: 1 }).boundingBox();
     expect(praise!.y).toBeLessThan(hero!.y);
     await expect(line).toContainText('꾸준히 했어요');
 
     // 확인하면 사라진다
     await page.getByRole('button', { name: '칭찬 확인' }).click();
     await expect(page.getByText(/님이 칭찬을 보냈어요/)).toHaveCount(0);
+  });
+
+  /*
+    학생 홈의 칭찬 줄을 두 가지로 확인한다(D-168). **한 테스트에 묶는다** — 둘 다 부모 로그인 +
+    자녀 로그인이 필요하고, 이 스위트는 로그인이 몰리면 GoTrue 한도에 걸린다(M-DB-15). 게다가
+    두 사실이 한 흐름에서 이어진다: 확인이 실패하면 되돌아오고, 성공하면 하나만 닫힌다.
+
+    ① **다시 읽는 동안 손에 있는 목록을 지우지 않는다.** 홈의 네 블록(진행 상황 · 학원 과제
+    섹션 · `학원에서 내준 과제물을 모두 마쳤어요.` · 담아 둔 학습)이 provider의 `loading`을 보고
+    있었는데, 그 값은 **재조회마다** 참이 된다. 쓰기가 실패하면 화면을 서버 값으로 되돌리려고
+    `reload()`가 돌기 때문에(`progress.tsx`의 `write`·`dismissPraise`) 실패 한 번이 목록을 통째로
+    지웠고, `학습을 불러오고 있어요.` 한 줄은 히어로의 한 가지에만 있어서 **아무 문장도 없이**
+    비는 화면이 됐다. 칭찬 확인은 이 홈의 유일한 쓰기라 그 실패를 트리거로 쓴다.
+
+    ② **확인 한 번은 칭찬 하나만 닫는다.** 홈은 미확인 칭찬 중 하나만 그리고 나머지를 `외 N개`로
+    접는데, 확인 버튼이 미확인 **전부**를 닫고 있었다 — 학생이 지난 칭찬을 다시 볼 화면은 앱에
+    없으므로(`praiseFor`를 읽는 곳은 학생 홈과 학부모 리포트뿐) 부모가 둘을 보내면 자녀는 하나만
+    읽고 나머지를 영구히 잃었다.
+
+    보이는 순서는 단정하지 않는다 — `sent_on`은 날짜라 같은 날 보낸 둘의 정렬 키가 같다. 대신
+    **먼저 보인 종류를 읽어 두고, 확인한 뒤 남은 줄이 그것이 아님**을 본다.
+  */
+  test('칭찬 확인은 실패하면 목록을 지우지 않고, 성공하면 한 줄만 닫는다', async ({ page }) => {
+    await loginParent(page);
+    await page.getByText('정예린').click();
+    await page.getByTestId('praise-open').click();
+    await page.getByTestId('praise-steady').click();
+    await expect(page.getByTestId('toast')).toHaveText('칭찬을 보냈어요');
+    await page.getByTestId('praise-open').click();
+    await page.getByTestId('praise-reviewed').click();
+    await expect(page.getByTestId('praise-sent')).toContainText('오답을 다시 봤어요');
+
+    await page.getByRole('link', { name: '내 정보' }).click();
+    await page.getByText('로그아웃').click();
+    await loginHere(page, 'yerin');
+
+    // 정예린은 배정 4건을 모두 냈다 — 진행 상황(`마친 학습`)과 다 마쳤다는 한 줄이 함께 선다.
+    const progress = page.getByTestId('home-progress');
+    const cleared = page.getByTestId('academy-cleared');
+    await expect(progress).toBeVisible();
+    await expect(cleared).toBeVisible();
+    const line = page.getByText(/님이 칭찬을 보냈어요/);
+    await expect(line).toContainText('외 1개');
+
+    /*
+      ① 확인 쓰기를 막고 다시 읽기를 느리게 만들어 재조회 창을 넓힌다. 나중에 등록한 핸들러가
+      먼저 걸리므로 이 순서여야 한다(GET은 지연 핸들러 → `fallback()` → 아래 핸들러).
+    */
+    await page.route('**/rest/v1/praises**', async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+        return;
+      }
+      await route.fallback();
+    });
+    await page.route('**/rest/v1/**', async (route) => {
+      if (route.request().method() === 'GET') await new Promise((r) => setTimeout(r, 2_000));
+      await route.fallback();
+    });
+
+    await page.getByRole('button', { name: '칭찬 확인' }).click();
+    /*
+      실패 토스트가 뜬 시점이면 재조회는 이미 돌고 있다(`reload()`는 토스트 앞에서 불린다).
+      그 순간의 상태를 본다 — `toBeVisible()`은 재시도하므로 2초 뒤 돌아오는 것과 구분하지 못한다.
+    */
+    await expect(page.getByTestId('toast')).toBeVisible();
+    expect(await progress.isVisible()).toBe(true);
+    expect(await cleared.isVisible()).toBe(true);
+    await page.waitForTimeout(500);
+    expect(await progress.isVisible()).toBe(true);
+    expect(await cleared.isVisible()).toBe(true);
+
+    // ② 막았던 것을 풀면 확인하지 못한 칭찬이 그대로 돌아온다(낙관적 갱신이 되돌려졌다)
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await expect(line).toContainText('외 1개', { timeout: 15_000 });
+    const first = (await line.textContent())?.includes('꾸준히 했어요')
+      ? '꾸준히 했어요'
+      : '오답을 다시 봤어요';
+
+    // 한 번 확인하면 그 줄만 닫히고 남은 칭찬이 이어서 나온다
+    await page.getByRole('button', { name: '칭찬 확인' }).click();
+    await expect(line).toBeVisible();
+    await expect(line).not.toContainText(first);
+    await expect(line).not.toContainText('외');
+
+    // 남은 하나까지 확인하면 사라진다
+    await page.getByRole('button', { name: '칭찬 확인' }).click();
+    await expect(line).toHaveCount(0);
   });
 
   test('자세히 보기에서 기한 내 제출과 반 구간을 보고 리포트로 돌아온다', async ({ page }) => {
@@ -449,7 +553,7 @@ test.describe('M3 학부모 흐름', () => {
     await loginParent(page);
     await page.getByRole('link', { name: '리포트' }).click();
     await expect(page).toHaveURL(/\/parent\/report/);
-    await page.getByRole('radio', { name: '정예린' }).click();
+    await switchChild(page, '정예린');
     await expect(page.getByText('정예린 님 리포트')).toBeVisible();
     await openRecordedMonth(page);
     await expect(page.getByText(/\d+월 학습$/)).toBeVisible();

@@ -12,6 +12,7 @@ export { ContentComposer } from './ContentComposer';
 export { Divider } from './Divider';
 export { Disclosure } from './Disclosure';
 export { EmptyState } from './EmptyState';
+export { LoadFailed } from './LoadFailed';
 export { Field } from './Field';
 export { Group } from './Group';
 export { Icon, type IconName } from './Icon';

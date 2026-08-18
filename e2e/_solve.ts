@@ -1,6 +1,19 @@
 import { type Page } from '@playwright/test';
 
 /**
+ * 풀이 화면의 **보기** 라디오. 이름으로 고른다.
+ *
+ * 순서로 세면(`getByRole('radio').first()`) 화면 맨 위 `5문항씩 / 한 문항씩` 보기 방식 토글이
+ * 먼저 걸린다 — 그 토글도 하나를 고르는 라디오 묶음이기 때문이다(D-166). 이름 규칙은
+ * 풀이 화면 한 곳이 정하므로, 스펙들이 정규식을 각자 적으면 그 한 문자열이 바뀔 때
+ * 다섯 파일을 찾아야 한다.
+ *
+ * `n`을 주면 그 번째 보기만(`보기 1`), 없으면 모든 보기다.
+ */
+export const choices = (page: Page, n?: number) =>
+  page.getByRole('radio', { name: n == null ? /보기 \d+$/ : new RegExp(`보기 ${n}$`) });
+
+/**
  * 풀이 화면에서 모든 문항의 첫 보기를 고른다.
  * 문항은 한 화면에 최대 5개만 나오므로 '다음'으로 페이지를 넘기며 고른다.
  * 보기 수가 문항마다 달라도 되도록 '…보기 1' 라디오만 눌러 센다.
@@ -8,7 +21,7 @@ import { type Page } from '@playwright/test';
 export async function answerAll(page: Page) {
   // 페이지 수 상한. 무한 루프를 막는 안전장치다(문항 100개까지).
   for (let guard = 0; guard < 20; guard++) {
-    const firstChoices = page.getByRole('radio', { name: /보기 1$/ });
+    const firstChoices = choices(page, 1);
     const count = await firstChoices.count();
     for (let i = 0; i < count; i++) await firstChoices.nth(i).click();
     const next = page.getByTestId('solve-next');

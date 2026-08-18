@@ -32,8 +32,13 @@ export function Section({
       {separated ? <Divider /> : null}
       {title || action ? (
         <View style={styles.head}>
+          {/*
+            **섹션 제목은 2단계다**(D-166 · `DESIGN.md` §4) — `Screen`의 화면 제목이 1단계이므로
+            단계를 건너뛰지 않는다. 호출부 124곳이 각자 붙이게 두면 규칙만 문서에 남는다.
+            섹션 안에 섹션을 두는 자리가 생기면 그때 `headingLevel` prop을 열어 3을 받는다.
+          */}
           {title ? (
-            <AppText variant="subheading" style={styles.title}>
+            <AppText variant="subheading" headingLevel={2} style={styles.title}>
               {title}
             </AppText>
           ) : null}

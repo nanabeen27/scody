@@ -95,21 +95,23 @@ function vars(p: Record<ColorName, string>): string {
 }
 
 /**
- * 키보드 포커스 링. **한곳에서만 정한다** — 컴포넌트마다 그리면 모양이 갈리고,
- * 브라우저 기본 링은 팔레트와 맞지 않고 `borderRadius`를 따르지 않는다.
- * `:focus-visible`이라 마우스 클릭에는 뜨지 않는다.
+ * **우리가 그리지 않은 브라우저 표면**을 팔레트로 맞춘다. 한곳에서만 정한다 —
+ * 컴포넌트마다 그리면 모양이 갈리고, 브라우저 기본값은 어느 팔레트에도 속하지 않는다.
+ * 값이 CSS 변수라 다크에서도 알아서 갈린다.
+ *
+ * - **키보드 포커스 링**: 기본 링은 색이 맞지 않고 `borderRadius`를 따르지 않는다.
+ *   `:focus-visible`이라 마우스 클릭에는 뜨지 않는다.
+ * - **선택 영역**: 기본 선택색은 파랑이라, 지문을 드래그해 읽는 순간 우리 색이 아닌 색이
+ *   한 덩어리 생긴다. `accentSoft` 위의 `ink`는 라이트·다크 모두 대비가 넉넉하다.
+ *
+ * 다음 전역 규칙(캐럿 색·`text-size-adjust`·스크롤바)도 여기 넣는다. 이름이 `FOCUS_CSS`였을
+ * 때 `::selection`이 들어오면서 상수 이름이 내용보다 좁아졌다.
  */
-export const FOCUS_CSS = `
+export const GLOBAL_CSS = `
 :focus-visible{outline:2px solid var(--sc-accent);outline-offset:2px;border-radius:inherit}
 :focus:not(:focus-visible){outline:none}
 ::selection{background:var(--sc-accentSoft);color:var(--sc-ink)}
 `;
-
-/*
-  `::selection`도 같은 자리에서 정한다. 브라우저 기본 선택색은 어느 팔레트에도 속하지 않는
-  파랑이라, 지문을 드래그해 읽는 순간 화면에 우리 색이 아닌 색이 한 덩어리 생긴다. 값이 CSS
-  변수라 다크에서도 알아서 갈린다(`accentSoft` 위의 `ink`는 라이트·다크 모두 대비가 넉넉하다).
-*/
 
 export const THEME_CSS = `
 :root{${vars(PALETTE_LIGHT)}}

@@ -251,10 +251,18 @@ const styles = StyleSheet.create({
     marginVertical: -spacing.sm,
   },
   navList: { gap: 2, flex: 1 },
+  /*
+    데스크톱 사이드바 메뉴 줄. **누름 영역은 44 이상이다**(§10 · A-125).
+    `paddingVertical: sm`만 두었더니 라벨 줄높이 23 + 16 = **39px**이었다(실측 1280). 마우스로
+    쓰는 자리라 곧바로 위험한 것은 아니지만, 같은 사이드바를 손가락으로 쓰는 폭도 있고 하한을
+    화면마다 예외로 두면 규칙이 규칙이 아니게 된다. 여백은 그대로 두고 최소 높이만 올린다.
+  */
   navItem: {
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderRadius: radius.md,
+    minHeight: touch.min,
+    justifyContent: 'center',
   },
   navItemRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   navItemActive: { backgroundColor: colors.accentSoft },

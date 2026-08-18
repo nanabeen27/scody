@@ -1,5 +1,5 @@
 import { StyleSheet } from 'react-native';
-import { spacing } from './tokens';
+import { spacing, touch } from './tokens';
 
 /*
   여기 `row.center`·`row.between`·`row.wrap`·`row.baseline`·`row.end`가 있었다. **지운다.**
@@ -42,6 +42,27 @@ export const inset = StyleSheet.create({
   /** 보조 행동 한 줄. 행동은 줄의 오른쪽 끝에 선다(§8 규칙 ③). */
   action: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md, ...endAligned },
 });
+
+/**
+ * **글자 한 줄인 링크의 누름 영역을 44로 키운다**(`DESIGN.md` §10).
+ *
+ * 커진 만큼 위아래 음수 마진으로 되돌리므로 **줄 높이는 그대로다** — 목록·푸터·제목 옆의
+ * 세로 리듬을 건드리지 않으면서 손가락 영역만 넓힌다. `IconButton`의 `inset`이 아이콘에 대해
+ * 하는 일과 같고, `hitSlop`은 react-native-web의 `Pressable`에서 듣지 않아 쓸 수 없다.
+ *
+ * `-spacing.md`(12)는 **캡션·라벨 한 줄(약 20px)** 기준이다: `(44 − 20) / 2`. 글자가 그보다
+ * 크면(워드마크 34px 등) 그 자리에서 자기 높이로 계산한다 — `Brand`가 그렇다.
+ *
+ * 이 상수는 호출부 셋을 옮긴 뒤에 두었다(`TextLink` · 법률 링크 푸터 · 담아 둔 학습 `전체 N개`).
+ * 위 주석이 경고하는 순서를 지킨다.
+ */
+const textLine = {
+  minHeight: touch.min,
+  justifyContent: 'center',
+  marginVertical: -spacing.md,
+} as const;
+
+export const tap = StyleSheet.create({ textLine });
 
 export const a11y = StyleSheet.create({
   /**

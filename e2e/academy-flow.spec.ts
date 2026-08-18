@@ -153,7 +153,7 @@ test.describe('M4 학원 흐름', () => {
     await page.getByText('로그아웃').click();
     await loginHere(page, 'yerin'); // 고1 국어 반 학생
 
-    await expect(page.getByTestId('home-academy-new')).toHaveText('새 과제가 배정되었어요');
+    await expect(page.getByTestId('home-academy-new')).toHaveText('아직 시작하지 않은 과제가 있어요');
 
     // 한 문항만 고르고 나온다. 답이 저장되는 순간 '진행 중'이 되어 새 과제에서 빠진다.
     await page.getByRole('link', { name: '학습' }).click();
@@ -168,11 +168,7 @@ test.describe('M4 학원 흐름', () => {
     // 풀이 화면은 집중 모드라 탭이 없다. 들어온 길로 나와 홈으로 간다.
     await page.getByTestId('focus-exit').click();
     await page.getByTestId('brand-home').click();
-    /*
-      **히어로를 본다.** 예전에는 `학원에서 내준 과제가 있어요` 섹션 제목을 봤는데, 남은 과제가
-      하나면 그것이 히어로에 올라가 목록이 비고 섹션은 그려지지 않는다(D-167) — 같은 사실을
-      네 번 말하던 블록을 없앴다. 확인할 성질은 그대로다: **그 과제가 아직 할 일로 남아 있다.**
-    */
+    // 그 과제가 아직 할 일로 남아 있다 — 남은 과제가 하나면 섹션이 아니라 히어로가 말한다(D-167).
     await expect(page.getByTestId('today-primary')).toContainText('헷갈리는 맞춤법·어법');
     await expect(page.getByTestId('home-academy-new')).toHaveCount(0);
   });
@@ -183,11 +179,7 @@ test.describe('M4 학원 흐름', () => {
     // 박도윤: 현대소설 점검(2026-07-24 마감)이 미제출로 남아 있다.
     await page.goto('/login');
     await loginHere(page, 'doyun');
-    /*
-      **히어로를 본다.** 예전에는 `학원에서 내준 과제가 있어요` 섹션 제목을 봤는데, 남은 과제가
-      하나면 그것이 히어로에 올라가 목록이 비고 섹션은 그려지지 않는다(D-167) — 같은 사실을
-      네 번 말하던 블록을 없앴다. 확인할 성질은 그대로다: **그 과제가 아직 할 일로 남아 있다.**
-    */
+    // 그 과제가 아직 할 일로 남아 있다 — 남은 과제가 하나면 섹션이 아니라 히어로가 말한다(D-167).
     await expect(page.getByTestId('today-primary')).toContainText('현대소설 점검');
     await expect(page.getByTestId('home-academy-new')).toHaveCount(0);
 
@@ -211,7 +203,7 @@ test.describe('M4 학원 흐름', () => {
     await page.getByRole('link', { name: '학원 관리' }).click();
     await page.getByText('로그아웃').click();
     await loginHere(page, 'doyun');
-    await expect(page.getByTestId('home-academy-new')).toHaveText('새 과제가 배정되었어요');
+    await expect(page.getByTestId('home-academy-new')).toHaveText('아직 시작하지 않은 과제가 있어요');
   });
 
   test('잘못된 마감일은 배정 전에 알려준다', async ({ page }) => {

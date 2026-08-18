@@ -171,7 +171,8 @@ test.describe('M1 소개·로그인·역할 분기', () => {
   test('테스트 계정으로 로그인한다', async ({ page }) => {
     await login(page, 'doyun');
     await expect(page).toHaveURL(/\/student/);
-    await expect(page.getByText(/박도윤님/)).toBeVisible();
+    // 존칭은 띄어 쓴다 — 앱 관례에 맞췄다(A-132).
+    await expect(page.getByText(/박도윤 님/)).toBeVisible();
   });
 
   /*

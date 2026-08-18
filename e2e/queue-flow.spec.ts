@@ -40,7 +40,8 @@ test.describe('M8 담아 둔 학습', () => {
 
     // 홈에 담아 둔 학습이 모인다(히어로가 담은 학습을 먼저 쓴다)
     await page.getByTestId('brand-home').click();
-    await expect(page.getByTestId('today-primary').getByText('담아 둔 학습')).toBeVisible();
+    // 히어로 라벨은 상태와 무관하게 `오늘의 학습`이다(A-128) — 출처는 태그가 말한다.
+    await expect(page.getByTestId('today-primary').getByText('개인 학습')).toBeVisible();
     await page.getByTestId('home-queue-all').click();
     await expect(page).toHaveURL(/\/student\/queue/);
     await expect(page.getByTestId('student-queue')).toBeVisible();

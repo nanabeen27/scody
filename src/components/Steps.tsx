@@ -23,7 +23,13 @@ const MAX = 12;
  * 도울 뿐이므로, 역할과 값을 모두 뺀다.
  */
 export function Steps({ done, total }: { done: number; total: number }) {
-  if (total <= 0 || total > MAX) return null;
+  /*
+    **한 칸은 그리지 않는다.** 칸이 하나면 개수를 말해 주지 못하고, 옆에 늘 함께 있는
+    `0 / 1 완료`가 이미 같은 말을 한다 — 남는 것은 폭만 채운 선 하나다. 상한(`MAX`)과 같은
+    이유의 같은 판단이라 **이 컴포넌트가 함께 갖는다**: 호출부가 각자 `total > 1`을 물으면
+    한 결정에 주인이 둘이 된다.
+  */
+  if (total <= 1 || total > MAX) return null;
   const filled = Math.max(0, Math.min(total, Math.round(done)));
   return (
     <View

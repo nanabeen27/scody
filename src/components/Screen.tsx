@@ -103,7 +103,16 @@ export function Screen({
                 {eyebrow}
               </AppText>
             ) : null}
-            {title ? <AppText variant="title">{title}</AppText> : null}
+            {/*
+              **화면 제목은 여기서 1단계가 된다**(D-166 · `DESIGN.md` §4). 호출부 62곳이 각자
+              붙이게 두면 새 화면이 조용히 제목 없이 나간다 — 실제로 `headingLevel`을 처음 넣을
+              때 손으로 붙인 자리만 제목이 있었다. 모양은 바뀌지 않는다.
+            */}
+            {title ? (
+              <AppText variant="title" headingLevel={1}>
+                {title}
+              </AppText>
+            ) : null}
             {lead ? (
               <AppText variant="bodyLg" tone="secondary">
                 {lead}

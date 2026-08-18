@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppText, Brand, Divider, ThemeToggle } from '@/components';
-import { LEGAL_DOCS } from '@/features/legal/documents';
-import { colors, radius, spacing, touch } from '@/theme/tokens';
+import { LegalLinks } from '@/features/legal/LegalLinks';
+import { tap } from '@/theme/styles';
+import { colors, radius, spacing } from '@/theme/tokens';
 import { useResponsive } from '@/theme/useResponsive';
 
 /**
@@ -194,25 +194,10 @@ export function AuthError({ children }: { children: string }) {
 
 /** 문서 링크와 테마. 로그인 화면에서도 약관·처리방침을 열 수 있어야 한다. */
 function AuthFooter() {
-  const router = useRouter();
   return (
     <View style={styles.footer}>
       <Divider />
-      <View style={styles.footerLinks}>
-        {LEGAL_DOCS.map((d) => (
-          <Pressable
-            key={d.slug}
-            testID={`auth-footer-${d.slug}`}
-            accessibilityRole="link"
-            onPress={() => router.push(`/legal/${d.slug}` as never)}
-            style={({ pressed }) => [styles.footerLink, pressed && { opacity: 0.6 }]}
-          >
-            <AppText variant="caption" tone="secondary">
-              {d.label}
-            </AppText>
-          </Pressable>
-        ))}
-      </View>
+      <LegalLinks testIDPrefix="auth-footer" />
       {/*
         **`tertiary`가 아니다.** 초안이라는 사실을 알리는 문장이라 반드시 읽혀야 하는데
         `inkTertiary`는 배경과 **2.96:1**(라이트, 실측)로 AA 4.5:1에 크게 미달했다.
@@ -258,19 +243,9 @@ const styles = StyleSheet.create({
   labeled: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   labeledLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
 
-  /*
-    인증 화면에서 가장 자주 눌리는 것이 이 링크들이다(회원가입·다른 방법으로 로그인·약관).
-    커진 만큼 음수 마진으로 되돌려 패널 안 세로 리듬은 그대로 둔다.
-  */
-  link: {
-    alignSelf: 'flex-start',
-    minHeight: touch.min,
-    justifyContent: 'center',
-    marginVertical: -spacing.md,
-  },
+  // 누름 영역 44는 `tap.textLine`이 맡는다. 여기서는 폭만 내용에 맞춘다.
+  link: { alignSelf: 'flex-start', ...tap.textLine },
   error: { color: colors.danger },
 
   footer: { gap: spacing.md, alignItems: 'flex-start' },
-  footerLinks: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.lg },
-  footerLink: { minHeight: touch.min, justifyContent: 'center', marginVertical: -spacing.md },
 });

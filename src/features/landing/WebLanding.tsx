@@ -1,14 +1,15 @@
 import { useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import { useRouter } from 'expo-router';
 import Svg, { Circle, Line, Path, Polyline } from 'react-native-svg';
 import { AppText, Brand, Button, Group, Icon, ProgressBar, Row, ThemeToggle, SegmentedControl } from '@/components';
-import { colors, control, spacing, radius, touch, typeface } from '@/theme/tokens';
+import { colors, control, spacing, radius, typeface } from '@/theme/tokens';
 import { useResponsive } from '@/theme/useResponsive';
 import { useSession } from '@/session';
-import { homeHrefFor, ROLE_LABEL } from '@/session/routing';
-import { DEV_ACCOUNTS, DEV_LOGIN_ENABLED } from '@/session/devAccounts';
-import { LEGAL_DOCS } from '@/features/legal/documents';
+import { homeHrefFor } from '@/session/routing';
+import { DEV_LOGIN_ENABLED } from '@/session/devAccounts';
+import { DemoAccounts } from '@/features/auth/DemoAccounts';
+import { LegalLinks } from '@/features/legal/LegalLinks';
 import { Reveal } from './Reveal';
 
 /** 소개 페이지에서 고르는 방문자 유형. 앱 역할(Role)과 달리 '선생님'은 학원 역할을 가리킨다. */
@@ -55,6 +56,7 @@ export function WebLanding() {
   const router = useRouter();
   const { account, signInWithTestAccount } = useSession();
   const [visitor, setVisitor] = useState<Visitor>('student');
+  const [showDemo, setShowDemo] = useState(false);
   // 목업이 440px 고정폭이라 태블릿(820)에서 2단으로 두면 본문 컬럼이 짜부라진다.
   const heroTwoCol = isDesktop;
   const view = VISITOR_VIEW[visitor];
@@ -187,7 +189,7 @@ export function WebLanding() {
                   hug={!isMobile}
                   label={view.cta}
                   onPress={() => router.push(view.ctaHref as never)}
-                  style={styles.heroBtn}
+                  style={styles.ctaPad}
                 />
               </View>
             )}
@@ -231,7 +233,7 @@ export function WebLanding() {
               size="lg"
               label={view.cta}
               onPress={() => router.push(view.ctaHref as never)}
-              style={styles.finalBtn}
+              style={styles.ctaPad}
             />
             {visitor === 'teacher' ? null : (
               <Button
@@ -240,7 +242,7 @@ export function WebLanding() {
                 size="lg"
                 label="학원으로 가입하기"
                 onPress={() => router.push('/signup?role=academy' as never)}
-                style={styles.finalBtn}
+                style={styles.ctaPad}
               />
             )}
           </View>
@@ -256,21 +258,7 @@ export function WebLanding() {
               스코디 · 고등 국어 학습 플랫폼
             </AppText>
           </View>
-          <View style={styles.footerLinks}>
-            {LEGAL_DOCS.map((d) => (
-              <Pressable
-                key={d.slug}
-                testID={`footer-${d.slug}`}
-                accessibilityRole="link"
-                onPress={() => router.push(`/legal/${d.slug}` as never)}
-                style={({ pressed }) => [styles.footerLink, pressed && { opacity: 0.6 }]}
-              >
-                <AppText variant="caption" tone="secondary">
-                  {d.label}
-                </AppText>
-              </Pressable>
-            ))}
-          </View>
+          <LegalLinks testIDPrefix="footer" />
           <AppText variant="caption" tone="secondary">
             이용약관과 개인정보처리방침은 검토 전 초안이에요. 사업자 등록 정보는 아직 없어요.
           </AppText>
@@ -278,7 +266,14 @@ export function WebLanding() {
             개발용 로그인이 꺼진 빌드에는 이 목록을 두지 않는다(D-135). 공개 소개
             페이지라서, 켜져 있으면 아무나 계정 목록을 보고 들어올 수 있다.
           */}
-          {DEV_LOGIN_ENABLED ? <DemoAccounts onEnter={(id) => void enterDemo(id)} /> : null}
+          {DEV_LOGIN_ENABLED ? (
+            <DemoAccounts
+              testID="landing-demo-toggle"
+              open={showDemo}
+              onOpenChange={setShowDemo}
+              onEnter={(id) => void enterDemo(id)}
+            />
+          ) : null}
         </View>
       </View>
     </ScrollView>
@@ -694,7 +689,7 @@ function FeatureRow({
       <View style={[styles.feature, row && (reverse ? styles.featureRowRev : styles.featureRow)]}>
         <Reveal style={row ? styles.featureHalf : undefined}>
           <View style={styles.featureIndexRow}>
-            <AppText variant="eyebrow" tone="secondary" style={styles.featureIndex}>
+            <AppText variant="eyebrow" tone="secondary">
               {index}
             </AppText>
             <AppText variant="caption" tone="secondary">
@@ -1182,55 +1177,6 @@ function CompareSection() {
   );
 }
 
-/* ---------- 테스트 계정 ---------- */
-
-function DemoAccounts({ onEnter }: { onEnter: (scodyId: string) => void }) {
-  const [show, setShow] = useState(false);
-  // seed가 만든 개발용 계정. 로그인 전에는 DB에서 아무것도 읽을 수 없어 목록이 클라이언트에 있다.
-  const accounts = DEV_ACCOUNTS;
-  return (
-    <View style={styles.demoBox}>
-      {/*
-        로그인 화면의 같은 컨트롤과 같은 모양으로 둔다(`app/login.tsx`의 `login-demo-toggle`).
-        맨 `Pressable` + 캡션이라 누름 영역이 **20px**이었고 펼침 표시도 없었다.
-      */}
-      <Button
-        testID="landing-demo-toggle"
-        variant="ghost"
-        size="sm"
-        hug
-        leading={
-          <Icon
-            name={show ? 'chevron-down' : 'chevron-right'}
-            size={15}
-            color={colors.inkSecondary}
-          />
-        }
-        label={show ? '테스트 계정 숨기기' : '테스트 계정 보기'}
-        onPress={() => setShow((v) => !v)}
-      />
-      {show ? (
-        <>
-          <AppText variant="caption" tone="secondary">
-            개발용 계정이에요. 실제 사용자 데이터가 아니에요.
-          </AppText>
-          <Group>
-            {accounts.map((a) => (
-              <Row
-                key={a.scodyId}
-                title={`${a.name} · ${a.roles.map((r) => ROLE_LABEL[r]).join('/')}`}
-                subtitle={a.note}
-                onPress={() => onEnter(a.scodyId)}
-                showChevron
-              />
-            ))}
-          </Group>
-        </>
-      ) : null}
-    </View>
-  );
-}
-
 const MAXW = 1040;
 
 const styles = StyleSheet.create({
@@ -1278,8 +1224,8 @@ const styles = StyleSheet.create({
   heroTitleMobile: { fontSize: 28, lineHeight: 40 },
   heroSub: { maxWidth: 460, marginTop: spacing.xs },
   heroActions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.lg },
-  // 높이·모서리는 `size="lg"`가 정한다. 좌우 여백만 소개 페이지 쪽이 더 넉넉하다.
-  heroBtn: { paddingHorizontal: spacing.xl },
+  // 높이·모서리는 `size="lg"`가 정한다. 좌우 여백만 소개 페이지 쪽이 더 넉넉하다(히어로·마지막 띠 공용).
+  ctaPad: { paddingHorizontal: spacing.xl },
 
   heroVisual: { alignItems: 'center' },
   heroVisualCol: { flex: 1 },
@@ -1364,11 +1310,6 @@ const styles = StyleSheet.create({
   featureHalf: { flex: 1 },
   featureVisualMobile: { alignItems: 'center' },
   featureIndexRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  /*
-    불투명도를 걷어냈다. `accent` + `opacity: 0.6`이라 12px 글자가 배경과 **2.25:1**이었다(실측).
-    순서를 말하는 표시라 장식이 아니고, 그래서 읽혀야 한다.
-  */
-  featureIndex: {},
   featureTitle: {
     ...keepAll,
     marginTop: spacing.md,
@@ -1498,7 +1439,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
     justifyContent: 'center',
   },
-  finalBtn: { paddingHorizontal: spacing.xl },
 
   footer: {
     width: '100%',
@@ -1515,12 +1455,4 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
   },
   footerTop: { gap: spacing.xs },
-  footerLinks: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.lg },
-  /*
-    푸터 링크는 휴대폰에서 손가락으로 누른다. `paddingVertical: 2`라 실제 높이가 **24px**이었다
-    (§10 하한 44 미달, 실측). `AuthShell`의 푸터가 이미 답을 갖고 있었다 — 누름 영역만 44로 키우고
-    커진 만큼 음수 마진으로 되돌려 줄 간격은 그대로 둔다.
-  */
-  footerLink: { minHeight: touch.min, justifyContent: 'center', marginVertical: -spacing.md },
-  demoBox: { gap: spacing.md, alignItems: 'flex-start' },
 });

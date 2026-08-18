@@ -1,17 +1,7 @@
 import { useState } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import {
-  AppText,
-  Button,
-  Divider,
-  Field,
-  Group,
-  Icon,
-  KakaoSymbol,
-  PhoneMark,
-  Row,
-} from '@/components';
+import { AppText, Button, Divider, Field, KakaoSymbol, PhoneMark } from '@/components';
 import {
   AuthError,
   AuthHeading,
@@ -20,9 +10,10 @@ import {
   LabeledDivider,
   TextLink,
 } from '@/features/auth/AuthShell';
+import { DemoAccounts } from '@/features/auth/DemoAccounts';
 import { useSession } from '@/session';
-import { DEV_ACCOUNTS, DEV_KAKAO_SCODY_ID, DEV_LOGIN_ENABLED } from '@/session/devAccounts';
-import { homeHrefFor, ROLE_LABEL } from '@/session/routing';
+import { DEV_KAKAO_SCODY_ID, DEV_LOGIN_ENABLED } from '@/session/devAccounts';
+import { homeHrefFor } from '@/session/routing';
 import { colors, spacing } from '@/theme/tokens';
 
 /**
@@ -146,45 +137,12 @@ export default function Login() {
           것을 두면 `눌러도 아무 일이 없는 버튼`이 된다(`DESIGN.md` §8).
         */
         !DEV_LOGIN_ENABLED ? null : (
-        <View style={styles.demoBox}>
-          {/*
-            글자에 `onPress`만 붙이면 스크린리더에는 그냥 글로 읽히고 누를 영역도 20px이다.
-            프로토타입 진입에 실제로 쓰는 컨트롤이라 버튼으로 둔다.
-          */}
-          <Button
+          <DemoAccounts
             testID="login-demo-toggle"
-            variant="ghost"
-            size="sm"
-            hug
-            leading={
-              <Icon
-                name={showDemo ? 'chevron-down' : 'chevron-right'}
-                size={15}
-                color={colors.inkSecondary}
-              />
-            }
-            label={showDemo ? '테스트 계정 숨기기' : '테스트 계정 보기'}
-            onPress={() => setShowDemo((v) => !v)}
+            open={showDemo}
+            onOpenChange={setShowDemo}
+            onEnter={(id) => void enterTest(id)}
           />
-          {showDemo ? (
-            <>
-              <AppText variant="caption" tone="secondary">
-                개발용 계정이에요. 실제 사용자 데이터가 아니에요.
-              </AppText>
-              <Group>
-                {DEV_ACCOUNTS.map((a) => (
-                  <Row
-                    key={a.scodyId}
-                    title={`${a.name} · ${a.roles.map((r) => ROLE_LABEL[r]).join('/')}`}
-                    subtitle={a.note}
-                    onPress={() => void enterTest(a.scodyId)}
-                    showChevron
-                  />
-                ))}
-              </Group>
-            </>
-          ) : null}
-        </View>
         )
       }
     >
@@ -324,5 +282,4 @@ const styles = StyleSheet.create({
   actions: { gap: spacing.md },
   errorBox: { gap: spacing.md, alignItems: 'flex-start' },
   signupBox: { gap: spacing.sm, alignItems: 'flex-start' },
-  demoBox: { gap: spacing.md, alignItems: 'flex-start' },
 });
