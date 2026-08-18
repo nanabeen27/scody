@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { findContent, type Assignment, type ContentSet } from '@/data';
 import { useSession } from '@/session';
 import { useProgress, type Attempt, type WrongNote } from './progress';
@@ -643,10 +643,55 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
 
 export type ChildReportData = ReturnType<typeof buildChildReport>;
 
+/**
+ * 리포트가 **얼마나 아는지**. 계산 결과와 함께 내보낸다.
+ *
+ * 계산은 두 조회(`useProgress` · `useContent`)에서 온다. 그런데 학부모 화면 셋은 그 조회의
+ * `loading`·`loaded`·`error`를 한 번도 보지 않아서, 첫 조회 중과 조회 실패 뒤에 `기록이 없다`고
+ * 단정했다 — 학생 화면이 D-133·D-136·D-168로 닫은 결함이 학부모 쪽에 그대로 남아 있었다.
+ * 상태를 화면마다 다시 조립하지 않고 여기서 한 번 만든다: 세 화면이 같은 사실을 말해야 한다.
+ */
+export interface ReportLoad {
+  /**
+   * 두 조회의 **첫 조회**가 끝났는지. 게이트는 `loading`이 아니라 이 값으로 건다(D-168) —
+   * `loading`은 `reading || !loaded`라 재조회마다 참이 되고, 그것으로 목록을 감추면 쓰기
+   * 실패가 부른 `reload()` 한 번에 손에 있는 리포트가 통째로 사라진다.
+   *
+   * **첫 조회가 실패해도 참이 된다**(두 provider가 성공·실패를 함께 끝으로 본다) —
+   * 그래서 실패 줄이 정상적으로 나오고 화면이 `불러오고 있어요`에서 영구히 멈추지 않는다.
+   */
+  loaded: boolean;
+  /** 조회가 도는 중. **재조회**는 `loading && loaded`다(`LoadFailed`의 `retrying`). */
+  loading: boolean;
+  /**
+   * 실패 문장(서버가 준 `errorMessage`) 또는 `null`.
+   * **첫 조회 중에는 `null`이다** — 자녀를 바꿔 첫 조회가 도는 동안 앞 자녀의 실패 문장이
+   * 남으면 지금 무슨 일이 일어나는지 알 수 없다(D-136이 정한 것과 같은 이유).
+   */
+  error: string | null;
+  /** 두 조회를 함께 다시 시도한다. 실패가 어느 쪽에서 왔는지 학부모가 고를 일은 아니다. */
+  reload: () => Promise<void>;
+}
+
 /** 자녀 한 명의 월간 리포트. 열람 권한은 `attemptsOf`가 검사한다(연결된 자녀만). */
-export function useChildReport(childId: string, month?: string): ChildReportData {
-  const { assignments, attemptsOf, wrongNotesOf, comparisonsOf } = useProgress();
-  const { sets } = useContent();
+export function useChildReport(childId: string, month?: string): ChildReportData & ReportLoad {
+  const {
+    assignments,
+    attemptsOf,
+    wrongNotesOf,
+    comparisonsOf,
+    loading: progressLoading,
+    loaded: progressLoaded,
+    error: progressError,
+    reload: reloadProgress,
+  } = useProgress();
+  const {
+    sets,
+    loading: contentLoading,
+    loaded: contentLoaded,
+    error: contentError,
+    reload: reloadContent,
+  } = useContent();
   const { studentClasses } = useSession();
   const attempts = attemptsOf(childId);
   const comparisons = comparisonsOf(childId);
@@ -654,7 +699,7 @@ export function useChildReport(childId: string, month?: string): ChildReportData
   const today = todayISO();
   const classIds = studentClasses(childId).map((c) => c.id);
   const classKey = classIds.join(',');
-  return useMemo(
+  const data = useMemo(
     () =>
       buildChildReport(
         childId,
@@ -663,6 +708,16 @@ export function useChildReport(childId: string, month?: string): ChildReportData
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- classIds는 매 렌더 새 배열이라 문자열 키로 비교한다.
     [childId, assignments, attempts, wrongNotes, sets, today, month, classKey, comparisons],
+  );
+  const loaded = progressLoaded && contentLoaded;
+  const loading = progressLoading || contentLoading;
+  const error = loaded ? (progressError ?? contentError) : null;
+  const reload = useCallback(async () => {
+    await Promise.all([reloadProgress(), reloadContent()]);
+  }, [reloadProgress, reloadContent]);
+  return useMemo(
+    () => ({ ...data, loaded, loading, error, reload }),
+    [data, loaded, loading, error, reload],
   );
 }
 
