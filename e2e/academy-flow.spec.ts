@@ -229,9 +229,15 @@ test.describe('M4 학원 흐름', () => {
   test('원장: 학원 관리에 초대와 선생님 목록', async ({ page }) => {
     await loginAs(page, 'hanbit.director');
     await page.getByRole('link', { name: '학원 관리' }).click();
-    // 초대 링크 목록과 선생님 초대 섹션이 함께 있다. 제목은 여러 곳에 나오므로 첫 번째로 좁힌다.
+    /*
+      앞 두 줄은 **초대 목록의 행**이다(seed가 한빛학원에 학생·학부모·선생님 초대를 하나씩 심는다 —
+      `scripts/gen-seed.ts`). 만들기 UI는 종류를 고르는 컨트롤이 생기면서 `초대 만들기` 한 섹션이
+      되었으므로 그것을 따로 단정한다. 제목은 여러 곳에 나오므로 첫 번째로 좁힌다.
+    */
     await expect(page.getByText('학생 초대').first()).toBeVisible();
     await expect(page.getByText('선생님 초대').first()).toBeVisible();
+    await expect(page.getByText('초대 만들기').first()).toBeVisible();
+    await expect(page.getByTestId('invite-kind-parent')).toBeVisible();
     await expect(page.getByText('오선생').first()).toBeVisible();
   });
 
@@ -267,10 +273,19 @@ test.describe('M4 학원 흐름', () => {
     await expect(page.getByText(/구성원 \d+명/)).toBeVisible();
     await expect(page.getByText(/원장 1명 · 선생님 \d+명/)).toBeVisible();
 
-    await page.getByTestId('teacher-add').click();
+    /*
+      초대 만들기는 세 종류가 되었고(학생·학부모·선생님, 확정 정책 3절) 기본값이 선생님이다.
+      testID도 종류를 가리지 않는 이름으로 바뀌었다(`teacher-add` → `invite-create`,
+      `teacher-invite-new` → `invite-new`).
+    */
+    await page.getByTestId('invite-create').click();
     await expect(page.getByTestId('toast')).toHaveText('초대 링크를 만들었어요');
     // 만든 링크를 그 자리에서 전달할 수 있다.
-    await expect(page.getByTestId('teacher-invite-new')).toContainText('/join?invite=INV-T-');
+    await expect(page.getByTestId('invite-new')).toContainText('/join?invite=INV-T-');
+    // 만든 뒤에 무엇이 남았는지 말한다 — 담당 반은 수락 뒤에 정한다.
+    await expect(
+      page.getByText('수락하면 구성원 목록에 나타나요. 그때 반 상세에서 담당으로 정할 수 있어요.'),
+    ).toBeVisible();
 
     // 제외는 한 번 더 확인한다. 담당 반이 있는 선생님으로 확인한다.
     await page.getByTestId('teacher-search').fill('hanbit.teacher');
@@ -279,6 +294,28 @@ test.describe('M4 학원 흐름', () => {
     await page.getByTestId('teacher-remove-confirm-hanbit.teacher').click();
     await expect(page.getByText('오선생', { exact: true })).toHaveCount(0);
     await expect(page.getByText('찾는 선생님이 없어요')).toBeVisible();
+  });
+
+  /*
+    **학부모 초대는 대상 학생을 고르는 단계가 있다**(확정 정책 3절 — 학원이 자녀 관계를 확인하고
+    연결을 승인한다). 그 값이 초대 행에 적히고(`invites.target_student_id`, 0036), 수락한 계정이
+    그 학생과 연결된다. 고르기 전에는 만들기 버튼을 두지 않는다 — 서버가 거부하는 버튼이다.
+  */
+  test('원장: 학부모 초대는 자녀를 고른 뒤에 만든다', async ({ page }) => {
+    await loginAs(page, 'hanbit.director');
+    await page.getByRole('link', { name: '학원 관리' }).click();
+    await page.getByTestId('invite-kind-parent').click();
+    await expect(page.getByTestId('invite-create')).toHaveCount(0);
+
+    await page.getByTestId('invite-child-search').fill('박도윤');
+    await page.getByTestId(`invite-child-${sid('u_student_academy')}`).click();
+    await page.getByTestId('invite-create').click();
+
+    await expect(page.getByTestId('toast')).toHaveText('초대 링크를 만들었어요');
+    await expect(page.getByTestId('invite-new')).toContainText('박도윤');
+    await expect(page.getByTestId('invite-new')).toContainText('/join?invite=INV-T-');
+    // 목록에도 어느 자녀의 초대인지 남는다.
+    await expect(page.getByText('학부모 초대 · 박도윤 학생').first()).toBeVisible();
   });
 
   test('원장: 선생님을 제외하면 담당 반이 미배정으로 바뀐다', async ({ page }) => {
