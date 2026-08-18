@@ -1,11 +1,11 @@
-import { useCallback, useMemo } from 'react';
-import { findContent, type Assignment, type ContentSet } from '@/data';
-import { useSession } from '@/session';
-import { useProgress, type Attempt, type WrongNote } from './progress';
-import type { ClassComparison } from '@/repo/learning';
-import { useContent } from './content';
-import { dueLabel } from './learning';
-import { todayISO } from './clock';
+import { useCallback, useMemo } from "react";
+import { findContent, type Assignment, type ContentSet } from "@/data";
+import { useSession } from "@/session";
+import { useProgress, type Attempt, type WrongNote } from "./progress";
+import type { ClassComparison } from "@/repo/learning";
+import { useContent } from "./content";
+import { dueLabel } from "./learning";
+import { todayISO } from "./clock";
 
 /** 취약이라고 말하려면 이만큼은 풀어야 한다. 한 세트(10문항)로 영역을 단정하지 않는다. */
 export const WEAK_MIN_QUESTIONS = 20;
@@ -14,41 +14,41 @@ export const HISTORY_MONTHS = 6;
 
 /** `YYYY-MM-DD` → `YYYY-MM`. 빈 값이면 빈 문자열. */
 export function monthOf(iso: string): string {
-  return iso ? iso.slice(0, 7) : '';
+  return iso ? iso.slice(0, 7) : "";
 }
 
 /** `2026-07` → `7월`. 해가 다르면 `2025년 12월`. */
 export function monthLabel(month: string, today: string): string {
-  const [y, m] = month.split('-');
+  const [y, m] = month.split("-");
   return today.slice(0, 4) === y ? `${Number(m)}월` : `${y}년 ${Number(m)}월`;
 }
 
 /** 그 주의 월요일(YYYY-MM-DD). 주 단위 집계와 요약 캐시의 키다. */
 export function weekOf(iso: string): string {
-  const [y, m, d] = iso.split('-').map(Number);
-  if (!y || !m || !d) return '';
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return "";
   const at = new Date(y, m - 1, d);
   // getDay(): 0=일요일. 월요일 시작으로 맞춘다.
   const back = (at.getDay() + 6) % 7;
   at.setDate(at.getDate() - back);
-  const mm = `${at.getMonth() + 1}`.padStart(2, '0');
-  const dd = `${at.getDate()}`.padStart(2, '0');
+  const mm = `${at.getMonth() + 1}`.padStart(2, "0");
+  const dd = `${at.getDate()}`.padStart(2, "0");
   return `${at.getFullYear()}-${mm}-${dd}`;
 }
 
 /** 한 주 전 월요일. */
 export function prevWeek(monday: string): string {
-  const [y, m, d] = monday.split('-').map(Number);
+  const [y, m, d] = monday.split("-").map(Number);
   const at = new Date(y, m - 1, d - 7);
-  const mm = `${at.getMonth() + 1}`.padStart(2, '0');
-  const dd = `${at.getDate()}`.padStart(2, '0');
+  const mm = `${at.getMonth() + 1}`.padStart(2, "0");
+  const dd = `${at.getDate()}`.padStart(2, "0");
   return `${at.getFullYear()}-${mm}-${dd}`;
 }
 
 /** 한 달 전. `2026-01` → `2025-12`. */
 export function prevMonth(month: string): string {
-  const [y, m] = month.split('-').map(Number);
-  return m === 1 ? `${y - 1}-12` : `${y}-${`${m - 1}`.padStart(2, '0')}`;
+  const [y, m] = month.split("-").map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${`${m - 1}`.padStart(2, "0")}`;
 }
 /** 이 아래면 약한 영역으로 본다. 화면에서 기준을 함께 밝힌다. */
 export const WEAK_THRESHOLD = 80;
@@ -57,7 +57,7 @@ export interface ReportRow {
   itemId: string;
   title: string;
   area: string;
-  source: 'personal' | 'academy';
+  source: "personal" | "academy";
   accuracy: number;
   questions: number;
   timeSec: number;
@@ -91,13 +91,6 @@ interface Deps {
   /** 오늘(YYYY-MM-DD). 기본으로 볼 달과 달 이름을 정한다. */
   today: string;
   /**
-   * 이 학생이 속한 반 id. **화면이 넘긴다** — 예전에는 fixture(`getStudentClasses`)를 읽어서
-   * 학원이 새로 만든 반을 못 봤다(마스터 플랜 S-013). 지금은 세션 스냅샷이 살아 있는 반을 준다.
-   *
-   * 그 달의 배정 수(`academySubmit`·`byWeekday`)만 이 값으로 좁힌다.
-   * **미제출(`pending`)은 배정 대상 행으로 판정한다** — 아래 근거를 적어 뒀다.
-   */
-  classIds?: readonly string[];
   /**
    * 배정 id → 반 비교 집계. **서버가 낸 값이다**(`rpc_class_comparison`).
    * 없으면 비교를 그리지 않는다 — 지어내지 않는다.
@@ -131,7 +124,12 @@ export interface ClassStat {
 export function classStat(
   comparison: ClassComparison | undefined,
 ): ClassStat | null {
-  if (!comparison || comparison.mine == null || comparison.rank == null || comparison.avg == null) {
+  if (
+    !comparison ||
+    comparison.mine == null ||
+    comparison.rank == null ||
+    comparison.avg == null
+  ) {
     return null;
   }
   if (comparison.submitters < RANK_MIN_SUBMITTERS) return null;
@@ -218,7 +216,7 @@ function weekStatOf(monday: string, rows: readonly ReportRow[]): WeekStat {
     questions,
     accuracy: questions ? Math.round((correct / questions) * 100) : null,
     timeSec: part.reduce((n, a) => n + a.timeSec, 0),
-    academySubmitted: part.filter((r) => r.source === 'academy').length,
+    academySubmitted: part.filter((r) => r.source === "academy").length,
   };
 }
 
@@ -240,19 +238,22 @@ export function weekFacts(
   lines.push(`이번 주에 푼 학습 수: ${week.count}개`);
   if (week.accuracy != null) lines.push(`이번 주 정답률: ${week.accuracy}%`);
   lines.push(`이번 주 총 학습 시간: ${Math.round(week.timeSec / 60)}분`);
-  if (week.academySubmitted > 0) lines.push(`이번 주에 낸 학원 과제: ${week.academySubmitted}개`);
-  if (pendingOverdue > 0) lines.push(`마감이 지났는데 아직 안 낸 학원 과제: ${pendingOverdue}개`);
+  if (week.academySubmitted > 0)
+    lines.push(`이번 주에 낸 학원 과제: ${week.academySubmitted}개`);
+  if (pendingOverdue > 0)
+    lines.push(`마감이 지났는데 아직 안 낸 학원 과제: ${pendingOverdue}개`);
   if (before && before.count > 0) {
     lines.push(`지난주에 공부한 날 수: ${before.days}일`);
     lines.push(`지난주에 푼 문항 수: ${before.questions}문항`);
-    if (before.accuracy != null) lines.push(`지난주 정답률: ${before.accuracy}%`);
+    if (before.accuracy != null)
+      lines.push(`지난주 정답률: ${before.accuracy}%`);
   } else {
-    lines.push('지난주 기록: 없음 (지난주와 비교하지 마세요)');
+    lines.push("지난주 기록: 없음 (지난주와 비교하지 마세요)");
   }
   for (const a of areas) {
     lines.push(`영역 ${a.area}: 정답률 ${a.rate}% (${a.total}문항)`);
   }
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 /**
@@ -262,11 +263,14 @@ export function weekFacts(
  */
 export function tidySummary(raw: string): string {
   const noMarkdown = raw
-    .replace(/^#{1,6}\s*/gm, '')
-    .replace(/^[-*]\s+/gm, '')
-    .replace(/^\d+\)\s*/gm, '');
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^[-*]\s+/gm, "")
+    .replace(/^\d+\)\s*/gm, "");
   // 문장마다 줄을 바꿔 보내는 일이 있어 한 덩어리로 잇는다.
-  const oneLine = noMarkdown.replace(/\s*\n+\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  const oneLine = noMarkdown
+    .replace(/\s*\n+\s*/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
   // 마침표 기준으로 자른 뒤 인사·자기소개 문장을 버린다.
   const sentences = oneLine
     .split(/(?<=[.!?])\s+/)
@@ -274,20 +278,26 @@ export function tidySummary(raw: string): string {
     .filter(Boolean)
     .filter((x) => !/^(안녕하세요|반갑습니다|저는|스코디 선생님)/.test(x));
   // 4문장을 넘기면 리포트 맨 위가 길어진다.
-  return sentences.slice(0, 4).join(' ');
+  return sentences.slice(0, 4).join(" ");
 }
 
 /** 키가 없을 때 쓸 대체 요약. 같은 숫자를 이어 붙이기만 한다(AI가 쓴 글이 아니라고 밝힌다). */
 export function weekFallback(week: WeekStat, before: WeekStat | null): string {
-  const bits = [`이번 주에 ${week.days}일 공부하고 ${week.questions}문항을 풀었어요.`];
+  const bits = [
+    `이번 주에 ${week.days}일 공부하고 ${week.questions}문항을 풀었어요.`,
+  ];
   if (week.accuracy != null) bits.push(`정답률은 ${week.accuracy}%예요.`);
   if (before && before.accuracy != null && week.accuracy != null) {
     const d = week.accuracy - before.accuracy;
-    if (d !== 0) bits.push(`지난주 ${before.accuracy}%보다 ${Math.abs(d)}%포인트 ${d > 0 ? '높아요' : '낮아요'}.`);
+    if (d !== 0)
+      bits.push(
+        `지난주 ${before.accuracy}%보다 ${Math.abs(d)}%포인트 ${d > 0 ? "높아요" : "낮아요"}.`,
+      );
   }
   // 근거 없는 총평을 붙이지 않는다. 꾸준함은 실제로 여러 날 했을 때만 말한다.
-  if (week.days >= 3) bits.push('오늘은 결과보다 꾸준히 앉은 점을 짚어 주세요.');
-  return bits.join(' ');
+  if (week.days >= 3)
+    bits.push("오늘은 결과보다 꾸준히 앉은 점을 짚어 주세요.");
+  return bits.join(" ");
 }
 
 /**
@@ -301,7 +311,11 @@ export function weekFallback(week: WeekStat, before: WeekStat | null): string {
  * 홈과 리포트가 같은 숫자를 말하도록 계산은 여기 한곳에만 둔다.
  * 훅이 아니라 순수 함수라 자녀 여러 명을 한 번에 계산할 수 있다.
  */
-export function buildChildReport(childId: string, deps: Deps, wantMonth?: string) {
+export function buildChildReport(
+  childId: string,
+  deps: Deps,
+  wantMonth?: string,
+) {
   const { assignments, attempts, wrongNotes, sets, today } = deps;
 
   /**
@@ -314,7 +328,9 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
    */
   const allRows: ReportRow[] = Object.values(attempts).map((a) => {
     const assignment =
-      a.source === 'academy' ? assignments.find((x) => x.id === a.itemId) : undefined;
+      a.source === "academy"
+        ? assignments.find((x) => x.id === a.itemId)
+        : undefined;
     return {
       itemId: a.itemId,
       title: a.title,
@@ -327,7 +343,9 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
       // 제출 기록의 기준 마감일은 그 학생에게 실제로 적용됐던 값이다(재배정 전).
       dueDate: assignment ? reportDueOf(assignment) : undefined,
       hasDetail: true,
-      cls: assignment ? classStat(deps.comparisons?.[assignment.id]) : undefined,
+      cls: assignment
+        ? classStat(deps.comparisons?.[assignment.id])
+        : undefined,
       // 정답 수는 근사하지 않는다. 저장된 실제 값을 쓴다.
       correct: a.correct,
     };
@@ -335,39 +353,45 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
   const seen = new Set(allRows.map((r) => r.itemId));
   for (const assignment of assignments) {
     const sub = assignment.submissions.find((s) => s.studentId === childId);
-    if (!sub?.submitted || seen.has(assignment.id) || sub.accuracy == null) continue;
-    const content = assignment.contentId ? findContent(sets, assignment.contentId) : undefined;
+    if (!sub?.submitted || seen.has(assignment.id) || sub.accuracy == null)
+      continue;
+    const content = assignment.contentId
+      ? findContent(sets, assignment.contentId)
+      : undefined;
     allRows.push({
       itemId: assignment.id,
       title: assignment.title,
-      area: content?.area ?? '문학',
-      source: 'academy',
+      area: content?.area ?? "문학",
+      source: "academy",
       accuracy: sub.accuracy,
       questions: content?.questions.length ?? assignment.questionCount,
       timeSec: sub.timeSec ?? 0,
       // 제출일이 없으면 비워 둔다. 마감일로 대신하지 않는다.
-      dateISO: sub.submittedAt ?? '',
+      dateISO: sub.submittedAt ?? "",
       dueDate: reportDueOf(assignment),
       hasDetail: !!content && !!sub.wrongQIds,
       cls: classStat(deps.comparisons?.[assignment.id]),
       // 틀린 문항 목록이 있으면 정답 수를 정확히 셀 수 있다.
       correct: sub.wrongQIds
-        ? (content?.questions.length ?? assignment.questionCount) - sub.wrongQIds.length
+        ? (content?.questions.length ?? assignment.questionCount) -
+          sub.wrongQIds.length
         : undefined,
     });
   }
-  allRows.sort((a, b) => (b.dateISO || '').localeCompare(a.dateISO || ''));
+  allRows.sort((a, b) => (b.dateISO || "").localeCompare(a.dateISO || ""));
 
   const thisMonth = monthOf(today);
   /** 기록이 있는 달만, 최신순. 비어 있는 이번 달은 여기 없다. */
   const recorded = Array.from(
     new Set([
       ...allRows.map((r) => monthOf(r.dateISO)).filter(Boolean),
-      ...wrongNotes.map((n) => monthOf(n.createdAt ?? '')).filter(Boolean),
+      ...wrongNotes.map((n) => monthOf(n.createdAt ?? "")).filter(Boolean),
     ]),
   ).sort((a, b) => b.localeCompare(a));
   /** 고를 수 있는 달. 기록이 있는 달 + 이번 달, 최신순. */
-  const months = Array.from(new Set([thisMonth, ...recorded])).sort((a, b) => b.localeCompare(a));
+  const months = Array.from(new Set([thisMonth, ...recorded])).sort((a, b) =>
+    b.localeCompare(a),
+  );
   /**
    * 기본은 **이번 달**이다(D-090). 기록이 있는 가장 최근 달로 열면 매달 1일에 홈은 `8월`,
    * 리포트는 `7월`을 말해 두 화면의 숫자가 어긋난다 — 홈도 같은 함수를 기본값으로 쓴다.
@@ -395,7 +419,9 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
    * 이 달의 복습 활동. 정답률만으로는 "복습을 했는지"를 알 수 없다 —
    * 학부모가 실제로 궁금해하는 것은 틀린 것을 다시 봤는가다.
    */
-  const monthNotes = wrongNotes.filter((n) => monthOf(n.createdAt ?? '') === month);
+  const monthNotes = wrongNotes.filter(
+    (n) => monthOf(n.createdAt ?? "") === month,
+  );
   const notes = {
     added: monthNotes.length,
     organized: monthNotes.filter((n) => n.dig).length,
@@ -420,28 +446,34 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
    * (`rpc_submit_attempt` → `배정받은 학습이 아니에요.`). 학생 화면(`learning.ts`)과 같은 기준으로
    * 맞춰 세 역할이 같은 사실을 말하게 한다.
    *
-   * 아래 달별 배정 수(`academySubmit`·`byWeekday`)는 아직 반 소속으로 좁힌다 — 같은 뿌리이지만
-   * 이 변경의 범위가 아니다(S-013).
+   * 달별 배정 수(`academySubmit`·`byWeekday`)도 같은 기준이다 — 한 리포트 안에서 미제출과
+   * 분모가 다른 집합을 세면 `안 낸 과제 0개`인데 `배정 4개 중 1개 냈어요`가 된다(S-013 해소).
    */
-  const classIds = new Set(deps.classIds ?? []);
   const pending: PendingRow[] = assignments
     .filter((a) => {
       const sub = a.submissions.find((s) => s.studentId === childId);
       return !!sub && !sub.submitted;
     })
-    .map((a) => ({ id: a.id, title: a.title, dueDate: a.dueDate, due: dueLabel(a.dueDate) }))
+    .map((a) => ({
+      id: a.id,
+      title: a.title,
+      dueDate: a.dueDate,
+      due: dueLabel(a.dueDate),
+    }))
     .sort((a, b) => {
       const ao = a.due?.overdue ? 0 : 1;
       const bo = b.due?.overdue ? 0 : 1;
       if (ao !== bo) return ao - bo;
-      return (a.dueDate ?? '9999-99-99').localeCompare(b.dueDate ?? '9999-99-99');
+      return (a.dueDate ?? "9999-99-99").localeCompare(
+        b.dueDate ?? "9999-99-99",
+      );
     });
 
   /**
    * 출처별 집계(이 달). **학부모만 두 출처를 다 본다.** 합쳐서 하나의 정답률로 말하면
    * 그 값이 학원 성적인지 집에서 푼 것인지 알 수 없어 학원 상담에 쓸 수 없다.
    */
-  const pick = (source: 'personal' | 'academy') => {
+  const pick = (source: "personal" | "academy") => {
     const part = rows.filter((r) => r.source === source);
     const q = part.reduce((n, a) => n + a.questions, 0);
     const c = part.reduce((n, a) => n + correctOf(a), 0);
@@ -453,14 +485,14 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
       timeSec: part.reduce((n, a) => n + a.timeSec, 0),
     };
   };
-  const bySource = { personal: pick('personal'), academy: pick('academy') };
+  const bySource = { personal: pick("personal"), academy: pick("academy") };
 
   /**
    * 이 달 학원 과제의 반 비교 요약.
    * **과제별 순위를 평균 내지 않는다** — 그것은 없는 수를 만드는 것이다.
    * 대신 반 평균보다 높았던 과제를 센다.
    */
-  const compared = rows.filter((r) => r.source === 'academy' && r.cls);
+  const compared = rows.filter((r) => r.source === "academy" && r.cls);
   const academyCompare =
     compared.length > 0
       ? {
@@ -484,7 +516,15 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
     분모에 모두 들어가고, 7월은 그 달에 내지 않은 과제를 '모두 냈어요'라고 말한다.
     마감일이 없는 배정은 어느 달에도 넣을 수 없으므로 세지 않고 그 수를 밝힌다.
   */
-  const mine = assignments.filter((a) => classIds.has(a.classId));
+  /*
+    **대상 행이 있는 배정만 이 자녀의 것이다**(D-172와 같은 기준). 반 소속으로 좁히면 나중에
+    그 반에 들어온 학생의 지난 배정까지 분모에 들어가는데(`addStudentsToClass`는 `class_students`만
+    채우고 지난 `assignment_targets`를 만들지 않는다), 같은 화면의 `pending`은 대상 행 기준이라
+    **한 리포트 안에서 두 숫자가 어긋났다** — `안 낸 과제 0개`인데 `배정 4개 중 1개 냈어요`.
+  */
+  const mine = assignments.filter((a) =>
+    a.submissions.some((s) => s.studentId === childId),
+  );
   const monthAssigned = mine.filter((a) => {
     const due = reportDueOf(a);
     return due && monthOf(due) === month;
@@ -520,7 +560,10 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
    * **자녀가 푼 세트만** 나오고, 대부분 유형에 세트가 하나뿐이라
    * 사실상 "그 세트의 정답률"과 같다 — 그래서 문항 수를 반드시 함께 낸다.
    */
-  const topicAcc: Record<string, { correct: number; total: number; area: string }> = {};
+  const topicAcc: Record<
+    string,
+    { correct: number; total: number; area: string }
+  > = {};
   for (const row of rows) {
     const content = sets.find(
       (c) => `li_${c.id}` === row.itemId || c.id === row.itemId,
@@ -529,10 +572,15 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
     const viaAssignment = content
       ? undefined
       : assignments.find((a) => a.id === row.itemId)?.contentId;
-    const set = content ?? (viaAssignment ? findContent(sets, viaAssignment) : undefined);
+    const set =
+      content ?? (viaAssignment ? findContent(sets, viaAssignment) : undefined);
     const topic = set?.topic;
     if (!topic) continue;
-    topicAcc[topic] = topicAcc[topic] ?? { correct: 0, total: 0, area: row.area };
+    topicAcc[topic] = topicAcc[topic] ?? {
+      correct: 0,
+      total: 0,
+      area: row.area,
+    };
     topicAcc[topic].correct += correctOf(row);
     topicAcc[topic].total += row.questions;
   }
@@ -561,25 +609,34 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
    * 기한 내 제출. 제출일과 마감일이 **둘 다 있는** 과제만 센다 —
    * 하나라도 없으면 판정할 수 없어 분모에서 뺀다.
    */
-  const judgeable = rows.filter((r) => r.source === 'academy' && r.dateISO && r.dueDate);
+  const judgeable = rows.filter(
+    (r) => r.source === "academy" && r.dateISO && r.dueDate,
+  );
   const onTime = {
     total: judgeable.length,
-    inTime: judgeable.filter((r) => r.dateISO <= (r.dueDate ?? '')).length,
+    inTime: judgeable.filter((r) => r.dateISO <= (r.dueDate ?? "")).length,
   };
 
   /** 마감이 어느 요일에 몰렸나. 그 달에 마감이 있는 배정만. */
-  const WEEKDAY = ['일', '월', '화', '수', '목', '금', '토'];
+  const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
   const loadAcc: Record<string, number> = {};
   for (const a of assignments) {
     const due = reportDueOf(a);
-    if (!classIds.has(a.classId) || !due || monthOf(due) !== month) continue;
-    const [y, m, d] = due.split('-').map(Number);
+    // 위 `mine`과 같은 기준이다 — 요일 분포도 이 자녀가 실제로 받은 과제만 센다.
+    if (
+      !a.submissions.some((s) => s.studentId === childId) ||
+      !due ||
+      monthOf(due) !== month
+    )
+      continue;
+    const [y, m, d] = due.split("-").map(Number);
     const label = WEEKDAY[new Date(y, m - 1, d).getDay()];
     loadAcc[label] = (loadAcc[label] ?? 0) + 1;
   }
-  const byWeekday = WEEKDAY.map((label) => ({ label, count: loadAcc[label] ?? 0 })).filter(
-    (x) => x.count > 0,
-  );
+  const byWeekday = WEEKDAY.map((label) => ({
+    label,
+    count: loadAcc[label] ?? 0,
+  })).filter((x) => x.count > 0);
 
   /** 날짜가 남아 있지 않아 어느 달에도 못 세는 기록. 숨기지 않고 밝힌다. */
   const undated = allRows.filter((r) => !r.dateISO).length;
@@ -602,7 +659,11 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
   }
   const weekAreas = Object.entries(weekAcc)
     .filter(([, v]) => v.total > 0)
-    .map(([area, v]) => ({ area, rate: Math.round((v.correct / v.total) * 100), total: v.total }))
+    .map(([area, v]) => ({
+      area,
+      rate: Math.round((v.correct / v.total) * 100),
+      total: v.total,
+    }))
     .sort((x, y) => x.rate - y.rate);
 
   return {
@@ -674,7 +735,10 @@ export interface ReportLoad {
 }
 
 /** 자녀 한 명의 월간 리포트. 열람 권한은 `attemptsOf`가 검사한다(연결된 자녀만). */
-export function useChildReport(childId: string, month?: string): ChildReportData & ReportLoad {
+export function useChildReport(
+  childId: string,
+  month?: string,
+): ChildReportData & ReportLoad {
   const {
     assignments,
     attemptsOf,
@@ -692,22 +756,27 @@ export function useChildReport(childId: string, month?: string): ChildReportData
     error: contentError,
     reload: reloadContent,
   } = useContent();
-  const { studentClasses } = useSession();
   const attempts = attemptsOf(childId);
   const comparisons = comparisonsOf(childId);
   const wrongNotes = wrongNotesOf(childId);
   const today = todayISO();
-  const classIds = studentClasses(childId).map((c) => c.id);
-  const classKey = classIds.join(',');
   const data = useMemo(
     () =>
       buildChildReport(
         childId,
-        { assignments, attempts, wrongNotes, sets, today, classIds, comparisons },
+        { assignments, attempts, wrongNotes, sets, today, comparisons },
         month,
       ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- classIds는 매 렌더 새 배열이라 문자열 키로 비교한다.
-    [childId, assignments, attempts, wrongNotes, sets, today, month, classKey, comparisons],
+    [
+      childId,
+      assignments,
+      attempts,
+      wrongNotes,
+      sets,
+      today,
+      month,
+      comparisons,
+    ],
   );
   const loaded = progressLoaded && contentLoaded;
   const loading = progressLoading || contentLoading;
@@ -725,12 +794,14 @@ export function useChildReport(childId: string, month?: string): ChildReportData
  * 자녀 여러 명의 리포트를 한 번에. 학부모 홈이 쓴다.
  * 훅을 반복 호출할 수 없어 순수 함수를 루프로 돈다.
  */
-export function useChildReports(childIds: readonly string[]): Record<string, ChildReportData> {
-  const { assignments, attemptsOf, wrongNotesOf, comparisonsOf } = useProgress();
+export function useChildReports(
+  childIds: readonly string[],
+): Record<string, ChildReportData> {
+  const { assignments, attemptsOf, wrongNotesOf, comparisonsOf } =
+    useProgress();
   const { sets } = useContent();
-  const { studentClasses } = useSession();
   const today = todayISO();
-  const key = childIds.join(',');
+  const key = childIds.join(",");
   return useMemo(() => {
     const out: Record<string, ChildReportData> = {};
     for (const id of childIds) {
@@ -739,7 +810,6 @@ export function useChildReports(childIds: readonly string[]): Record<string, Chi
         attempts: attemptsOf(id),
         wrongNotes: wrongNotesOf(id),
         sets,
-        classIds: studentClasses(id).map((c) => c.id),
         comparisons: comparisonsOf(id),
         today,
       });
