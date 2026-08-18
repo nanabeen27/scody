@@ -186,7 +186,8 @@ test.describe('M1 소개·로그인·역할 분기', () => {
     await page.getByTestId('login-password').fill(devPassword());
     await page.getByTestId('login-submit').click();
     await expect(page).toHaveURL(/\/student/);
-    await expect(page.getByText(/박도윤님/)).toBeVisible();
+    // 이름 뒤에 띄어쓰기가 있다(A-132 — `{이름} 님`).
+    await expect(page.getByText(/박도윤 님/)).toBeVisible();
   });
 
   test('로그인이 틀리면 어느 쪽이 틀렸는지 말하지 않는다', async ({ page }) => {
