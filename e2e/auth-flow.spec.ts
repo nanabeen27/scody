@@ -342,6 +342,30 @@ test.describe('M1 소개·로그인·역할 분기', () => {
     await expect(page).toHaveURL(/\/signup/);
   });
 
+  /*
+    막히는 사실을 **첫 화면에서** 말한다. 예전에는 이름·아이디·비밀번호·인증번호를 다 받고
+    아이디 중복까지 서버에 물어본 뒤 마지막에 말했다.
+  */
+  test('가입 화면 첫 화면이 계정을 만들 수 없다고 먼저 말한다', async ({ page }) => {
+    await page.goto('/signup');
+    await expect(page.getByText('지금은 계정을 만들 수 없어요.')).toBeVisible();
+    await expect(page.getByText(/마지막에 계정이 만들어지지 않아요/)).toBeVisible();
+    // 지금 할 수 있는 일로 가는 길이 그 자리에 있다(D-126).
+    await page.getByTestId('signup-to-login').click();
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  /*
+    소개 페이지의 `학부모로 시작하기`로 들어온 사람에게 **학생**이 골라져 있었다 — 그대로
+    진행하면 자녀를 확인하러 온 사람이 학생 계정을 만든다.
+  */
+  test('학부모로 들어오면 학부모 역할이 골라져 있다', async ({ page }) => {
+    await page.goto('/signup?role=parent');
+    await page.getByTestId('signup-kakao').click();
+    await expect(page.getByTestId('signup-role-parent')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('signup-role-student')).toHaveAttribute('aria-checked', 'false');
+  });
+
   test('이미 가입된 번호로는 가입할 수 없다', async ({ page }) => {
     await page.goto('/signup');
     await page.getByTestId('signup-phone').click();
@@ -354,7 +378,12 @@ test.describe('M1 소개·로그인·역할 분기', () => {
   test('신규 가입: 카카오로 가입하면 번호 단계를 건너뛴다', async ({ page }) => {
     await page.goto('/signup');
     await page.getByTestId('signup-kakao').click();
-    await expect(page.getByText(/카카오 계정을 연결했어요/)).toBeVisible();
+    /*
+      연결하지 않은 것을 `카카오 계정을 연결했어요`라고 말하던 자리다. 방법 선택 화면의 캡션은
+      `실제로 연결하지 않고 다음 단계로 넘어가요`라고 밝히고 있었으므로 한 흐름이 두 가지로
+      말하고 있었다 — 화면 문구를 사실로 고쳤고 단정도 그 문장을 본다.
+    */
+    await expect(page.getByText(/카카오 연결은 프로토타입에서 건너뛰어요/)).toBeVisible();
     await page.getByTestId('signup-name').fill('카카오가입');
     await page.getByTestId('signup-id').fill('kakaonew');
     await page.getByTestId('signup-pw').fill('test1234');
@@ -409,7 +438,11 @@ test.describe('M1 소개·로그인·역할 분기', () => {
     await page.getByTestId('signup-phone').click();
     await page.getByTestId('signup-phone-number').fill('010-5000-4321');
     await page.getByTestId('signup-phone-send').click();
-    await expect(page.getByText(/010-5000-4321으로 6자리 번호를 보냈어요/)).toBeVisible();
+    /*
+      가입 화면은 보내지 않은 인증번호를 `보냈어요`라고 말하고 있었다(로그인 화면은 같은 자리에서
+      `보낼 수 없다`고 말한다). 프로토타입 통과 코드만 그 자리에서 밝힌다.
+    */
+    await expect(page.getByText(/인증번호 발송은 아직 연결되지 않았어요/)).toBeVisible();
     await page.getByTestId('signup-phone-code').fill(DEMO_CODE);
     await page.getByTestId('signup-phone-next').click();
     await page.getByTestId('signup-detail-back').click();
