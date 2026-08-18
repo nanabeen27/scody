@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { Section } from './Section';
 import { Group } from './Group';
 import { Row } from './Row';
@@ -16,6 +16,11 @@ import { useTheme, THEME_LABEL } from '@/theme/ThemeProvider';
  */
 export function AccountSettings() {
   const router = useRouter();
+  /*
+    지금 있는 `내 정보`의 경로. 공간 선택 화면에 온 곳으로 넘긴다 — 그 화면은 로그인 직후에도
+    열리므로 되돌릴 곳이 있는지 스스로 알 수 없고, 없다고 보면 확인만 하러 온 사람이 갇힌다.
+  */
+  const pathname = usePathname();
   const { account, signOut, impersonation } = useSession();
   const { mode, cycle } = useTheme();
   const finishImpersonation = useFinishImpersonation();
@@ -31,7 +36,9 @@ export function AccountSettings() {
             subtitle="학생·학부모·학원 공간을 오갈 수 있어요"
             testID="switch-space"
             showChevron
-            onPress={() => router.push('/select-space' as never)}
+            onPress={() =>
+              router.push(`/select-space?from=${encodeURIComponent(pathname)}` as never)
+            }
           />
         ) : null}
         <Row
