@@ -11,6 +11,7 @@ import {
   LabeledDivider,
   TextLink,
 } from '@/features/auth/AuthShell';
+import { DEV_LOGIN_ENABLED } from '@/session/devAccounts';
 import { ROLE_LABEL } from '@/session/routing';
 import type { Role } from '@/data';
 import { isScodyIdTaken, isPhoneTaken } from '@/repo/directory';
@@ -21,6 +22,19 @@ const ROLE_OPTIONS: { role: Role; desc: string }[] = [
   { role: 'parent', desc: '자녀 학습을 확인해요' },
   { role: 'academy', desc: '학원을 운영해요' },
 ];
+
+/**
+ * 소개 페이지의 역할별 CTA가 붙여 오는 `?role=`.
+ *
+ * **학원만 알아듣던 자리다.** 예전에는 `role === 'academy' ? ['academy'] : ['student']`여서
+ * `학부모로 시작하기`를 누르고 온 사람에게 **학생**이 골라져 있었다 — 그대로 진행하면 자녀를
+ * 확인하러 온 사람이 학생 계정을 만든다. `ROLE_OPTIONS`에 있는 역할만 인정하고, 모르는 값이면
+ * 학생으로 시작한다(운영자 역할은 이 목록에 없으므로 주소로 고를 수 없다).
+ */
+function rolesFromParam(param?: string): Role[] {
+  const known = ROLE_OPTIONS.find((o) => o.role === param);
+  return [known?.role ?? 'student'];
+}
 
 /** 로그인으로 이어지는 오류. 문구가 가리키는 행동을 그 자리에서 할 수 있게 아래에 링크를 붙인다. */
 const PHONE_TAKEN = '이미 가입된 번호예요. 로그인으로 들어올 수 있어요.';
@@ -40,9 +54,16 @@ const DEMO_PHONE_CODE = '000000';
  * 계정 만들기가 아직 서버에 연결되지 않았다는 안내.
  *
  * 실제 계정 생성은 카카오·휴대폰 인증 연결과 함께 온다(확정 정책 D-020). 그때까지는 이 문장이
- * 사실이고, 화면은 테스트 계정으로 둘러볼 수 있다고 알려 준다.
+ * 사실이다.
+ *
+ * **뒷문장은 테스트 계정 패널이 있을 때만 사실이다.** 그 패널은 개발용 로그인이 켜져 있을 때만
+ * 그려지는데(D-135) 예전에는 이 상수가 빌드와 무관하게 `로그인 화면의 테스트 계정으로 둘러볼 수
+ * 있어요`라고 말했다 — 운영 빌드에서는 없는 것을 가리키는 거짓 문장이었다. 로그인 화면은 같은
+ * 문제를 이미 분기로 처리해 뒀고(`PHONE_PENDING`), 이 화면만 빠져 있었다.
  */
-const SIGNUP_PENDING = '계정 만들기는 아직 연결되지 않았어요. 지금은 로그인 화면의 테스트 계정으로 둘러볼 수 있어요.';
+const SIGNUP_PENDING = DEV_LOGIN_ENABLED
+  ? '계정 만들기는 아직 연결되지 않았어요. 지금은 로그인 화면의 테스트 계정으로 둘러볼 수 있어요.'
+  : '계정 만들기는 아직 연결되지 않았어요.';
 
 /**
  * 신규 가입. 방법(카카오·휴대폰)을 먼저 고르고, 그다음 역할과 계정 정보를 채운다.
@@ -50,6 +71,14 @@ const SIGNUP_PENDING = '계정 만들기는 아직 연결되지 않았어요. �
  *
  * 마지막 단계는 묻는 것을 두 묶음으로 나눈다: 어떻게 쓸지(역할) → 계정 정보.
  * 역할을 먼저 물어야 학원일 때 학원 이름을 이어서 물을 수 있다.
+ *
+ * ## 막히는 사실은 첫 화면에서 말한다
+ *
+ * 계정을 만드는 경로가 아직 없다(M-DB-2). 예전에는 그 사실을 **3단계를 다 걸은 뒤**에 말했다 —
+ * 이름·아이디·비밀번호·인증번호를 받고 아이디 중복까지 서버에 물어본 다음이었다. 가입하러 온
+ * 사람이 가장 먼저 알아야 하는 것은 "지금 무엇이 되고 무엇이 안 되는지"이므로, 방법을 고르는
+ * 화면에서 먼저 말하고 지금 할 수 있는 일(로그인)로 가는 링크를 그 자리에 둔다(D-126).
+ * 절차 자체는 그대로 걸어 볼 수 있다.
  */
 export default function Signup() {
   const router = useRouter();
@@ -62,7 +91,9 @@ export default function Signup() {
   const [name, setName] = useState('');
   const [id, setId] = useState('');
   const [pw, setPw] = useState('');
-  const [roles, setRoles] = useState<Role[]>(role === 'academy' ? ['academy'] : ['student']);
+  const [roles, setRoles] = useState<Role[]>(() =>
+    rolesFromParam(typeof role === 'string' ? role : undefined),
+  );
   const [academyName, setAcademyName] = useState('');
   const [error, setError] = useState<string | null>(null);
   // 중복 검사를 서버에 묻는 동안. 같은 버튼을 두 번 누르면 두 번 묻는다.
@@ -82,7 +113,41 @@ export default function Signup() {
     setStep(next === 'kakao' ? 'detail' : 'phone');
   }
 
-  async function onSendCode() {
+  function toLogin() {
+    router.replace('/login' as never);
+  }
+
+  /**
+   * 앞 단계로 가기. 워드마크와 본문 링크가 **같은 함수와 같은 이름**을 쓴다.
+   *
+   * 예전에는 같은 행동에 이름이 둘이었다(워드마크 `앞 단계로 가기` + 본문
+   * `번호 확인으로 돌아가기`). 이름이 갈리면 화면에 두 가지 이탈 경로가 있는 것처럼 읽힌다.
+   */
+  function stepBack() {
+    setError(null);
+    if (step === 'detail') {
+      setStep(method === 'phone' ? 'phone' : 'method');
+      return;
+    }
+    if (step === 'phone') {
+      setStep('method');
+      setCodeSent(false);
+      setCode('');
+      return;
+    }
+    // 방법 선택 중이면 들어온 화면으로.
+    if (router.canGoBack()) router.back();
+    else if (Platform.OS === 'web') router.replace('/introduce' as never);
+  }
+
+  const backLabel =
+    step === 'method'
+      ? '스코디 소개로 가기'
+      : step === 'detail' && method === 'phone'
+        ? '번호 확인으로 돌아가기'
+        : '다른 방법으로 가입하기';
+
+  async function onCheckPhone() {
     if (checking) return;
     if (!phone.trim()) {
       setError('휴대폰 번호를 입력해 주세요.');
@@ -102,6 +167,20 @@ export default function Signup() {
     }
     setError(null);
     setCodeSent(true);
+  }
+
+  /**
+   * 번호를 고치면 확인 결과를 버린다.
+   *
+   * 중복 검사는 **그때 입력돼 있던 번호**에 대한 답이다. 결과를 남겨 두면 안 쓰는 번호로 확인을
+   * 받은 뒤 이미 가입된 번호로 바꿔 넣고 `000000`으로 다음 단계까지 갈 수 있었다.
+   */
+  function onChangePhone(next: string) {
+    setPhone(next);
+    if (!codeSent) return;
+    setCodeSent(false);
+    setCode('');
+    setError(null);
   }
 
   function onVerify() {
@@ -150,56 +229,53 @@ export default function Signup() {
       휴대폰 인증이다 — 그 연결이 다음 단계다.
 
       **만들어진 척하지 않는다.** 예전에는 여기서 이용권 없는 계정으로 홈에 들어가 두 번째 화면에서
-      흐름이 끊겼다(A-096). 지금은 그 사실을 이 자리에서 말하고, 지금 할 수 있는 일로 보낸다.
+      흐름이 끊겼다(A-096). 이제 이 사실은 첫 화면에서 이미 말했고, 여기서는 되풀이만 한다 —
+      마지막까지 온 사람이 결과를 못 듣고 끝나지 않게.
     */
     setError(SIGNUP_PENDING);
   }
 
   /*
-    오류가 다른 화면의 행동을 가리키면 그 링크를 오류 바로 아래에 둔다.
+    오류가 다른 화면의 행동을 가리키면 그 링크를 오류 바로 아래에 둔다(D-126).
     이 단계에 보이는 `다른 방법으로 가입하기`는 뜻이 달라서 대신 쓸 수 없다.
+
+    `SIGNUP_PENDING`도 로그인 화면을 가리키는데 링크가 없었다 — "로그인 화면으로 가라"고 말하고
+    갈 길은 앞 단계에만 뒀다. 다만 그 뒷문장은 개발용 로그인이 켜진 빌드에만 있으므로(위 상수)
+    링크도 그때만 둔다. 가리킬 곳이 없는 링크는 그 자체로 또 하나의 거짓이다.
   */
+  const errorPointsToLogin =
+    error === PHONE_TAKEN || (error === SIGNUP_PENDING && DEV_LOGIN_ENABLED);
   const errorBlock = error ? (
     <View style={styles.errorBox}>
       <AuthError>{error}</AuthError>
-      {error === PHONE_TAKEN ? (
-        <TextLink
-          testID="signup-error-login"
-          label="로그인"
-          onPress={() => router.replace('/login' as never)}
-        />
+      {errorPointsToLogin ? (
+        <TextLink testID="signup-error-login" label="로그인으로 가기" onPress={toLogin} />
       ) : null}
     </View>
   ) : null;
 
   return (
-    <AuthShell
-      exitTestID="signup-brand"
-      exitLabel={step === 'method' ? '스코디 소개로 가기' : '앞 단계로 가기'}
-      onExit={() => {
-        // 단계 중이면 앞 단계로, 방법 선택 중이면 들어온 화면으로.
-        if (step === 'detail') {
-          setStep(method === 'phone' ? 'phone' : 'method');
-          setError(null);
-          return;
-        }
-        if (step === 'phone') {
-          setStep('method');
-          setCodeSent(false);
-          setCode('');
-          setError(null);
-          return;
-        }
-        if (router.canGoBack()) router.back();
-        else if (Platform.OS === 'web') router.replace('/introduce' as never);
-      }}
-    >
+    <AuthShell exitTestID="signup-brand" exitLabel={backLabel} onExit={stepBack}>
       {step === 'method' ? (
         <>
-          <AuthHeading
-            title="스코디 시작하기"
-            sub="가입 방법을 골라주세요. 다음 단계에서 어떻게 쓸지 정해요."
-          />
+          <AuthHeading title="스코디 시작하기" sub="지금은 계정을 만들 수 없어요." />
+          {/*
+            **막히는 사실과 지금 할 수 있는 일을 첫 화면에 함께 둔다.** 이 화면의 종착점은
+            "아무것도 만들 수 없다"이고, 그것을 3단계 뒤에 말하면 이름·아이디·비밀번호를 다 적은
+            사람이 마지막에 듣는다. 로그인 링크는 하나만 둔다 — `이미 계정이 있어요` 블록과
+            나누면 같은 목적지로 가는 링크가 한 화면에 둘이 된다.
+          */}
+          <View style={styles.notice}>
+            <AppText variant="body" tone="secondary">
+              가입 절차는 끝까지 볼 수 있지만, 마지막에 계정이 만들어지지 않아요.
+            </AppText>
+            <AppText variant="caption" tone="tertiary">
+              {DEV_LOGIN_ENABLED
+                ? '이미 계정이 있거나 지금 둘러보려면 로그인 화면의 테스트 계정을 쓸 수 있어요.'
+                : '이미 계정이 있으면 로그인할 수 있어요.'}
+            </AppText>
+            <TextLink testID="signup-to-login" label="로그인으로 가기" onPress={toLogin} />
+          </View>
           <View style={styles.actions}>
             <Button
               testID="signup-phone"
@@ -240,16 +316,6 @@ export default function Signup() {
               프로토타입에서는 카카오 계정을 실제로 연결하지 않고 다음 단계로 넘어가요.
             </AppText>
           </View>
-          <View style={styles.loginBox}>
-            <AppText variant="body" tone="secondary">
-              이미 계정이 있어요
-            </AppText>
-            <TextLink
-              testID="signup-to-login"
-              label="로그인"
-              onPress={() => router.replace('/login' as never)}
-            />
-          </View>
         </>
       ) : null}
 
@@ -264,9 +330,9 @@ export default function Signup() {
               keyboardType="phone-pad"
               autoComplete="tel"
               value={phone}
-              onChangeText={setPhone}
+              onChangeText={onChangePhone}
               placeholder="010-0000-0000"
-              onSubmitEditing={onSendCode}
+              onSubmitEditing={onCheckPhone}
             />
             {codeSent ? (
               <Field
@@ -276,8 +342,13 @@ export default function Signup() {
                 value={code}
                 onChangeText={setCode}
                 placeholder="6자리"
-                /* 번호를 보냈다는 사실을 먼저 확인해 준다(로그인 화면은 단계를 갈라 같은 말을 한다). */
-                hint={`${phone.trim()}으로 6자리 번호를 보냈어요. 프로토타입에서는 인증번호가 ${DEMO_PHONE_CODE}이에요.`}
+                /*
+                  **보내지 않은 번호를 보냈다고 말하지 않는다.** 예전 문구는
+                  `{번호}으로 6자리 번호를 보냈어요.`로 시작했는데 발송은 연결돼 있지 않다
+                  (로그인 화면은 같은 자리에서 `보낼 수 없다`고 말한다 — 한 수단이 두 화면에서
+                  다르게 말하고 있었다). 프로토타입 통과 코드는 그 자리에서 정직하게 알린다.
+                */
+                hint={`인증번호 발송은 아직 연결되지 않았어요. 프로토타입에서는 ${DEMO_PHONE_CODE}을 넣으면 다음 단계로 가요.`}
                 onSubmitEditing={onVerify}
               />
             ) : null}
@@ -295,21 +366,13 @@ export default function Signup() {
                 testID="signup-phone-send"
                 size="lg"
                 fullWidth
-                label={checking ? '확인하고 있어요' : '인증번호 받기'}
-                onPress={onSendCode}
+                /* 이 버튼이 실제로 하는 일은 발송이 아니라 이미 가입된 번호인지 확인하는 것이다. */
+                label={checking ? '확인하고 있어요' : '번호 확인하기'}
+                onPress={onCheckPhone}
               />
             )}
           </View>
-          <TextLink
-            testID="signup-back"
-            label="다른 방법으로 가입하기"
-            onPress={() => {
-              setStep('method');
-              setCodeSent(false);
-              setCode('');
-              setError(null);
-            }}
-          />
+          <TextLink testID="signup-back" label={backLabel} onPress={stepBack} />
         </>
       ) : null}
 
@@ -320,8 +383,9 @@ export default function Signup() {
             title="어떻게 사용할까요?"
             sub={
               method === 'kakao'
-                ? '카카오 계정을 연결했어요. 나중에 공간을 추가할 수 있어요.'
-                : '번호를 확인했어요. 나중에 공간을 추가할 수 있어요.'
+                ? /* 연결하지 않은 것을 `연결했어요`라고 말하던 자리다. 방법 선택 화면의 캡션과 같은 사실을 말한다. */
+                  '카카오 연결은 프로토타입에서 건너뛰어요.'
+                : '번호가 이미 가입돼 있지 않은지 확인했어요.'
             }
           />
 
@@ -403,16 +467,25 @@ export default function Signup() {
           {errorBlock}
 
           <View style={styles.submitBox}>
+            {/*
+              **버튼은 하는 일만 말한다.** `스코디 시작하기`는 계정이 만들어진다는 약속인데
+              지금 일어나는 일은 입력 검사와 아이디 중복 확인까지다. 무엇이 일어나는지 누르기
+              전에 밝히고, 계정 만들기가 연결되면 라벨이 다시 `스코디 시작하기`로 돌아온다.
+            */}
+            <AppText variant="caption" tone="tertiary">
+              지금은 입력한 내용만 확인해요. 계정은 아직 만들어지지 않아요.
+            </AppText>
             <Button
               testID="signup-submit"
               size="lg"
               fullWidth
-              label={checking ? '확인하고 있어요' : '스코디 시작하기'}
+              label={checking ? '확인하고 있어요' : '입력한 내용 확인하기'}
               onPress={onSubmit}
             />
             <View style={styles.consent}>
+              {/* 이 버튼으로 동의가 기록되지 않는다 — 동의는 계정을 만드는 날의 일이다. */}
               <AppText variant="caption" tone="secondary">
-                시작하면 이용약관과 개인정보처리방침에 동의하게 돼요. 두 문서는 아직 검토 전
+                계정을 만들 때 이용약관과 개인정보처리방침에 동의하게 돼요. 두 문서는 아직 검토 전
                 초안이에요.
               </AppText>
               <View style={styles.consentLinks}>
@@ -432,16 +505,9 @@ export default function Signup() {
 
           {/*
             앞 단계로 가는 길이 워드마크에만 있으면 화면에는 로고로만 보인다.
-            같은 행동을 글자로도 둔다(워드마크 동작은 그대로).
+            같은 행동을 글자로도 둔다(이름은 워드마크와 같다 — `backLabel`).
           */}
-          <TextLink
-            testID="signup-detail-back"
-            label={method === 'phone' ? '번호 확인으로 돌아가기' : '다른 방법으로 가입하기'}
-            onPress={() => {
-              setStep(method === 'phone' ? 'phone' : 'method');
-              setError(null);
-            }}
-          />
+          <TextLink testID="signup-detail-back" label={backLabel} onPress={stepBack} />
         </>
       ) : null}
     </AuthShell>
@@ -451,7 +517,7 @@ export default function Signup() {
 const styles = StyleSheet.create({
   actions: { gap: spacing.md },
   errorBox: { gap: spacing.md, alignItems: 'flex-start' },
-  loginBox: { gap: spacing.sm, alignItems: 'flex-start' },
+  notice: { gap: spacing.sm, alignItems: 'flex-start' },
   submitBox: { gap: spacing.md },
   consent: { gap: spacing.sm },
   consentLinks: { flexDirection: 'row', gap: spacing.lg },
