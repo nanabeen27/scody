@@ -59,7 +59,7 @@ export default function ParentChildren() {
       {/*
         **읽는 동안 버튼을 그리지 않는다.** 표시는 서버에서 오고, 첫 조회가 끝나기 전에는
         `parentPays`가 빈 배열이다 — 그 순간 이미 표시해 둔 자녀에게도
-        `내가 대신 낼게요`가 보이고, 누르면 이미 있는 표시를 다시 만드는 셈이 된다.
+        `내가 내겠다고 표시하기`가 보이고, 누르면 이미 있는 표시를 다시 만드는 셈이 된다.
       */}
       {loading ? (
         <AppText variant="caption" tone="secondary">
@@ -83,13 +83,22 @@ export default function ParentChildren() {
           />
         ))
       )}
-
-      {!loading && children.length > 0 ? (
-        <AppText variant="caption" tone="tertiary">
-          결제 연결은 아직 준비 중이에요. 지금은 내가 내겠다는 표시만 남고 실제로 청구되지 않아요.
-        </AppText>
-      ) : null}
     </Screen>
+  );
+}
+
+/**
+ * 표시가 청구가 아니라는 고지.
+ *
+ * **버튼 바로 위에 둔다.** 예전에는 화면 맨 아래 한 줄이라 자녀가 둘이면 버튼은 위, 해명은
+ * 스크롤 밖이었다 — 무엇이 일어나는지 모른 채 누르는 자리가 생긴다(D-141). 자녀 섹션마다
+ * 반복되지만, 각 섹션이 각자의 결정을 요구하므로 그 결정이 무엇인지도 각자 말해야 한다.
+ */
+function NoChargeNote() {
+  return (
+    <AppText variant="caption" tone="tertiary">
+      지금은 표시만 남고 실제로 청구되지 않아요.
+    </AppText>
   );
 }
 
@@ -123,7 +132,7 @@ function ChildBilling({
             title={child.academyName ?? '학원 이용권'}
             subtitle="학원이 비용을 내요"
             leading={<SourceTag source="academy" />}
-            meta="이용 중"
+            trailing={<Val>이용 중</Val>}
           />
         ) : null}
         {personal ? (
@@ -132,7 +141,7 @@ function ChildBilling({
             title="개인 월정액"
             subtitle={parentAlready ? '내가 내고 있어요' : '자녀 본인이 내고 있어요'}
             leading={<SourceTag source="personal" />}
-            meta={won(monthly)}
+            trailing={<Val>{won(monthly)}</Val>}
           />
         ) : (
           <Row
@@ -140,10 +149,9 @@ function ChildBilling({
             title="개인 월정액"
             subtitle="아직 이용하지 않아요"
             leading={<SourceTag source="personal" />}
-            meta={won(monthly)}
+            trailing={<Val>{won(monthly)}</Val>}
           />
         )}
-        {!academy && !personal ? null : null}
       </Group>
 
       {parentAlready ? (
@@ -155,6 +163,7 @@ function ChildBilling({
           <AppText variant="caption" tone="accent">
             {personal ? '다음 결제부터' : '이용을 시작할 때'} 내가 내기로 표시했어요.
           </AppText>
+          <NoChargeNote />
           <Button
             testID={`billing-cancel-${child.userId}`}
             variant="secondary"
@@ -166,17 +175,38 @@ function ChildBilling({
           />
         </View>
       ) : (
-        <Button
-          testID={`billing-offer-${child.userId}`}
-          variant="secondary"
-          size="sm"
-          tone="accent"
-          hug
-          label={personal ? '내가 대신 낼게요' : '내가 결제해서 시작할게요'}
-          trailing={<Icon name="arrow-right" size={15} color={colors.accent} />}
-          onPress={onOffer}
-        />
+        <View style={{ gap: spacing.sm }}>
+          <NoChargeNote />
+          {/*
+            **일어나는 일을 이름으로 말한다.** 예전 라벨은 `내가 대신 낼게요` ·
+            `내가 결제해서 시작할게요`인데, 눌러서 실제로 일어나는 일은 표시 한 줄
+            (`parent_payment_offers`)이고 청구도 이용권 시작도 없다(5절) — 버튼 이름이 앱이 할
+            수 없는 일을 약속했다(D-141). 이용권이 이미 있는지는 위 `개인 월정액` 줄이 말하므로
+            라벨을 두 벌로 가르지 않는다.
+          */}
+          <Button
+            testID={`billing-offer-${child.userId}`}
+            variant="secondary"
+            size="sm"
+            tone="accent"
+            hug
+            label="내가 내겠다고 표시하기"
+            trailing={<Icon name="arrow-right" size={15} color={colors.accent} />}
+            onPress={onOffer}
+          />
+        </View>
       )}
     </Section>
   );
+}
+
+/**
+ * 행의 값(금액 · 이용 상태).
+ *
+ * **`Row.meta`에 두지 않는다** — `inkTertiary`(대비 3.23:1, AA 미달)라 판단에 쓰는 값이 화면에서
+ * 가장 흐린 글자가 된다(`DESIGN.md` §20 · §19). 값은 `trailing`의 `label`이고,
+ * 같은 형태를 `app/admin/user/[id].tsx`가 쓴다.
+ */
+function Val({ children }: { children: string }) {
+  return <AppText variant="label">{children}</AppText>;
 }
