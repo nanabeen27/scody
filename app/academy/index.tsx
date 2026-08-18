@@ -91,9 +91,19 @@ export default function AcademyDashboard() {
   const router = useRouter();
   const account = useCurrentAccount();
   const { accountOf } = useSession();
-  const { assignments } = useProgress();
-  const { classesFor, isActiveTeacher } = useAcademyStaff();
-  const { sets } = useContent();
+  const {
+    assignments,
+    loaded: progressLoaded,
+    error: progressError,
+    reload: reloadProgress,
+  } = useProgress();
+  const { classesFor, isActiveTeacher, studentInScope } = useAcademyStaff();
+  const {
+    sets,
+    loaded: contentLoaded,
+    error: contentError,
+    reload: reloadContent,
+  } = useContent();
   const isDirector = account.academyRole === 'director';
   const today = todayISO();
   /** 좁은 컬럼(390)인가. 추이를 접을지 판단한다. */
@@ -168,6 +178,49 @@ export default function AcademyDashboard() {
     }
     return map;
   }, [classes, isActiveTeacher, accountOf]);
+
+  /*
+    **읽는 중 · 실패 · 없음을 셋으로 가른다**(D-136 · `DESIGN.md` §9).
+
+    이 화면의 지표·표·목록은 전부 배정 기록(`useProgress`)과 콘텐츠(`useContent`)에서 온다.
+    `classes`는 세션이라 레이아웃이 이미 기다려 주지만 그 둘은 아니었다 — 첫 조회가 끝나기 전에는
+    `assignments`가 비어 있어서, 배정이 수백 건 있는 학원의 원장도 첫 진입에서
+    `아직 배정한 학습이 없어요` + `학습 배정하러 가기`를 먼저 봤다. 조회가 **실패해도** 같은
+    화면이 남는다 — 그때는 `loading`이 내려가므로 로딩 게이트가 덮지 못한다.
+
+    게이트는 `loading`이 아니라 **`loaded`**(첫 조회가 끝났는가)다(D-163). `loading`은 재조회마다
+    참이 되어, 쓰기 실패가 부른 `reload()` 한 번에 이 화면이 통째로 `불러오고 있어요`로 돌아간다.
+  */
+  const ready = progressLoaded && contentLoaded;
+  /** 실패 문장. 서버가 준 것을 그대로 쓴다(`errorMessage`). */
+  const loadError = progressError ?? contentError;
+  /** 두 조회를 함께 다시 시도한다. 실패가 어느 쪽에서 왔는지 원장이 고를 일은 아니다. */
+  async function retryLoad() {
+    await Promise.all([reloadProgress(), reloadContent()]);
+  }
+
+  /**
+   * 미제출 목록이 가리키는 학생 한 명.
+   *
+   * **반에서 빼도 그 학생의 배정 대상 행은 남는다** — `removeStudentFromClass`는
+   * `class_students.removed_at`만 채우므로 이 목록에는 계속 나온다. 예전에는 제목이
+   * `accountOf(...)?.name ?? '학생'`이라 학원을 떠난 계정이면 행 제목이 `학생`이 되고, 눌러서 간
+   * 상세는 `학생을 찾을 수 없어요`로 끝났다 — 목록이 가리킨 곳에서 할 수 있는 일이 0개였다.
+   *
+   * 그래서 **지금 내 반에 있는 학생만** 상세로 보내고, 빠진 학생은 행에서 그 사실을 말한다.
+   * 링크 여부는 상세 화면과 **같은 판정**(`studentInScope`)을 쓴다 — 목록이 여는 문과 상세가
+   * 여는 문이 갈리면 또 막힌 링크가 된다. 소급 집계를 어떻게 셀지는 이 화면이 정하지 않는다.
+   */
+  const studentLine = (studentId: string) => {
+    const inClass = classes.some((c) => c.studentIds.includes(studentId));
+    const found = accountOf(studentId);
+    return {
+      name: found?.name ?? '반에서 빠진 학생',
+      /** 이름을 아는 학생이 반에서 빠졌을 때만. 이름을 모르면 제목이 이미 그 말을 한다. */
+      note: found && !inClass ? '반에서 빠진 학생이에요' : null,
+      openable: inClass && !!studentInScope(studentId),
+    };
+  };
 
   /** 안 낸 과제 중 가장 이른 마감. 급한 정도를 한 줄로 말할 때 쓴다. */
   const nearestDue = useMemo(() => {
@@ -320,6 +373,50 @@ export default function AcademyDashboard() {
         },
       ];
 
+  /** 화면 첫 줄. 세 갈래(읽는 중·실패·본문)가 같은 머리를 쓴다 — 상태에 따라 화면이 갈리지 않게. */
+  const lead = `${account.academyName ?? '학원'}에서 지금 확인할 것을 모았어요.`;
+
+  /*
+    **첫 조회가 끝나기 전에는 아무 숫자도 말하지 않는다.** 카드나 빈 표를 남기지 않고 한 줄만
+    둔다 — 빈 표 여섯 개는 곧 `아무 일도 없다`는 뜻으로 읽힌다(§9 · 학생 홈의 같은 규칙).
+  */
+  if (!ready) {
+    return (
+      <Screen wide testID="academy-dashboard" title="대시보드" lead={lead}>
+        <TestDataNote />
+        <AppText variant="caption" tone="secondary">
+          배정 기록을 불러오고 있어요.
+        </AppText>
+      </Screen>
+    );
+  }
+
+  /*
+    **못 읽은 목록을 없는 목록으로 말하지 않는다**(D-136). 손에 든 배정이 0건인 채로 실패했으면
+    `아직 배정한 학습이 없어요`도 `모두 냈어요`도 거짓이라, 실패 문장 하나와 다시 시도할 행동만
+    둔다. 반이 없다는 것은 세션이 준 사실이라 아래 빈 상태가 그대로 맡는다.
+  */
+  if (loadError && classes.length > 0 && scoped.length === 0) {
+    return (
+      <Screen wide testID="academy-dashboard" title="대시보드" lead={lead}>
+        <TestDataNote />
+        <View testID="academy-load-failed" style={styles.loadFailed}>
+          <AppText variant="caption" tone="danger">
+            배정 기록을 불러오지 못했어요. {loadError}
+          </AppText>
+          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
+          <Button
+            testID="academy-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void retryLoad()}
+          />
+        </View>
+      </Screen>
+    );
+  }
+
   /*
     반이 없거나 배정이 한 건도 없으면 **아래 섹션을 아예 그리지 않는다.**
     빈 표 여섯 개와 `모두 냈어요`가 나란히 서면 아무 일도 하지 않은 학원을 칭찬하는 화면이 된다
@@ -341,12 +438,7 @@ export default function AcademyDashboard() {
         : null
       : { testID: 'academy-assign-cta', label: '학습 배정하러 가기', href: '/academy/assign' };
     return (
-      <Screen
-        wide
-        testID="academy-dashboard"
-        title="대시보드"
-        lead={`${account.academyName ?? '학원'}에서 지금 확인할 것을 모았어요.`}
-      >
+      <Screen wide testID="academy-dashboard" title="대시보드" lead={lead}>
         <TestDataNote />
         <Group>
           <View style={styles.empty}>
@@ -385,13 +477,28 @@ export default function AcademyDashboard() {
   }
 
   return (
-    <Screen
-      wide
-      testID="academy-dashboard"
-      title="대시보드"
-      lead={`${account.academyName ?? '학원'}에서 지금 확인할 것을 모았어요.`}
-    >
+    <Screen wide testID="academy-dashboard" title="대시보드" lead={lead}>
       <TestDataNote />
+
+      {/*
+        **한 화면에 실패 면은 하나다**(§9). 아래 지표·표·목록이 모두 같은 두 조회에 매달려 있어서
+        자리마다 빨간 줄을 두면 한 번의 실패가 여덟 번으로 읽힌다. 여기까지 왔다는 것은 손에 든
+        배정이 있다는 뜻이라(위 게이트) 이미 읽어 둔 값은 그대로 보여 준다 — 가진 것은 사실이다.
+      */}
+      {loadError ? (
+        <View testID="academy-load-failed" style={styles.loadFailed}>
+          <AppText variant="caption" tone="danger">
+            배정 기록을 다시 불러오지 못했어요. {loadError}
+          </AppText>
+          <Button
+            testID="academy-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void retryLoad()}
+          />
+        </View>
+      ) : null}
 
       <SegmentedControl
         testID="academy-range"
@@ -645,15 +752,25 @@ export default function AcademyDashboard() {
       >
         <Group>
           {pending.byStudent.length ? (
-            pending.byStudent.slice(0, PREVIEW).map((s) => (
-              <Row
-                key={s.studentId}
-                title={accountOf(s.studentId)?.name ?? '학생'}
-                subtitle={`안 낸 과제 ${s.count}건${nearestText(s.nearest)}`}
-                onPress={() => router.push(`/academy/classes/student/${s.studentId}` as never)}
-                showChevron
-              />
-            ))
+            pending.byStudent.slice(0, PREVIEW).map((s) => {
+              const who = studentLine(s.studentId);
+              return (
+                <Row
+                  key={s.studentId}
+                  title={who.name}
+                  subtitle={[`안 낸 과제 ${s.count}건${nearestText(s.nearest)}`, who.note]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  /* 열리지 않는 상세로 보내지 않는다. 눌리지 않는 행에는 이동 표시도 두지 않는다(§8). */
+                  onPress={
+                    who.openable
+                      ? () => router.push(`/academy/classes/student/${s.studentId}` as never)
+                      : undefined
+                  }
+                  showChevron={who.openable}
+                />
+              );
+            })
           ) : (
             <Row title="모두 냈어요" subtitle="안 낸 과제가 없어요" />
           )}
@@ -1252,6 +1369,11 @@ function Def({ term, desc }: { term: string; desc: string }) {
 
 const styles = StyleSheet.create({
   empty: { padding: spacing.lg, gap: spacing.xs },
+  /*
+    실패 문장 + 다시 시도. 카드로 만들지 않는다 — 실패는 알려야 하지만 화면에서 가장 무거운
+    것이 될 이유는 없다(학생 홈의 `loadFailed`와 같은 모양).
+  */
+  loadFailed: { gap: spacing.sm, alignItems: 'flex-start' },
   defs: { gap: spacing.sm },
   def: { flexDirection: 'row', gap: spacing.md, alignItems: 'flex-start' },
   defTerm: { fontFamily: typeface.semibold, color: colors.ink, width: 92 },

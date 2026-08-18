@@ -56,8 +56,20 @@ export default function AcademyStudentDetail() {
   const account = useCurrentAccount();
   const studentId = typeof params.id === 'string' ? params.id : '';
   const { classesFor, studentInScope } = useAcademyStaff();
-  const { assignments, academyNotesOf, reassign } = useProgress();
-  const { sets } = useContent();
+  const {
+    assignments,
+    academyNotesOf,
+    reassign,
+    loaded: progressLoaded,
+    error: progressError,
+    reload: reloadProgress,
+  } = useProgress();
+  const {
+    sets,
+    loaded: contentLoaded,
+    error: contentError,
+    reload: reloadContent,
+  } = useContent();
   const { show } = useToast();
   const today = todayISO();
 
@@ -123,6 +135,63 @@ export default function AcademyStudentDetail() {
             onPress={() => router.replace('/academy/classes/students' as never)}
           />
         </ActionBar>
+      </Screen>
+    );
+  }
+
+  /*
+    **읽는 중 · 실패 · 없음을 셋으로 가른다**(D-136 · `DESIGN.md` §9).
+
+    이 화면의 모든 값(제출·평균 정답률·안 낸 과제·추이·영역별·낸 과제·오답노트)이 배정 기록과
+    콘텐츠 조회에서 온다. 이름과 소속 반만 세션이 준다 — 그래서 첫 조회가 끝나기 전에는 상담을
+    준비하는 선생님이 `제출 0/0건 · 아직 배정받은 학습이 없어요 · 담은 오답이 없어요`를 읽었다.
+    실패해도 같은 화면이 남는다(`loading`이 내려가므로 로딩 게이트가 덮지 못한다).
+
+    게이트는 `loaded`다(D-163) — 마감일 재배정이 부른 `reload()` 한 번에 화면이 통째로
+    `불러오고 있어요`로 돌아가지 않게. 상태가 무엇이든 이탈 경로(`backFallback`)를 함께 둔다(D-156).
+  */
+  const ready = progressLoaded && contentLoaded;
+  const loadError = progressError ?? contentError;
+  /** 손에 든 기록이 있으면 그것은 사실이다 — 실패해도 이미 읽어 둔 값은 지우지 않는다(D-136). */
+  const hasRecord = perf.assigned > 0 || notes.length > 0;
+
+  if (!ready) {
+    return (
+      <Screen
+        wide
+        testID="academy-student"
+        backFallback="/academy/classes/students"
+        title={student.name}
+      >
+        <Group>
+          <Row title="학원 학습 기록을 불러오고 있어요" />
+        </Group>
+      </Screen>
+    );
+  }
+
+  /* 못 읽은 기록을 없는 기록으로 말하지 않는다. 다시 시도가 이 화면의 유일한 다음 행동이다. */
+  if (loadError && !hasRecord) {
+    return (
+      <Screen
+        wide
+        testID="academy-student"
+        backFallback="/academy/classes/students"
+        title={student.name}
+      >
+        <View testID="academy-student-load-failed" style={styles.loadFailed}>
+          <AppText variant="caption" tone="danger">
+            학원 학습 기록을 불러오지 못했어요. {loadError}
+          </AppText>
+          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
+          <Button
+            testID="academy-student-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void Promise.all([reloadProgress(), reloadContent()])}
+          />
+        </View>
       </Screen>
     );
   }
@@ -315,6 +384,25 @@ export default function AcademyStudentDetail() {
       <AppText variant="caption" tone="tertiary">
         우리 학원이 배정한 학습만 보여요. 개인 학습 기록은 학원에 공개되지 않아요.
       </AppText>
+
+      {/*
+        **한 화면에 실패 면은 하나다**(§9). 아래 여섯 섹션이 모두 같은 두 조회에 매달려 있다.
+        여기까지 왔다는 것은 손에 든 기록이 있다는 뜻이라(위 게이트) 그 값은 그대로 보여 준다.
+      */}
+      {loadError ? (
+        <View testID="academy-student-load-failed" style={styles.loadFailed}>
+          <AppText variant="caption" tone="danger">
+            학원 학습 기록을 다시 불러오지 못했어요. {loadError}
+          </AppText>
+          <Button
+            testID="academy-student-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void Promise.all([reloadProgress(), reloadContent()])}
+          />
+        </View>
+      ) : null}
 
       <Section title="배정 학습 요약">
         <Group>
@@ -560,6 +648,8 @@ export default function AcademyStudentDetail() {
 
 const styles = StyleSheet.create({
   num: { fontVariant: ['tabular-nums'] },
+  /* 조회 실패 한 줄 + 다시 시도. 카드로 만들지 않는다(학생 홈과 같은 모양, §9). */
+  loadFailed: { gap: spacing.sm, alignItems: 'flex-start' },
   trend: { gap: spacing.xs },
   /** 가로 막대 목록. 한 줄의 모양·쌓기는 `BarRow`가 쥔다. */
   bars: { gap: spacing.xs },

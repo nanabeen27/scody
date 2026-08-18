@@ -67,6 +67,10 @@ interface MissingTask {
 interface NeedStudent {
   studentId: string;
   name: string;
+  /** 지금 내가 보는 반에 없는 학생. 배정 대상 행이 남아 이 목록에는 계속 나온다. */
+  left: boolean;
+  /** 학생 상세가 열리는 학생인가. 판정은 상세 화면과 같은 `studentInScope`다. */
+  openable: boolean;
   count: number;
   nearest?: string;
   tasks: MissingTask[];
@@ -106,8 +110,15 @@ export default function AcademyAnalytics() {
   const account = useCurrentAccount();
   const { accountOf } = useSession();
   const router = useRouter();
-  const { assignments, academyNotesOf, reassign } = useProgress();
-  const { classesFor } = useAcademyStaff();
+  const {
+    assignments,
+    academyNotesOf,
+    reassign,
+    loaded: progressLoaded,
+    error: progressError,
+    reload: reloadProgress,
+  } = useProgress();
+  const { classesFor, studentInScope } = useAcademyStaff();
   const { show } = useToast();
   const today = todayISO();
 
@@ -116,9 +127,21 @@ export default function AcademyAnalytics() {
    * 상위 탭이라, 왜 여기 왔는지를 쿼리가 말하고 아래 `전체 보기`가 되돌아갈 길을 준다(D-075).
    * 범위 밖 값은 무시하고 전체를 보여 준다.
    */
-  const params = useLocalSearchParams<{ due?: string }>();
+  const params = useLocalSearchParams<{ due?: string; task?: string }>();
   const fromQuery: DueFilter =
     params.due === 'overdue' || params.due === 'soon' ? params.due : 'all';
+
+  /**
+   * 배정 완료 화면이 `?task=<배정 id>`로 **방금 낸 과제만** 실어 보낸다(§20 · D-075와 같은 형태).
+   * 예전에는 `/academy/analytics`로 그냥 보내서, 방금 낸 과제를 배정 목록에서 이름으로 다시
+   * 검색해야 했다.
+   *
+   * **상태로 복사하지 않고 쿼리를 그대로 읽는다.** `dueFilter`는 화면에 컨트롤이 있어(세그먼트)
+   * 사용자가 직접 바꾸므로 상태가 필요하지만, 이것은 좁혀 들어온 사실 하나라 되돌리는 길도
+   * 주소를 지우는 것이다(`전체 보기` → `replace`). 상태로 두면 이미 열려 있던 성과 분석 화면이
+   * 다시 쓰일 때 `useState` 초기값이 갱신되지 않아 좁혀 보낸 것이 조용히 무시된다.
+   */
+  const fromTask = typeof params.task === 'string' ? params.task : '';
 
   // 제출 현황 필터·펼침
   const [dueFilter, setDueFilter] = useState<DueFilter>(fromQuery);
@@ -161,6 +184,27 @@ export default function AcademyAnalytics() {
     return assignments.filter((a) => ids.has(a.classId));
   }, [assignments, classes]);
 
+  /*
+    **읽는 중 · 실패 · 없음을 셋으로 가른다**(D-136 · `DESIGN.md` §9).
+
+    이 화면의 세 섹션(제출 현황 · 확인이 필요한 학생 · 배정 학습 오답노트)은 모두 배정 기록에서
+    온다. `classes`는 세션이라 레이아웃이 기다려 주지만 `assignments`는 아니었다 — 첫 조회가
+    끝나기 전에는 비어 있어서, 배정이 있는 학원의 원장도 첫 진입에서 `아직 배정한 학습이 없어요` +
+    `학습 배정하러 가기`를 봤다. 실패해도 같은 화면이 남는다(`loading`이 내려간다).
+
+    게이트는 `loading`이 아니라 **`loaded`**(첫 조회가 끝났는가)다(D-163) — 마감일 재배정이 부른
+    `reload()` 한 번에 화면이 통째로 `불러오고 있어요`로 돌아가지 않게.
+  */
+  const ready = progressLoaded;
+  /** 실패 문장. 서버가 준 것을 그대로 쓴다(`errorMessage`). */
+  const loadError = progressError;
+
+  /** 지금 내가 보는 반에 있는 학생. 반에서 빠진 학생을 가르는 기준이다(아래 `needStudents`). */
+  const inMyClass = useMemo(
+    () => new Set(classes.flatMap((c) => c.studentIds)),
+    [classes],
+  );
+
   /** 마감이 지났고 **안 낸 학생이 남은** 배정. 마감일을 다시 정할 대상이다(D-046). */
   const reassignable = useMemo(() => {
     const map = new Map<string, number>();
@@ -192,10 +236,17 @@ export default function AcademyAnalytics() {
 
   const classSearch = classOptions.length > SEGMENT_MAX;
 
+  /** 실려 온 배정 id가 지금 내가 보는 범위에 있을 때만 좁힌다. 아니면 전체를 보여 준다(D-075). */
+  const taskNarrow = useMemo(
+    () => (fromTask && scoped.some((a) => a.id === fromTask) ? fromTask : ''),
+    [fromTask, scoped],
+  );
+
   const taskRows = useMemo(() => {
     const q = classQuery.trim();
     const t = taskQuery.trim();
     const rows = scoped
+      .filter((a) => !taskNarrow || a.id === taskNarrow)
       .filter((a) =>
         dueFilter === 'overdue'
           ? !!a.dueDate && a.dueDate < today
@@ -212,7 +263,7 @@ export default function AcademyAnalytics() {
       좁혀서 볼 때(`마감 지남`·`오늘·내일`)는 급한 것이 이른 마감이므로 반대로 세운다.
     */
     return dueFilter === 'all' ? rows.sort((a, b) => -byDueAsc(a, b)) : rows.sort(byDueAsc);
-  }, [scoped, dueFilter, classFilter, classQuery, taskQuery, soonIds, today, classes]);
+  }, [scoped, taskNarrow, dueFilter, classFilter, classQuery, taskQuery, soonIds, today, classes]);
 
   const overdueCount = useMemo(
     () => scoped.filter((a) => !!a.dueDate && a.dueDate < today).length,
@@ -249,15 +300,28 @@ export default function AcademyAnalytics() {
     // `pendingStat`이 정한 순서(안 낸 개수 → 급한 마감)를 그대로 쓴다.
     const q = needQuery.trim();
     return pendingStat(urgent)
-      .byStudent.map((s) => ({
-        studentId: s.studentId,
-        name: accountOf(s.studentId)?.name ?? '학생',
-        count: s.count,
-        nearest: s.nearest,
-        tasks: (tasks.get(s.studentId) ?? []).sort(byDueAsc),
-      }))
+      .byStudent.map((s) => {
+        /*
+          **반에서 빼도 그 학생의 배정 대상 행은 남는다** — `removeStudentFromClass`는
+          `class_students.removed_at`만 채우므로 이 목록에는 계속 나온다. 예전에는 이름을 못
+          찾으면 그냥 `학생`이라고 불렀고, 대시보드에서 눌러 간 상세는 `학생을 찾을 수 없어요`로
+          끝났다 — 목록이 가리킨 곳에서 할 수 있는 일이 0개였다. 지금은 그 사실을 행에서 말하고
+          상세로 보내지 않는다(대시보드의 `studentLine`과 같은 판단).
+        */
+        const found = accountOf(s.studentId);
+        const mine = inMyClass.has(s.studentId);
+        return {
+          studentId: s.studentId,
+          name: found?.name ?? '반에서 빠진 학생',
+          left: !!found && !mine,
+          openable: mine && !!studentInScope(s.studentId),
+          count: s.count,
+          nearest: s.nearest,
+          tasks: (tasks.get(s.studentId) ?? []).sort(byDueAsc),
+        };
+      })
       .filter((s) => !q || s.name.includes(q));
-  }, [urgent, reassignable, needQuery, accountOf, classes]);
+  }, [urgent, reassignable, needQuery, accountOf, classes, inMyClass, studentInScope]);
 
   /**
    * 배정 학습 오답노트. 읽기는 `academyNotesOf` 한 경로로만 한다(담당 반 + 우리 학원 배정 검사).
@@ -337,7 +401,7 @@ export default function AcademyAnalytics() {
     페이지는 필터가 바뀌면 처음으로 돌아가야 한다. effect에서 setState를 하면 렌더가 연쇄되므로
     상태에 필터 키를 함께 담아 **파생**으로 계산한다(`ChildReport`의 오답 페이지와 같은 방법).
   */
-  const taskKey = `${dueFilter}|${classFilter}|${classQuery.trim()}|${taskQuery.trim()}`;
+  const taskKey = `${taskNarrow}|${dueFilter}|${classFilter}|${classQuery.trim()}|${taskQuery.trim()}`;
   const taskPage = taskNav.key === taskKey ? taskNav.page : 0;
   const visibleTasks = taskRows.slice(taskPage * PAGE, taskPage * PAGE + PAGE);
 
@@ -356,7 +420,8 @@ export default function AcademyAnalytics() {
   function missingNames(a: Assignment): string {
     const names = a.submissions
       .filter((s) => !s.submitted)
-      .map((s) => accountOf(s.studentId)?.name ?? '학생');
+      // 이름을 못 찾는 계정은 학원을 떠난 학생이다. 아무 학생이나 가리키는 `학생`으로 쓰지 않는다.
+      .map((s) => accountOf(s.studentId)?.name ?? '반에서 빠진 학생');
     const head = names.slice(0, NAME_PREVIEW).join(' · ');
     return names.length > NAME_PREVIEW ? `${head} 외 ${names.length - NAME_PREVIEW}명` : head;
   }
@@ -445,6 +510,71 @@ export default function AcademyAnalytics() {
     { value: 'memo', label: '메모 있음', count: taskScopedNotes.filter((r) => !!r.note.dig).length },
   ];
 
+  /**
+   * 쿼리로 좁혀 들어온 이유와 되돌아갈 길(§20 · D-075). **두 갈래를 한 자리로 모은다** —
+   * 대시보드는 `?due=`로, 배정 완료 화면은 `?task=`로 보내고 배너는 화면에 하나만 선다.
+   *
+   * **수는 지금 목록의 크기를 그대로 말한다**(`taskRows.length`, D-084 ①). 예전에는
+   * `overdueCount`·`soonIds.size`를 말했는데 둘은 반·과제 검색을 거치기 전 값이라 더 좁히는
+   * 순간 화면에 남은 줄 수와 어긋났다. 설명도 필터 이름과 같은 말로 둔다.
+   */
+  const narrowed = taskNarrow
+    ? {
+        testID: 'submit-clear-task',
+        text: `배정 화면에서 넘어왔어요. 방금 배정한 학습 ${taskRows.length}개만 남겼어요.`,
+        /* 좁힌 근거가 주소에 있으니 되돌리는 것도 주소를 지우는 일이다(뒤로가기를 만들지 않게 `replace`). */
+        clear: () => router.replace('/academy/analytics' as never),
+      }
+    : fromQuery !== 'all' && dueFilter === fromQuery
+      ? {
+          testID: 'submit-clear-narrow',
+          text: `대시보드에서 넘어왔어요. ${
+            fromQuery === 'overdue' ? '마감이 지난' : '오늘·내일 마감인'
+          } 배정 ${taskRows.length}개만 남겼어요.`,
+          clear: () => {
+            setDueFilter('all');
+            router.replace('/academy/analytics' as never);
+          },
+        }
+      : null;
+
+  /*
+    **첫 조회가 끝나기 전에는 배정이 없다고 말하지 않는다**(§9). 빈 상자 셋과 배정 CTA를 두면
+    배정이 있는 학원의 원장이 첫 화면에서 "아무것도 안 냈다"를 읽는다.
+  */
+  if (!ready) {
+    return (
+      <Screen wide testID="academy-analytics" title="성과 분석">
+        <TestDataNote />
+        <AppText variant="caption" tone="secondary">
+          배정 기록을 불러오고 있어요.
+        </AppText>
+      </Screen>
+    );
+  }
+
+  /* 못 읽은 목록을 없는 목록으로 말하지 않는다(D-136). 실패 문장 하나와 다시 시도만 둔다. */
+  if (loadError && scoped.length === 0) {
+    return (
+      <Screen wide testID="academy-analytics" title="성과 분석">
+        <TestDataNote />
+        <View testID="analytics-load-failed" style={styles.loadFailed}>
+          <AppText variant="caption" tone="danger">
+            배정 기록을 불러오지 못했어요. {loadError}
+          </AppText>
+          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
+          <Button
+            testID="analytics-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void reloadProgress()}
+          />
+        </View>
+      </Screen>
+    );
+  }
+
   // 배정이 없으면 하위 섹션을 아예 그리지 않는다. 빈 상자 셋을 쌓는 대신 다음 행동 하나를 둔다.
   if (scoped.length === 0) {
     return (
@@ -476,23 +606,34 @@ export default function AcademyAnalytics() {
     <Screen wide testID="academy-analytics" title="성과 분석">
       <TestDataNote />
 
+      {/*
+        **한 화면에 실패 면은 하나다**(§9). 세 섹션이 모두 같은 조회에 매달려 있어서 자리마다
+        빨간 줄을 두면 한 번의 실패가 세 번으로 읽힌다. 여기까지 왔다는 것은 손에 든 배정이
+        있다는 뜻이라(위 게이트) 이미 읽어 둔 값은 그대로 보여 준다 — 가진 것은 사실이다.
+      */}
+      {loadError ? (
+        <View testID="analytics-load-failed" style={styles.loadFailed}>
+          <AppText variant="caption" tone="danger">
+            배정 기록을 다시 불러오지 못했어요. {loadError}
+          </AppText>
+          <Button
+            testID="analytics-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void reloadProgress()}
+          />
+        </View>
+      ) : null}
+
       <Section title="제출 현황">
-        {fromQuery !== 'all' && dueFilter === fromQuery ? (
+        {narrowed ? (
           <View style={styles.narrowed}>
-            {/*
-              **수는 지금 목록의 크기를 그대로 말한다**(`taskRows.length`). 예전에는
-              `overdueCount`·`soonIds.size`를 말했는데 둘은 반·과제 검색을 거치기 전 값이라
-              더 좁히는 순간 화면에 남은 줄 수와 어긋났고, `마감이 지났는데 안 낸 학생이 남은`은
-              필터가 세지 않는 조건이라(대시보드의 `overdueAssignments`만 그렇게 센다)
-              문장 자체가 목록과 달랐다. 설명도 필터 이름과 같은 말로 둔다.
-            */}
             <AppText variant="caption" tone="secondary" style={styles.narrowedText}>
-              {`대시보드에서 넘어왔어요. ${
-                fromQuery === 'overdue' ? '마감이 지난' : '오늘·내일 마감인'
-              } 배정 ${taskRows.length}개만 남겼어요.`}
+              {narrowed.text}
             </AppText>
             <Button
-              testID="submit-clear-narrow"
+              testID={narrowed.testID}
               size="sm"
               variant="ghost"
               tone="accent"
@@ -500,10 +641,7 @@ export default function AcademyAnalytics() {
               label="전체 보기"
               /* 옆 문장과 떨어져 읽히면 무엇의 전체인지 알 수 없다. 이름을 고정한다(§8). */
               accessibilityLabel="배정 전체 보기"
-              onPress={() => {
-                setDueFilter('all');
-                router.replace('/academy/analytics' as never);
-              }}
+              onPress={narrowed.clear}
             />
           </View>
         ) : null}
@@ -657,13 +795,17 @@ export default function AcademyAnalytics() {
                   <Row
                     testID={`need-${s.studentId}`}
                     title={s.name}
-                    subtitle={
+                    subtitle={[
                       s.count === 1 && first
                         ? [`${first.title} 미제출`, first.className, dueText(first.dueDate)]
                             .filter(Boolean)
                             .join(' · ')
-                        : `안 낸 과제 ${s.count}건 · 가장 급한 마감 ${dueText(s.nearest)}`
-                    }
+                        : `안 낸 과제 ${s.count}건 · 가장 급한 마감 ${dueText(s.nearest)}`,
+                      // 이름을 모르는 학생은 제목이 이미 그 말을 한다 — 같은 말을 두 번 두지 않는다.
+                      s.left ? '반에서 빠진 학생이에요' : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
                     accessibilityLabel={`${s.name} 안 낸 과제 보기`}
                     /*
                       **펼칠 수 있다는 표시가 없으면 이 행은 눌러 볼 이유가 없다.**
@@ -686,6 +828,34 @@ export default function AcademyAnalytics() {
                             </AppText>
                           ))
                         : null}
+                      {/*
+                        **학생 축에서 그 학생 상세로 가는 길.** 대시보드의 `안 낸 학생` 행과 반
+                        상세의 펼침은 이미 같은 곳으로 가는데(D-084 ⑥ — 같은 목적지는 한 이름·한
+                        아이콘) 미제출을 다루는 주 화면인 여기만 길이 없었다. 그래서 이름을 아는
+                        학생의 지난 제출·정답률을 보려면 학생 목록으로 되돌아가 다시 찾아야 했다.
+                        모양·이름은 반 상세의 `class-student-detail-*`과 같다.
+                      */}
+                      {s.openable ? (
+                        <View style={endRow.action}>
+                          <Button
+                            testID={`need-student-detail-${s.studentId}`}
+                            variant="ghost"
+                            tone="accent"
+                            hug
+                            leading={<Icon name="user" size={16} color={colors.accent} />}
+                            label="이 학생 기록 전체 보기"
+                            accessibilityLabel={`${s.name} 학생 기록 전체 보기`}
+                            onPress={() =>
+                              router.push(`/academy/classes/student/${s.studentId}` as never)
+                            }
+                          />
+                        </View>
+                      ) : (
+                        /* 열리지 않는 상세로 보내지 않는다. 왜 없는지만 한 줄로 말한다(§8 · D-141). */
+                        <AppText variant="caption" tone="tertiary">
+                          반에서 빠진 학생이라 기록 전체 보기는 열리지 않아요.
+                        </AppText>
+                      )}
                       {target ? (
                         /* 위 과제 목록과 같은 패널 안이라 버튼만 오른쪽으로 뺀다(D-146).
                            바로 위 과제 섹션의 `reassign-open-*`은 `inset.action`이라 이미
@@ -890,6 +1060,8 @@ const styles = StyleSheet.create({
   nested: { paddingLeft: spacing.sm },
   dueInput: { maxWidth: 280 },
   empty: { padding: spacing.lg, gap: spacing.xs },
+  /* 실패 문장 + 다시 시도. 카드로 만들지 않는다(학생 홈·대시보드와 같은 모양, §9). */
+  loadFailed: { gap: spacing.sm, alignItems: 'flex-start' },
   block: { gap: spacing.sm },
   note: { padding: spacing.lg, gap: 4 },
   memo: { gap: 2, marginTop: 2 },
