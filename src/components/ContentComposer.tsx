@@ -80,6 +80,9 @@ function isFilled(q: QDraft): boolean {
  * 검사는 **첫 실패에서 멈추지 않는다.** 문법 은행 세트는 20~25문항이라 문항 하나가 약 400px이고,
  * 화면 맨 아래 캡션 한 줄로 `3번 문제의 보기를…`이라고 알리면 수천 픽셀을 거슬러 올라가야 한다.
  * 그래서 남은 입력을 **해당 필드 아래 인라인**으로 모두 표시하고, 문항 제목에도 표시를 붙인다.
+ *
+ * `defaultArea`·`defaultTopic`은 **선택**이다. 넘기지 않으면 예전 기본값(`독서` + 그 영역의 첫
+ * 유형) 그대로라 학원 등록(`app/academy/content/new.tsx`)은 그대로 동작한다.
  */
 export function ContentComposer({
   title,
@@ -88,6 +91,8 @@ export function ContentComposer({
   publishToStudents,
   ownerAcademyName,
   backFallback,
+  defaultArea,
+  defaultTopic,
 }: {
   title: string;
   /** 등록을 마치고 확인을 눌렀을 때. 방금 만든 세트를 함께 넘긴다(다음 화면이 그 학습을 이어 쓴다). */
@@ -99,12 +104,31 @@ export function ContentComposer({
   ownerAcademyName?: string;
   /** 등록을 그만둘 때 돌아갈 경로. 히스토리가 없는 직접 진입에도 안전해야 한다. */
   backFallback: string;
+  /**
+   * 미리 골라 둘 영역. 넘기지 않으면 `독서`다.
+   *
+   * `문법`을 넘기면 `kind`도 `grammar`로 세운다 — 둘이 어긋나면 영역 컨트롤이 남은 채로
+   * 문법 유형이 골라져, 화면이 자기 안에서 다른 말을 한다(`setKindSafe`가 지키는 규칙이다).
+   */
+  defaultArea?: KoreanArea;
+  /** 미리 골라 둘 세부 유형. `defaultArea`에 속하지 않는 값은 무시한다. */
+  defaultTopic?: string;
 }) {
   const { addContent } = useContent();
-  const [kind, setKind] = useState<ContentKind>('passage');
-  const [area, setArea] = useState<KoreanArea>('독서');
+  /*
+    **미리 고른 값은 초기 상태로만 쓴다.** `콘텐츠가 없는 세부 유형`에서 온 운영자는 유형 이름을
+    외워 나가 영역·세부 유형을 손으로 다시 골랐다 — S-011(`유형별 최소 1세트 확보`)이 완료 조건으로
+    걸어 둔 작업의 입구다. 고른 뒤에는 평소처럼 바꿀 수 있어야 하므로 값을 다시 밀어 넣지 않는다.
+  */
+  const initialArea: KoreanArea = defaultArea ?? '독서';
+  const prefilledTopic =
+    defaultTopic && topicsFor(initialArea).includes(defaultTopic) ? defaultTopic : null;
+  const [kind, setKind] = useState<ContentKind>(
+    initialArea === '문법' ? 'grammar' : 'passage',
+  );
+  const [area, setArea] = useState<KoreanArea>(initialArea);
   const [grade, setGrade] = useState<Grade>(1);
-  const [topic, setTopic] = useState<string>(topicsFor('독서')[0]);
+  const [topic, setTopic] = useState<string>(prefilledTopic ?? topicsFor(initialArea)[0]);
   const [ct, setCt] = useState('');
   const [passageTitle, setPassageTitle] = useState('');
   const [passageBody, setPassageBody] = useState('');
@@ -303,6 +327,18 @@ export function ContentComposer({
 
       <Section title="세부 유형">
         <SegmentedControl testID="new-topic" options={topicOptions} value={topic} onChange={setTopic} />
+        {/*
+          미리 골라 둔 값이라는 사실을 그 컨트롤 옆에서 말한다 — 쿼리로 좁혀 온 화면은 좁힌 이유를
+          말한다(DESIGN.md §20). 운영자가 값을 바꾸면 사라진다. 조사(을/를)가 유형 이름의 종성에
+          따라 갈리므로 이름을 문장에 넣지 않는다.
+
+          이름은 `new-topic-*`을 쓰지 않는다 — `SegmentedControl`이 옵션마다 그 이름을 만든다.
+        */}
+        {prefilledTopic && topic === prefilledTopic && area === initialArea ? (
+          <AppText testID="new-prefill-note" variant="caption" tone="tertiary">
+            비어 있던 세부 유형을 미리 골라 뒀어요. 바꿔도 돼요.
+          </AppText>
+        ) : null}
         {checked && problems.topic ? (
           <AppText variant="caption" style={{ color: colors.danger }}>
             세부 유형을 골라 주세요.

@@ -4,7 +4,7 @@ import { usePathname, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText } from './AppText';
 import { Icon } from './Icon';
-import { useSession, homeHrefFor, IMPERSONATION_MINUTES } from '@/session';
+import { useSession, IMPERSONATION_MINUTES } from '@/session';
 import { useAudit } from '@/features/audit';
 import { colors, radius, spacing, typeface } from '@/theme/tokens';
 
@@ -12,11 +12,18 @@ import { colors, radius, spacing, typeface } from '@/theme/tokens';
  * 대리 보기를 끝내는 유일한 동작. 배너와 대상 계정의 `내 정보`가 함께 쓴다.
  *
  * 세 가지를 한 번에 한다. ① 세션 되돌리기 ② **종료를 감사 로그에 남기기**(열어 본 화면 수와
- * 경로, 종료 사유 — 개인정보 안전성 확보조치 기준 제8조의 '수행업무') ③ 운영자 홈으로 보내기.
+ * 경로, 종료 사유 — 개인정보 안전성 확보조치 기준 제8조의 '수행업무') ③ 운영자 라우트로 보내기.
  *
- * 끝낼 때 **운영자 홈으로 보내야 한다.** 계정만 되돌리면 화면은 아직 대상의 라우트에 있고
+ * 끝낼 때 **운영자 라우트로 보내야 한다.** 계정만 되돌리면 화면은 아직 대상의 라우트에 있고
  * (예: `/student/solve/...`) 운영자에게는 그 역할이 없어서 역할 가드가 `/login`으로 보낸다 —
  * 운영자가 로그아웃된 것처럼 보인다(실측으로 확인했다). 시간 만료도 같은 경로를 탄다.
+ *
+ * **목적지는 조사하던 계정 상세**(`/admin/user/{대상}`)다. 운영자 라우트이므로 위의 역할 가드
+ * 문제는 그대로 해결되고, 대리 보기는 늘 그 화면에서 시작하므로 끝낸 자리가 시작한 자리다 —
+ * 예전에는 `/admin`(개요)으로 보내서, 방금 본 것을 열람 기록에서 확인하거나 다시 열려면
+ * **계정 검색을 처음부터 다시** 해야 했다. `등록을 마치면 방금 만든 것을 보여 준다`와 같은
+ * 판단이다(DESIGN.md §20). 시간 만료도 같은 목적지다 — 어디를 열어 보던 중이었는지와 무관하게
+ * 조사 대상은 하나다.
  *
  * 기록을 `SessionProvider`가 아니라 여기서 남기는 이유는 `session.tsx`의 `ImpersonationEnd`
  * 주석에 있다(세션이 감사 로그 provider에 의존하지 않게 한다).
@@ -43,7 +50,7 @@ export function useFinishImpersonation() {
         subjectId: ended.target.userId,
         detail: `대리 보기 종료 · ${ended.target.name}(${ended.target.userId}) · ${ended.why} · ${seen}`,
       });
-      router.replace(homeHrefFor(ended.operator) as never);
+      router.replace(`/admin/user/${ended.target.userId}` as never);
     },
     [endImpersonation, log, router],
   );

@@ -62,7 +62,7 @@ type Range = (typeof RANGES)[number]['value'];
  */
 export default function AdminHome() {
   const router = useRouter();
-  const { sets } = useContent();
+  const { sets, loading: contentLoading } = useContent();
   const { policy } = usePricing();
   const [range, setRange] = useState<Range>('12');
 
@@ -189,11 +189,18 @@ export default function AdminHome() {
       href: '/admin/metrics',
     });
   }
-  if (content.empty > 0) {
+  /*
+    **읽는 중에는 없다고 세지 않는다**(D-133). `sets`가 아직 비어 있는 프레임에서는 모든 세부
+    유형이 비어 보여서 `콘텐츠가 없는 세부 유형 29개`가 사실처럼 걸린다 — 오답률 알림이 `usage`를
+    기다리는 것과 같은 이유다.
+  */
+  if (!contentLoading && content.empty > 0) {
     alerts.push({
       title: `콘텐츠가 없는 세부 유형 ${content.empty}개`,
       subtitle: `전체 ${content.total}개 유형 중`,
-      href: '/admin/content',
+      // 세어 준 것으로 좁힌 목록으로 보낸다(형제 알림의 `?wrong=`과 같은 규칙, D-075).
+      // 목적지는 그 유형만 남기고 유형마다 등록 폼으로 가는 길을 둔다 — S-011이 걸어 둔 작업이다.
+      href: '/admin/content?empty=1',
     });
   }
   if (content.hard > 0) {

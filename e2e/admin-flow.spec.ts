@@ -369,9 +369,14 @@ test.describe('총괄관리자 대리 보기', () => {
     // 몰입 모드는 화면 장식을 걷어내지만 배너는 남아야 한다.
     await expect(page.getByTestId('impersonation-banner')).toBeVisible();
 
-    // 끝내면 운영자 계정으로, 운영자 홈으로 돌아온다(학생 라우트에 남으면 역할 가드에 걸린다).
+    /*
+      끝내면 운영자 계정으로, **조사하던 계정 상세로** 돌아온다(학생 라우트에 남으면 역할 가드에
+      걸린다). 예전에는 `/admin`(개요)이어서 그 계정의 열람 기록을 보거나 다시 열려면 계정 검색을
+      처음부터 다시 해야 했다.
+    */
     await page.getByTestId('impersonation-end').click();
-    await expect(page).toHaveURL(/\/admin$/);
+    await expect(page).toHaveURL(new RegExp(`/admin/user/${sid('u_student_academy')}$`));
+    await expect(page.getByTestId('admin-user')).toBeVisible();
     await expect(page.getByTestId('impersonation-banner')).toHaveCount(0);
 
     // 시작 사실이 운영 기록에 남는다.
@@ -446,7 +451,7 @@ test.describe('총괄관리자 대리 보기', () => {
     const end = page.getByTestId('settings-impersonation-end');
     await expect(end).toBeVisible();
     await end.click();
-    await expect(page).toHaveURL(/\/admin$/);
+    await expect(page).toHaveURL(new RegExp(`/admin/user/${sid('u_student_both')}$`));
     await expect(page.getByTestId('impersonation-banner')).toHaveCount(0);
   });
 
@@ -463,7 +468,7 @@ test.describe('총괄관리자 대리 보기', () => {
     await expect(page.getByTestId('impersonation-left')).toBeVisible();
 
     await page.getByTestId('impersonation-end').click();
-    await expect(page).toHaveURL(/\/admin$/);
+    await expect(page).toHaveURL(new RegExp(`/admin/user/${sid('u_teacher_parent')}$`));
   });
 
   test('시작과 종료가 대리 보기 분류로 남고 종료 기록에 열어 본 화면 수가 있다', async ({ page }) => {
@@ -472,7 +477,9 @@ test.describe('총괄관리자 대리 보기', () => {
     await page.getByRole('link', { name: '학습' }).click();
     await expect(page).toHaveURL(/\/student\/learn/);
     await page.getByTestId('impersonation-end').click();
-    await expect(page).toHaveURL(/\/admin$/);
+    // 끝낸 자리가 시작한 자리다 — 그 계정의 열람 기록이 여기 있다.
+    await expect(page).toHaveURL(new RegExp(`/admin/user/${sid('u_student_academy')}$`));
+    await expect(page.locator('[data-testid^="user-audit-"]')).toHaveCount(2);
 
     await page.getByRole('link', { name: '운영 기록' }).click();
     // 기록이 생긴 분류만 칩이 된다(D-065). 대리 보기 칩이 실제로 생겨야 한다.
@@ -536,7 +543,7 @@ test.describe('총괄관리자 대리 보기', () => {
 
     // 열람 범위가 운영 기록에 남는다 — 화면이 말한 문장과 같은 문장이다
     await page.getByTestId('impersonation-end').click();
-    await expect(page).toHaveURL(/\/admin/);
+    await expect(page).toHaveURL(new RegExp(`/admin/user/${sid('u_parent')}$`));
     await page.getByRole('link', { name: '운영 기록' }).first().click();
     await expect(
       page.getByText(/열람 범위: 연결된 자녀의 학습 기록 전부/).first(),
