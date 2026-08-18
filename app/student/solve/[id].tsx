@@ -6,6 +6,8 @@ import {
   Screen,
   Button,
   AppText,
+  Group,
+  Row,
   SegmentedControl,
   SourceTag,
   Passage,
@@ -13,7 +15,7 @@ import {
   Icon,
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
-import { useStudentItems } from '@/features/learning';
+import { dueLabel, useStudentItems } from '@/features/learning';
 import { useContent } from '@/features/content';
 import { useProgress } from '@/features/progress';
 import { now } from '@/features/clock';
@@ -58,8 +60,13 @@ export default function Solve() {
   useCurrentAccount();
   const { answers, saveAnswer } = useSession();
   const { all } = useStudentItems();
-  const { sets } = useContent();
-  const { submitAttempt } = useProgress();
+  const { sets, loading: contentLoading, error: contentError, reload: reloadContent } = useContent();
+  const {
+    submitAttempt,
+    loading: progressLoading,
+    error: progressError,
+    reload: reloadProgress,
+  } = useProgress();
   const { isDesktop } = useResponsive();
   const startRef = useRef<number>(now());
   const [mode, setMode] = useState<ViewMode>('five');
@@ -86,17 +93,78 @@ export default function Solve() {
   const item = all.find((i) => i.id === id);
   const content = item ? findContent(sets, item.contentId) : undefined;
 
+  /*
+    **읽는 중 · 실패 · 없는 학습을 셋으로 가른다**(A-116). 이 화면이 특히 중요하다 —
+    **풀던 학습을 새로고침한 학생**이 여기로 돌아오고, 그때 첫 조회는 아직 돌고 있다.
+    예전에는 그 창과 조회 실패(M-DB-16)에 모두 `학습을 찾지 못했어요`가 나와서, 답을 절반쯤
+    고른 학생에게 그 학습이 사라졌다고 단정했다. 기준 구현은 `result/[id].tsx`다.
+  */
+  const reading = progressLoading || contentLoading;
+  /** 조회 실패 문장. 다시 읽는 중에는 감춘다(§9). */
+  const loadError = reading ? null : (progressError ?? contentError);
+
+  /** 두 조회를 함께 다시 시도한다. 실패가 어느 쪽에서 왔는지 학생이 고를 일은 아니다. */
+  async function retryLoad() {
+    await Promise.all([reloadProgress(), reloadContent()]);
+  }
+
   if (!item || !content) {
     return (
-      <Screen testID="student-solve" title="학습을 찾지 못했어요">
-        <ActionBar>
-          <Button label="홈으로 갈게요" onPress={() => router.replace('/student' as never)} />
-        </ActionBar>
+      <Screen
+        testID="student-solve"
+        /*
+          **`backFallback`을 주지 않는다.** 이 경로는 몰입 모드라 `RoleShell`이 좌상단에
+          `나중에 다시 풀기`를 이미 그리고(`pathname.includes('/solve/')`), 화면 상태와 무관하게
+          모든 상태에서 그대로 있다. 여기에 `BackLink`를 더하면 뒤로가는 장치가 두 겹으로 쌓인다.
+        */
+        title={
+          reading
+            ? '학습을 불러오고 있어요'
+            : loadError
+              ? '학습을 불러오지 못했어요'
+              : '학습을 찾지 못했어요'
+        }
+      >
+        {reading ? (
+          <Group>
+            <Row title="잠시만 기다려 주세요" />
+          </Group>
+        ) : loadError ? (
+          /*
+            실패 문장은 서버가 준 것을 쓴다. **고른 답은 세션에 남아 있다** —
+            다시 불러오기가 성공하면 풀던 자리에서 이어진다.
+          */
+          <>
+            <AppText variant="caption" tone="danger">
+              {loadError}
+            </AppText>
+            <ActionBar>
+              <Button
+                testID="solve-load-retry"
+                label="다시 불러오기"
+                onPress={() => void retryLoad()}
+              />
+            </ActionBar>
+          </>
+        ) : (
+          <ActionBar>
+            <Button label="홈으로 갈게요" onPress={() => router.replace('/student' as never)} />
+          </ActionBar>
+        )}
       </Screen>
     );
   }
 
   const questions = content.questions;
+  /**
+   * 오늘 기준 마감. **이 화면에는 마감이 아예 없었다** — 홈과 상세가 `마감이 지났어요`라고 말한
+   * 과제를 열면 그 사실이 사라졌다.
+   *
+   * **지난 마감만 그린다.** 아직 남은 마감(`오늘까지`)은 지금 손으로 할 일을 바꾸지 않으므로
+   * 상세에 두고, 이 화면은 몰입을 지킨다(§16). 지난 마감은 다르다 — 지금 내도 되는지 모르면
+   * 풀다가 그만두게 된다. 이미 낸 학습에는 쓰지 않는다(D-142 — 재풀이로 들어온 경우다).
+   */
+  const due = item.status === 'done' ? null : dueLabel(item.dueDate);
   const saved = answers[item.id] ?? {};
   /*
     재풀이에서는 이번에 다시 고른 문항만 칠한다. `saved`에서 골라 오므로 대리 보기처럼
@@ -270,6 +338,26 @@ export default function Solve() {
       */}
       <Steps done={answeredCount} total={questions.length} />
 
+      {/*
+        **지난 마감과 지금 할 수 있는 일을 같은 자리에서 말한다.** 문장은 상세의 마감 줄 아래와
+        한 글자도 다르지 않다 — 두 화면이 같은 사실을 다르게 말하면 어느 쪽이 맞는지 다시 읽어야
+        한다. 서버는 마감을 검사하지 않으므로(`supabase/migrations/0029_*.sql`의
+        `rpc_submit_attempt` 가드는 배정 여부·콘텐츠 일치·문항 존재만 본다) 지나도 낼 수 있다.
+        **글자가 먼저 바뀌고 색은 그다음이다**(§11).
+      */}
+      {due?.overdue ? (
+        <View style={styles.overdueBlock}>
+          <AppText variant="caption" style={styles.overdue}>
+            {due.text}
+          </AppText>
+          {item.source === 'academy' ? (
+            <AppText variant="caption" tone="secondary">
+              마감이 지나도 낼 수 있어요. 선생님에게는 늦게 낸 것으로 보여요.
+            </AppText>
+          ) : null}
+        </View>
+      ) : null}
+
       {twoCol ? (
         <View style={styles.cols}>
           <View style={[styles.col, stickyPassage]}>{passageBlock}</View>
@@ -345,6 +433,11 @@ function QuestionCard({
 
 const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
+
+  /* 지난 마감과 그 뒤에 할 수 있는 일. 한 덩어리 안에서 줄만 갈리므로 `spacing.xs`다. */
+  overdueBlock: { gap: spacing.xs },
+  /* 학생 홈 히어로·학습 상세의 같은 줄과 한 벌이다. */
+  overdue: { color: colors.danger, fontFamily: typeface.medium },
   cols: { flexDirection: 'row', gap: spacing.xxl, alignItems: 'flex-start' },
   col: { flex: 1, gap: spacing.xl },
 
