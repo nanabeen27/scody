@@ -548,10 +548,16 @@ test.describe('M3 학부모 흐름', () => {
     await keepWrongNotes(page);
 
     /*
-      오답노트에서 별표를 달고 메모를 정리한다. **방금 담은 오답**(목록 맨 아래)에 한다 —
-      맨 위는 지난달 시드 오답이라, 거기에 붙이면 학부모가 이번 달 리포트에서 볼 수 없다.
+      오답노트에서 별표를 달고 메모를 정리한다. **방금 담은 오답**에 한다 — 시드 오답은
+      지난달 것이라, 거기에 붙이면 학부모가 이번 달 리포트에서 볼 수 없다.
+
+      **`정리 안 함`으로 좁힌 뒤 맨 아래를 집는다.** 오답노트는 아직 정리하지 않은 오답을 위에
+      세우고 목록을 다섯 개로 접으므로, 좁히지 않고 `.last()`를 쓰면 이미 메모가 붙은 지난달
+      오답을 집는다(정예린은 시드 오답이 여덟 개이고 그중 다섯 개에 메모가 있다).
+      좁힌 안에서는 담은 순서가 유지되므로 방금 담은 것이 맨 아래다.
     */
     await page.getByTestId('result-notebook').click();
+    await page.getByTestId('note-filter-pending').click();
     await page.getByRole('button', { name: '별표 달기' }).last().click();
     const ask = page.locator('[data-testid^="ask-"]').last();
     await ask.fill('왜 이게 정답인가요?');

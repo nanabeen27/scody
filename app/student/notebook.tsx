@@ -32,6 +32,20 @@ import { findContent, type LearningItem } from '@/data';
 import { colors, spacing, typeface, font } from '@/theme/tokens';
 import { useColumn } from '@/theme/useColumn';
 
+/** 먼저 보여 줄 오답 수(§8의 5줄 상한). 나머지는 목록 아래 `N개 더 보기`로 펼친다. */
+const PREVIEW = 5;
+
+/**
+ * 오답노트 목록을 좁히는 값 하나.
+ *
+ * **상태(정리·별표)와 영역이 같은 컨트롤에 선다.** 하나를 고르는 자리는 이 프로젝트에
+ * `SegmentedControl` 하나뿐이고(D-077), 학생이 한 번에 좁히고 싶은 것도 하나다 — 컨트롤을
+ * 둘로 늘리면 `전체` 칸이 두 벌이 되어 지금 목록이 무엇인지 화면에서 읽히지 않는다.
+ *
+ * 영역만 접두사를 붙인다. 영역 이름은 데이터에서 오므로(`src/data`) 상태 값과 같은 값
+ * 공간에 두면 `all`이라는 영역이 생기는 날 조용히 겹친다.
+ */
+type NoteFilter = 'all' | 'pending' | 'starred' | `area:${string}`;
 
 /**
  * 노트 카드의 머리 — 발문과 아이콘 줄(정리·별표·휴지통).
@@ -77,8 +91,18 @@ export default function Notebook() {
     addToQueue,
     removeFromQueue,
     isQueued,
+    loading: progressLoading,
+    loaded: progressLoaded,
+    error: progressError,
+    reload: reloadProgress,
   } = useProgress();
-  const { sets } = useContent();
+  const {
+    sets,
+    loading: contentLoading,
+    loaded: contentLoaded,
+    error: contentError,
+    reload: reloadContent,
+  } = useContent();
   const { readOnly } = useSession();
   const { show } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
@@ -90,43 +114,56 @@ export default function Notebook() {
   const [wrapUp, setWrapUp] = useState(false);
   /** 정리와 대화를 지우기 전 확인. 되돌릴 수 없어 한 번 묻는다. */
   const [confirmReset, setConfirmReset] = useState<string | null>(null);
-  const [areaFilter, setAreaFilter] = useState<string>('all');
+  const [noteFilter, setNoteFilter] = useState<NoteFilter>('all');
+  /**
+   * 목록 상한(`PREVIEW`)을 풀었는지.
+   *
+   * **필터를 바꿔도 되감지 않는다**(D-144와 같은 규칙) — 학생이 펼친 선택을 화면이 취소하지
+   * 않는다.
+   */
+  const [showAll, setShowAll] = useState(false);
   // 담아 둔 오답과 같은 유형의 학습을 다음에 풀 것으로 제안한다.
   const recommendations = useRecommendations(3);
+
+  /*
+    **읽는 중 · 실패 · 없음을 셋으로 가른다**(A-116 · `DESIGN.md` §9).
+
+    오답 목록은 학습 기록 조회에서, 지문은 콘텐츠 조회에서 온다. 첫 조회가 끝나기 전에는 둘 다
+    비어 있어서, 그 창에 `담아 둔 오답이 없어요`를 그리면 오답 열 개를 담아 둔 학생에게 없는
+    것을 없다고 단정한다(D-133). 조회가 **실패해도** 같은 문장이 나왔다 — 그때는 `loading`이
+    내려가므로 로딩 게이트가 덮지 못한다(M-DB-16). 기준 구현은 `app/student/index.tsx`다.
+  */
+  /**
+   * **`loading`이 아니라 `loaded`로 가른다.**
+   *
+   * 이 화면의 노트 카드는 저마다 화면 상태를 들고 있다 — 펼쳐 둔 지문(`Passage`), 쓰다 만 질문
+   * (`AskField`), 받고 있는 답. 그런데 이 화면의 쓰기(별표·정리·지우기)는 전부 끝에서
+   * `reload()`를 부르고, `loading`은 **재조회마다 다시 참**이 된다. `loading`으로 목록의
+   * 마운트를 정하면 별표를 한 번 누를 때마다 카드가 전부 새로 마운트돼 쓰던 질문이 사라진다
+   * (provider가 `loaded`를 값으로 내보내는 이유이고, D-160이 겪은 일이다).
+   *
+   * 그래서 `없어요`를 막는 데는 **첫 조회가 끝났는가**만 쓴다. 다시 읽는 중(`retrying`)은
+   * 실패 문장을 감추는 데만 쓴다.
+   */
+  const firstLoad = !progressLoaded || !contentLoaded;
+  const retrying = progressLoading || contentLoading;
+  /**
+   * 조회 실패 문장. 서버가 준 것을 그대로 쓴다(`errorMessage`).
+   * **다시 읽는 중에는 감춘다** — 실패 문장과 `불러오고 있어요`가 함께 서면 지금 무슨 일이
+   * 일어나는지 알 수 없다.
+   */
+  const loadError = retrying ? null : (progressError ?? contentError);
+
+  /** 두 조회를 함께 다시 시도한다. 실패가 어느 쪽에서 왔는지 학생이 고를 일은 아니다. */
+  async function retryLoad() {
+    await Promise.all([reloadProgress(), reloadContent()]);
+  }
 
   const areas = useMemo(() => {
     const seen: string[] = [];
     for (const n of allNotes) if (!seen.includes(n.area)) seen.push(n.area);
     return seen;
   }, [allNotes]);
-  const areaOptions = useMemo<readonly SegmentedOption<string>[]>(
-    () => [
-      { value: 'all', label: '전체', count: allNotes.length },
-      ...areas.map((a) => ({
-        value: a,
-        label: a,
-        count: allNotes.filter((n) => n.area === a).length,
-      })),
-    ],
-    [allNotes, areas],
-  );
-  /**
-   * 실제로 걸러 볼 영역. **옵션에서 사라진 값은 `전체`로 되돌린다.**
-   *
-   * 옵션은 `allNotes`에서 파생되는데 고른 값은 상태에 남는다 — `문법`으로 좁힌 뒤 마지막 문법
-   * 오답을 지우면 어떤 옵션도 값과 맞지 않아 `SegmentedControl`의 **모든 칸이 비선택**으로
-   * 그려졌다. 화면이 자기 상태를 잘못 말하는 것이라, 상태를 고치지 않고 그릴 값을 정한다 —
-   * 그래야 되돌리기로 그 오답이 살아나면 보고 있던 필터도 함께 돌아온다.
-   */
-  const activeArea = useMemo(
-    () => (areaOptions.some((o) => o.value === areaFilter) ? areaFilter : 'all'),
-    [areaOptions, areaFilter],
-  );
-  const wrongNotes = useMemo(
-    () => (activeArea === 'all' ? allNotes : allNotes.filter((n) => n.area === activeArea)),
-    [allNotes, activeArea],
-  );
-  const pending = useMemo(() => wrongNotes.filter((n) => !n.dig), [wrongNotes]);
   /**
    * 아직 정리하지 않은 오답 **전체**. 필터와 무관하다.
    *
@@ -135,8 +172,91 @@ export default function Notebook() {
    * 완료를 잘못 선언하면 학생은 남은 것을 모르고 나간다.
    */
   const pendingAll = useMemo(() => allNotes.filter((n) => !n.dig), [allNotes]);
+  /** 별표를 단 오답 전체. 별표 칸의 개수와 존재 여부를 함께 정한다. */
+  const starredAll = useMemo(() => allNotes.filter((n) => n.starred), [allNotes]);
+  /**
+   * 좁혀 볼 칸들.
+   *
+   * **`아직 정리 안 함`과 `별표`가 여기 있어야 한다.** 예전에는 칸이 영역뿐이라, 화면이
+   * `{N}개 중 {M}개는 아직 정리하지 않았어요.`라고 세어 주면서 그 M개만 보는 길이 없었다 —
+   * 오답이 스무 개면 `문항 카드 + 대화 카드` 스무 쌍을 훑어야 미정리를 찾았다. 별표도 같다:
+   * 별표를 다는 곳은 이 화면인데 별표만 모아 보는 길은 카드 복습뿐이었다.
+   *
+   * **0건인 칸은 만들지 않는다**(§8) — 누르면 빈 목록만 나오는 죽은 버튼이 된다.
+   */
+  const filterOptions = useMemo<readonly SegmentedOption<NoteFilter>[]>(
+    () => [
+      { value: 'all', label: '전체', count: allNotes.length },
+      ...(pendingAll.length > 0
+        ? [{ value: 'pending' as const, label: '정리 안 함', count: pendingAll.length }]
+        : []),
+      ...(starredAll.length > 0
+        ? [{ value: 'starred' as const, label: '별표', count: starredAll.length }]
+        : []),
+      ...areas.map((a) => ({
+        value: `area:${a}` as NoteFilter,
+        label: a,
+        count: allNotes.filter((n) => n.area === a).length,
+      })),
+    ],
+    [allNotes, areas, pendingAll, starredAll],
+  );
+  /**
+   * 실제로 걸러 볼 값. **옵션에서 사라진 값은 `전체`로 되돌린다.**
+   *
+   * 옵션은 `allNotes`에서 파생되는데 고른 값은 상태에 남는다 — `문법`으로 좁힌 뒤 마지막 문법
+   * 오답을 지우면 어떤 옵션도 값과 맞지 않아 `SegmentedControl`의 **모든 칸이 비선택**으로
+   * 그려졌다. 화면이 자기 상태를 잘못 말하는 것이라, 상태를 고치지 않고 그릴 값을 정한다 —
+   * 그래야 되돌리기로 그 오답이 살아나면 보고 있던 필터도 함께 돌아온다.
+   *
+   * 상태 칸도 같은 길을 쓴다: 마지막 미정리를 정리하면 `정리 안 함` 칸이 사라지고 목록은
+   * 스스로 `전체`로 돌아온다. 그래서 `정리 안 함`을 골라 둔 채 빈 목록을 보는 일이 없다.
+   */
+  const activeFilter = useMemo<NoteFilter>(
+    () => (filterOptions.some((o) => o.value === noteFilter) ? noteFilter : 'all'),
+    [filterOptions, noteFilter],
+  );
+  /** 지금 칸의 이름. 마무리 문장이 `{이름} 오답은 다 정리했어요.`로 쓴다. */
+  const activeLabel = filterOptions.find((o) => o.value === activeFilter)?.label ?? '전체';
+
+  const selected = useMemo(() => {
+    if (activeFilter === 'all') return allNotes;
+    if (activeFilter === 'pending') return allNotes.filter((n) => !n.dig);
+    if (activeFilter === 'starred') return allNotes.filter((n) => n.starred);
+    const area = activeFilter.slice('area:'.length);
+    return allNotes.filter((n) => n.area === area);
+  }, [allNotes, activeFilter]);
+  /**
+   * **아직 정리하지 않은 오답을 위에 세운다.** 서버가 주는 순서는 담은 시각 오름차순이라,
+   * 정리를 끝낸 오답이 목록 앞을 채우고 할 일은 아래에 흩어져 있었다. 이 화면에 온 이유가
+   * `정리`이므로 할 일이 먼저다.
+   *
+   * 같은 상태 안에서는 서버 순서를 그대로 둔다(`sort`는 안정 정렬이다) — 담은 순서가 곧
+   * 학습 순서라, 두 번째 기준을 얹으면 화면을 다시 열 때마다 자리가 달라진다.
+   */
+  const wrongNotes = useMemo(
+    () => [...selected].sort((a, b) => Number(!!a.dig) - Number(!!b.dig)),
+    [selected],
+  );
+  const pending = useMemo(() => wrongNotes.filter((n) => !n.dig), [wrongNotes]);
+  /**
+   * 상한을 걸어 접어 둔 상태인지.
+   *
+   * **상한이 없으면 이 화면은 끝이 보이지 않는다** — 오답 하나가 `문항 카드 + 대화 카드`
+   * 두 덩어리라 스무 개면 마무리 카드가 스무 쌍 아래에 있다. §8의 5줄 상한을 그대로 쓴다.
+   */
+  const collapsed = !showAll && wrongNotes.length > PREVIEW;
+  const visibleNotes = collapsed ? wrongNotes.slice(0, PREVIEW) : wrongNotes;
   /** 지문을 자동으로 펼칠 문항. 목록이 바뀌면 새 첫 문항이 펼쳐진다. */
-  const firstId = wrongNotes[0]?.id;
+  const firstId = visibleNotes[0]?.id;
+  /**
+   * 화면에 대화가 남아 있는 문항이 하나라도 있는지.
+   *
+   * 마무리 카드가 **사라지는 것을 정직하게 말하는 데** 쓴다. 대화(`convo`)는 `WrongNote`가
+   * 아니라 이 화면의 상태라 나가면 사라진다(A-031). 그래서 `오답은 그대로 남아 있어요`만
+   * 말하면, 아직 정리하지 않은 대화를 들고 있는 학생에게는 반대로 읽힌다.
+   */
+  const hasLiveConvo = Object.values(convo).some((m) => m.length > 0);
 
   /**
    * 추천 학습 담기/빼기. 오답노트 문항 담기와 문구를 구분한다.
@@ -330,7 +450,12 @@ export default function Notebook() {
         <AppText variant="body" tone="secondary">
           Scody AI와 이야기하면서 정답이 왜 정답인지, 내가 어디서 잘못 생각했는지 짚어봐요.
         </AppText>
-        <AppText variant="caption" tone="tertiary">
+        {/*
+          **읽어야 하는 문장에는 `tertiary`를 쓰지 않는다**(A-123). `inkTertiary`는 배경과
+          2.96:1로 AA(4.5:1) 미달이라, 이 화면에서 가장 흐린 글자에 무엇이 남는지를 적어 두면
+          그 사실이 사실상 안 읽힌다. `tertiary`는 플레이스홀더 자리에만 남긴다.
+        */}
+        <AppText variant="caption" tone="secondary">
           이야기한 내용은 오답노트 메모로 남고, 카드로 모아 다시 공부할 수 있어요.
         </AppText>
       </View>
@@ -340,52 +465,120 @@ export default function Notebook() {
         예전에는 빈 분기에 필터가 없어서, 문법으로 좁힌 뒤 마지막 문법 오답을 지우면
         `담아 둔 오답이 없어요`만 남고 전체로 돌아갈 길이 화면에서 사라졌다(다른 영역에는
         오답이 남아 있는데도). 화면을 나갔다 들어오는 것이 유일한 탈출구였다.
+
+        **`전체` 하나만 남으면 컨트롤 자체를 그리지 않는다**(§8) — 이미 선택된 칸 하나만 놓인
+        선택 컨트롤은 고를 것이 없다. 첫 조회 중에는 목록이 비어 있어 이 조건에 걸려 사라지므로,
+        읽지 못한 목록으로 센 개수를 칸에 적는 일이 없다(§9 — 실패했을 때 개수를 세지 않는다).
       */}
-      {areas.length > 1 ? (
+      {filterOptions.length > 1 ? (
         <SegmentedControl
-          testID="note-area"
-          options={areaOptions}
-          value={activeArea}
-          onChange={setAreaFilter}
+          testID="note-filter"
+          options={filterOptions}
+          value={activeFilter}
+          onChange={setNoteFilter}
         />
       ) : null}
 
-      {wrongNotes.length === 0 ? (
-        <EmptyState
-          title={activeArea === 'all' ? '담아 둔 오답이 없어요' : `${activeArea} 오답이 없어요`}
-          subtitle={
-            activeArea === 'all'
-              ? '완료한 학습을 열면 틀린 문항을 담을 수 있어요.'
-              : '위에서 다른 영역을 골라 볼 수 있어요.'
-          }
-          action={
-            activeArea === 'all' ? (
-              <Button
-                testID="notebook-go-records"
-                label="학습 보러 가기"
-                trailing={<Icon name="arrow-right" size={16} color={colors.accentText} />}
-                onPress={() => router.push('/student/learn' as never)}
-              />
-            ) : (
-              <Button
-                testID="notebook-clear-filter"
-                variant="secondary"
-                tone="accent"
-                label="전체 보기"
-                onPress={() => setAreaFilter('all')}
-              />
-            )
-          }
-        />
+      {/*
+        **실패는 빈 목록과 다르게 말한다**(D-136 · §9). 못 읽은 것을 없다고 하면 학생은 담아 둔
+        오답이 사라졌다고 믿는다. 인라인 `danger` 캡션 + 다시 시도할 행동 하나이고, **면은 하나만
+        둔다** — 목록·마무리 카드·추천이 모두 이 조회에 매달려 있어 자리마다 빨간 줄을 두면
+        한 번의 실패가 세 번으로 읽힌다.
+
+        **이미 읽어 둔 오답은 지우지 않는다**(§9) — 다시 읽기가 실패해도 provider는 앞서 읽은
+        값을 그대로 들고 있고, 가진 것은 여전히 사실이다. 그래서 이 줄은 목록 **위에** 서고
+        목록을 대신하지 않는다. 아래 빈 분기만 실패했을 때 입을 닫는다.
+      */}
+      {loadError ? (
+        <View testID="notebook-load-failed" style={styles.loadFailed}>
+          <AppText variant="caption" tone="danger">
+            오답을 불러오지 못했어요. {loadError}
+          </AppText>
+          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
+          <Button
+            testID="notebook-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void retryLoad()}
+          />
+        </View>
+      ) : null}
+
+      {firstLoad ? (
+        /*
+          조회 중에는 없다고 말하지 않는다(D-133). 화면 전체를 막지 않고 개수와 `없어요`를
+          말하는 자리만 기다린다 — 문장의 무게는 학생 홈·학습 탭과 같다.
+        */
+        <AppText variant="caption" tone="secondary">
+          오답을 불러오고 있어요.
+        </AppText>
+      ) : wrongNotes.length === 0 ? (
+        loadError ? (
+          /*
+            **못 읽은 것을 없다고 말하지 않는다.** 목록이 비어 있는 이유가 실패일 수 있으므로
+            `담아 둔 오답이 없어요`도 `학습 보러 가기`도 두지 않는다 — 위 실패 줄이 그 자리를
+            대신하고, 다음 행동은 `다시 불러오기` 하나다(`student/index.tsx`의 히어로와 같은 판단).
+          */
+          null
+        ) : (
+          <EmptyState
+            title={
+              activeFilter === 'all'
+                ? '담아 둔 오답이 없어요'
+                : activeFilter === 'pending'
+                  ? '아직 정리하지 않은 오답이 없어요'
+                  : activeFilter === 'starred'
+                    ? '별표를 단 오답이 없어요'
+                    : `${activeLabel} 오답이 없어요`
+            }
+            subtitle={
+              activeFilter === 'all'
+                ? '완료한 학습을 열면 틀린 문항을 담을 수 있어요.'
+                : '위에서 다른 것을 골라 볼 수 있어요.'
+            }
+            action={
+              activeFilter === 'all' ? (
+                <Button
+                  testID="notebook-go-records"
+                  label="학습 보러 가기"
+                  trailing={<Icon name="arrow-right" size={16} color={colors.accentText} />}
+                  onPress={() => router.push('/student/learn' as never)}
+                />
+              ) : (
+                <Button
+                  testID="notebook-clear-filter"
+                  variant="secondary"
+                  tone="accent"
+                  label="전체 보기"
+                  onPress={() => setNoteFilter('all')}
+                />
+              )
+            }
+          />
+        )
       ) : (
         <>
           <AppText variant="caption" tone="secondary">
-            {pending.length > 0
-              ? `${wrongNotes.length}개 중 ${pending.length}개는 아직 정리하지 않았어요.`
-              : `${wrongNotes.length}개 모두 정리했어요.`}
+            {activeFilter === 'pending'
+              ? /* 이 칸은 미정리만 모았으므로 `N개 중 N개`라고 세면 같은 말을 두 번 한다. */
+                `정리할 오답 ${wrongNotes.length}개예요.`
+              : pending.length > 0
+                ? `${wrongNotes.length}개 중 ${pending.length}개는 아직 정리하지 않았어요.`
+                : `${wrongNotes.length}개 모두 정리했어요.`}
           </AppText>
+          {/*
+            **접어 둔 동안에는 몇 개를 보여 주는지 말한다.** 위 문장이 `20개 중 12개는`이라고
+            세는데 아래에 다섯 개만 있으면 나머지가 없는 것으로 읽힌다(A-108이 결과 화면에서
+            짚은 것과 같은 결함이라, 상한을 들여오면서 함께 막는다). 정렬 규칙도 여기서 말한다.
+          */}
+          {collapsed ? (
+            <AppText variant="caption" tone="secondary">
+              아직 정리하지 않은 것부터 {PREVIEW}개를 보여 줘요.
+            </AppText>
+          ) : null}
 
-          {wrongNotes.map((n) => {
+          {visibleNotes.map((n) => {
             const msgs = convo[n.id] ?? [];
             const live = streaming[n.id] ?? '';
             const content = n.contentId ? findContent(sets, n.contentId) : undefined;
@@ -482,8 +675,12 @@ export default function Notebook() {
                       정리하기 전에 알 수 있도록 메모가 아직 없을 때에도 둔다.
                       개인 학습 오답은 어떤 경로로도 학원에 나가지 않으므로 붙이지 않는다.
                     */}
+                    {/*
+                      톤은 `secondary`다 — 이 고지는 **읽혀야** 뜻이 있는데 `inkTertiary`는
+                      배경과 2.96:1로 AA 미달이라 화면에서 가장 흐린 글자였다(A-123).
+                    */}
                     {n.source === 'academy' ? (
-                      <AppText variant="caption" tone="tertiary" style={styles.notice}>
+                      <AppText variant="caption" tone="secondary" style={styles.notice}>
                         학원 과제에서 담은 오답의 메모는 선생님이 볼 수 있어요.
                       </AppText>
                     ) : null}
@@ -493,7 +690,8 @@ export default function Notebook() {
                     */}
                     {busy === `${n.id}-sum` ? (
                       <View style={styles.summarizing}>
-                        <AppText variant="caption" tone="tertiary">
+                        {/* 진행을 알리는 문장이라 읽혀야 한다 — `tertiary`는 AA 미달(A-123). */}
+                        <AppText variant="caption" tone="secondary">
                           정리하는 중이에요
                         </AppText>
                         <MotionAsset name="pending" testID={`summ-pending-motion-${n.qId}`} />
@@ -572,7 +770,8 @@ export default function Notebook() {
                 <Group dividerInset={0}>
                   {msgs.map((m, i) => (
                     <View key={i} style={{ padding: spacing.lg, gap: 6 }}>
-                      <AppText variant="caption" tone="tertiary">
+                      {/* 누가 한 말인지 가리는 이름표다. 읽혀야 하므로 `secondary`(A-123). */}
+                      <AppText variant="caption" tone="secondary">
                         나
                       </AppText>
                       <AppText style={styles.body}>{m.q}</AppText>
@@ -604,7 +803,8 @@ export default function Notebook() {
                         <RichText text={live} />
                       ) : (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                          <AppText variant="body" tone="tertiary">
+                          {/* 상태를 말하는 유일한 문장이다. `tertiary`는 AA 미달(A-123). */}
+                          <AppText variant="body" tone="secondary">
                             답을 쓰고 있어요
                           </AppText>
                           {/* 상태는 위 글자가 말한다. 이건 '멈춘 게 아니다'만 거든다. */}
@@ -646,64 +846,33 @@ export default function Notebook() {
           })}
 
           {/*
-            맨 아래: 오답노트 마무리.
-            **집계는 필터와 무관한 전체(`pendingAll`)로 낸다.** 지금 보고 있는 영역만 세면
-            흐름의 마지막 문장이 남은 오답을 감춘다. 영역을 다 끝냈으면 그것도 함께 말한다.
+            **`N개 더 보기`는 목록 아래다.** 여기서 다섯 개가 끝나므로 이어 볼 곳도 여기다
+            (`learn.tsx`의 `learn-academy-more`와 같은 자리·같은 모양). 이 화면에는 목록을
+            덮는 섹션 제목이 없어 R2의 `제목 옆`을 쓸 자리가 없다 — 노트마다 자기 `Section`이다.
+            `접기`로 되돌릴 수 있고, **필터를 바꿔도 펼친 상태는 되감지 않는다**(D-144).
           */}
-          {wrapUp ? (
-            <Group>
-              <View style={{ padding: spacing.lg, gap: spacing.xs }}>
-                {pendingAll.length === 0 ? (
-                  <AppText variant="label">오답을 모두 정리했어요.</AppText>
-                ) : activeArea !== 'all' && pending.length === 0 ? (
-                  <>
-                    <AppText variant="label">{activeArea} 오답은 다 정리했어요.</AppText>
-                    <AppText variant="caption" tone="secondary">
-                      다른 영역에 {pendingAll.length}개 남아 있어요.
-                    </AppText>
-                  </>
-                ) : (
-                  <>
-                    <AppText variant="label">
-                      오답노트를 안 한 문제들이 있어요. 나중에 오답노트 하시겠어요?
-                    </AppText>
-                    <AppText variant="caption" tone="secondary">
-                      {pendingAll.length}개가 남아 있어요. 지금 나가도 오답은 그대로 남아 있어요.
-                    </AppText>
-                  </>
-                )}
-              </View>
-              {/*
-                **답이 둘인 질문이라 버튼을 늘어놓지 않고 카드 안 목록으로 둔다**
-                (`ActionBar` 규칙 3). 둘 다 위 물음에 대한 답이라 화면 아래 행동 줄로 내려가면
-                무엇에 답하는 것인지 사라진다. 여기 남는 답이 먼저, 나가는 답이 뒤다.
-                chevron은 화면을 떠나는 줄에만 둔다 — `더 정리할게요`는 이 화면에 남는다.
-              */}
-              <Row
-                testID="wrapup-continue"
-                title="더 정리할게요"
-                onPress={() => setWrapUp(false)}
-              />
-              <Row
-                testID="wrapup-later"
-                title={pendingAll.length > 0 ? '나중에 할게요' : '학습 보러 가기'}
-                subtitle={pendingAll.length > 0 ? '학습 화면으로 가요' : undefined}
-                showChevron
-                onPress={() => router.push('/student/learn' as never)}
-              />
-            </Group>
-          ) : (
-            <ActionBar>
-              <Button
-                testID="notebook-wrapup"
-                label="오답노트 마무리하기"
-                onPress={() => setWrapUp(true)}
-              />
-            </ActionBar>
-          )}
+          {wrongNotes.length > PREVIEW ? (
+            <Button
+              testID="notebook-more"
+              variant="secondary"
+              size="sm"
+              hug
+              label={showAll ? '접기' : `오답 ${wrongNotes.length - PREVIEW}개 더 보기`}
+              onPress={() => setShowAll((v) => !v)}
+            />
+          ) : null}
         </>
       )}
 
+      {/*
+        **추천은 마무리보다 위다.** 예전에는 마무리 카드와 `오답노트 마무리하기` 아래에 있어서,
+        마무리 카드의 `학습 보러 가기`를 누른 학생은 D-022의 추천을 한 번도 보지 못했다 —
+        화면을 끝내는 행동 뒤에 다음 행동을 두면 아무도 거기까지 가지 않는다.
+        순서는 결과 화면이 이미 갖고 있다(`result/[id].tsx`: 추천 → 화면을 끝내는 행동).
+
+        목록이 비어 보이는 화면에서도 그린다 — 좁혀 본 칸이 비었을 뿐 담아 둔 오답은 있을 수
+        있고, 추천은 필터와 무관한 전체에서 나온다(`useRecommendations`).
+      */}
       {recommendations.length > 0 ? (
         <Section title="이 유형 더 풀어볼까요?">
           <AppText variant="caption" tone="secondary">
@@ -735,11 +904,84 @@ export default function Notebook() {
           </Group>
         </Section>
       ) : null}
+
+      {/*
+        맨 아래: 오답노트 마무리. 화면을 끝내는 자리다.
+        **집계는 필터와 무관한 전체(`pendingAll`)로 낸다.** 지금 보고 있는 칸만 세면
+        흐름의 마지막 문장이 남은 오답을 감춘다. 그 칸을 다 끝냈으면 그것도 함께 말한다.
+
+        첫 조회가 끝나기 전에는 그리지 않는다 — 아직 세지 못한 오답을 두고 `모두 정리했어요`도
+        `N개 남아 있어요`도 둘 다 사실이 아니다(§9). 목록이 하나라도 있으면 조회가 한 번은
+        성공했다는 뜻이라, 다시 읽기가 실패한 뒤에도 마지막으로 읽은 개수로 말한다.
+      */}
+      {firstLoad || wrongNotes.length === 0 ? null : wrapUp ? (
+        <Group>
+          <View style={{ padding: spacing.lg, gap: spacing.xs }}>
+            {pendingAll.length === 0 ? (
+              <AppText variant="label">오답을 모두 정리했어요.</AppText>
+            ) : activeFilter !== 'all' && pending.length === 0 ? (
+              <>
+                <AppText variant="label">{activeLabel} 오답은 다 정리했어요.</AppText>
+                <AppText variant="caption" tone="secondary">
+                  다른 오답이 {pendingAll.length}개 남아 있어요.
+                </AppText>
+              </>
+            ) : (
+              <>
+                <AppText variant="label">
+                  오답노트를 안 한 문제들이 있어요. 나중에 오답노트 하시겠어요?
+                </AppText>
+                <AppText variant="caption" tone="secondary">
+                  {pendingAll.length}개가 남아 있어요. 지금 나가도 오답은 그대로 남아 있어요.
+                </AppText>
+              </>
+            )}
+            {/*
+              **남는 것과 사라지는 것을 함께 말한다.** 위 문장은 `오답은 그대로 남아 있어요`
+              라고만 하는데, 대화(`convo`)는 `WrongNote`가 아니라 이 화면의 상태라
+              나가면 사라진다(A-031). 정리하지 않은 대화를 들고 있는 학생에게 그 안심은
+              반대로 읽혔다 — 지금 사실을 그대로 적는다(대화 영속은 A-031이 맡는다).
+            */}
+            {hasLiveConvo ? (
+              <AppText testID="wrapup-convo-notice" variant="caption" tone="secondary">
+                정리하지 않은 대화는 나가면 사라져요.
+              </AppText>
+            ) : null}
+          </View>
+          {/*
+            **답이 둘인 질문이라 버튼을 늘어놓지 않고 카드 안 목록으로 둔다**
+            (`ActionBar` 규칙 3). 둘 다 위 물음에 대한 답이라 화면 아래 행동 줄로 내려가면
+            무엇에 답하는 것인지 사라진다. 여기 남는 답이 먼저, 나가는 답이 뒤다.
+            chevron은 화면을 떠나는 줄에만 둔다 — `더 정리할게요`는 이 화면에 남는다.
+          */}
+          <Row testID="wrapup-continue" title="더 정리할게요" onPress={() => setWrapUp(false)} />
+          <Row
+            testID="wrapup-later"
+            title={pendingAll.length > 0 ? '나중에 할게요' : '학습 보러 가기'}
+            subtitle={pendingAll.length > 0 ? '학습 화면으로 가요' : undefined}
+            showChevron
+            onPress={() => router.push('/student/learn' as never)}
+          />
+        </Group>
+      ) : (
+        <ActionBar>
+          <Button
+            testID="notebook-wrapup"
+            label="오답노트 마무리하기"
+            onPress={() => setWrapUp(true)}
+          />
+        </ActionBar>
+      )}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  /*
+    조회 실패 한 줄 + 다시 시도. 카드가 아니다 — 실패는 조용히 알리고 다음 행동만 준다(§9).
+    `flex-start`로 두어야 `hug` 버튼이 컬럼 폭까지 늘어나지 않는다(`student/index.tsx`와 같다).
+  */
+  loadFailed: { gap: spacing.sm, alignItems: 'flex-start' },
   /** 정리 진행 캡션 + 대기 표시가 한 줄에 선다. 줄 높이는 캡션이 정한다. */
   summarizing: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   /*
