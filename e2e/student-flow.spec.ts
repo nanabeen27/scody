@@ -511,11 +511,20 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     expect(inSelect).toBe(0);
   });
 
-  test('기록이 비어 있으면 학습을 고르러 갈 수 있다', async ({ page }) => {
-    await loginAs(page, 'doyun'); // 아직 푼 학습이 없는 학생
+  test('기록이 비어 있고 개인 이용권이 없으면 고르러 가는 버튼을 두지 않는다', async ({ page }) => {
+    await loginAs(page, 'doyun'); // 아직 푼 학습이 없고 개인 이용권도 없는 학생
     await page.getByRole('link', { name: '기록' }).click();
     await expect(page.getByText(/아직 제출한 학습이 없어요/)).toBeVisible();
-    await page.getByTestId('records-empty-start').click();
+    /*
+      **누를 것이 0개인 목적지로 보내지 않는다**(D-141). 예전에는 이 빈 상태가 누구에게나
+      `문제 담으러 가기`를 줬는데, 이 학생이 그 화면에서 고를 수 있는 것은 하나도 없다.
+      문장은 홈의 `noPickReason`과 같다 — 같은 상황을 두 화면이 다른 말로 하지 않는다.
+    */
+    await expect(page.getByTestId('records-empty-start')).toHaveCount(0);
+    await expect(page.getByText('학원에서 과제를 내주면 여기에서 알려 줘요.')).toBeVisible();
+
+    // 학습 탭은 그대로 열린다 — 막힌 것은 고르기 하나다
+    await page.getByRole('link', { name: '학습' }).click();
     await expect(page).toHaveURL(/\/student\/learn/);
     // 학원 학습 섹션은 그대로 보인다
     await expect(page.getByText('학원 학습', { exact: true })).toBeVisible();
