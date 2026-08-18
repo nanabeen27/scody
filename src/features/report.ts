@@ -93,6 +93,9 @@ interface Deps {
   /**
    * 이 학생이 속한 반 id. **화면이 넘긴다** — 예전에는 fixture(`getStudentClasses`)를 읽어서
    * 학원이 새로 만든 반을 못 봤다(마스터 플랜 S-013). 지금은 세션 스냅샷이 살아 있는 반을 준다.
+   *
+   * 그 달의 배정 수(`academySubmit`·`byWeekday`)만 이 값으로 좁힌다.
+   * **미제출(`pending`)은 배정 대상 행으로 판정한다** — 아래 근거를 적어 뒀다.
    */
   classIds?: readonly string[];
   /**
@@ -403,11 +406,29 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
     total: wrongNotes.length,
   };
 
-  /** 학원이 배정했는데 아직 안 낸 과제. 달과 무관한 **지금** 상태다. */
+  /**
+   * 학원이 배정했는데 아직 안 낸 과제. 달과 무관한 **지금** 상태다.
+   *
+   * **판정 근거는 배정 대상 행 하나다**(`Submission`은 `v_assignment_submissions` =
+   * `assignment_targets`에서 온다). 그 행이 있고 아직 안 낸 것만 센다.
+   *
+   * 예전에는 `반 소속 ∩ 미제출`이라 대상 행을 보지 않았다. 대상 행은 배정하는 순간의 로스터로
+   * 한 번 박히고(`rpc_add_assignment`) 반에 나중에 들어온 학생에게 소급되지 않으므로, 원장이
+   * 학생을 반에 넣으면 그 반의 **지난 배정 전부**가 대상 행 없이 이 목록에 들어왔다 — 마감이
+   * 이미 지났으니 `지금 확인할 것`과 `아직 안 낸 학원 과제`에 영구히 남는 유령이었다. 같은
+   * 과제를 학원은 미제출로 세지 않고(대상 행만 본다) 서버는 제출을 거부했다
+   * (`rpc_submit_attempt` → `배정받은 학습이 아니에요.`). 학생 화면(`learning.ts`)과 같은 기준으로
+   * 맞춰 세 역할이 같은 사실을 말하게 한다.
+   *
+   * 아래 달별 배정 수(`academySubmit`·`byWeekday`)는 아직 반 소속으로 좁힌다 — 같은 뿌리이지만
+   * 이 변경의 범위가 아니다(S-013).
+   */
   const classIds = new Set(deps.classIds ?? []);
   const pending: PendingRow[] = assignments
-    .filter((a) => classIds.has(a.classId))
-    .filter((a) => !a.submissions.some((s) => s.studentId === childId && s.submitted))
+    .filter((a) => {
+      const sub = a.submissions.find((s) => s.studentId === childId);
+      return !!sub && !sub.submitted;
+    })
     .map((a) => ({ id: a.id, title: a.title, dueDate: a.dueDate, due: dueLabel(a.dueDate) }))
     .sort((a, b) => {
       const ao = a.due?.overdue ? 0 : 1;

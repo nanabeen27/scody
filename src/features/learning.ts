@@ -97,7 +97,7 @@ export function byTodoThenDue(a: LearningItem, b: LearningItem): number {
 /**
  * 학생 학습 목록.
  * - 개인: 공개 콘텐츠에서 파생
- * - 학원: 내가 속한 반에 배정된 학습(선생님 배정 → 학생 전달)
+ * - 학원: **나에게 배정된** 학습(배정 대상 행이 있는 것. 반 소속만으로는 받지 않는다)
  * 각 항목은 내 풀이 기록(attempt)으로 완료/정답률이 반영된다.
  */
 export interface QueuedItems {
@@ -139,26 +139,29 @@ export function useStudentItems(): StudentItems {
   const { sets } = useContent();
   const account = useCurrentAccount();
   const { attempts, assignments } = useProgress();
-  const { academyLinked, answers, studentClasses } = useSession();
-  // 살아 있는 반 목록. fixture를 읽던 자리다 — 학원이 새로 만든 반도 여기 들어 있다(S-013).
-  const classIds = studentClasses(account.userId).map((c) => c.id);
-  const classKey = classIds.join(',');
+  const { academyLinked, answers } = useSession();
+  /*
+    반 목록은 더 이상 재료가 아니다. 학원 과제 판정이 배정 대상 행만 보므로(아래
+    `buildStudentItems`) 반 소속을 읽을 이유가 없어졌다 — 살아 있는 반을 넘기던 자리였다(S-013).
+  */
   return useMemo(
-    () =>
-      buildStudentItems({ sets, account, attempts, assignments, academyLinked, answers, classIds }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- classIds는 매 렌더 새 배열이라 문자열 키로 비교한다.
-    [sets, account, attempts, assignments, academyLinked, answers, classKey],
+    () => buildStudentItems({ sets, account, attempts, assignments, academyLinked, answers }),
+    [sets, account, attempts, assignments, academyLinked, answers],
   );
 }
 
-function buildStudentItems({
+/**
+ * 훅이 쓰는 순수 계산. 학부모 쪽 `buildChildReport`와 같은 이유로 내보낸다 —
+ * 배정 대상 판정을 provider 없이 단위 테스트로 지킬 수 있게(`__tests__/assignedTargets.test.ts`).
+ * 화면은 이 함수를 직접 부르지 않고 `useStudentItems`를 쓴다.
+ */
+export function buildStudentItems({
   sets,
   account,
   attempts,
   assignments,
   academyLinked,
   answers,
-  classIds,
 }: {
   sets: ReturnType<typeof useContent>['sets'];
   account: ReturnType<typeof useCurrentAccount>;
@@ -166,7 +169,6 @@ function buildStudentItems({
   assignments: ReturnType<typeof useProgress>['assignments'];
   academyLinked: boolean;
   answers: ReturnType<typeof useSession>['answers'];
-  classIds: readonly string[];
 }): StudentItems {
 
   /**
@@ -196,18 +198,22 @@ function buildStudentItems({
   const personal = (hasPersonal ? personalItems(sets) : []).map(merge);
 
   /*
-    내게 배정된 과제인지 판정한다.
-    소속 반(fixture)만 보면 학원이 **새로 만든 반**에 들어간 학생은 과제를 못 받는다.
-    배정할 때 반 학생마다 제출 행이 만들어지므로(`addAssignment`) 그 행이 곧 배정 사실이다.
-    두 기준을 합집합으로 둔다 — 기존 시드(제출 행이 없는 반 친구)도 그대로 보인다.
+    내게 배정된 과제인지 판정한다. **근거는 배정 대상 행 하나뿐이다**(`Assignment.submissions`는
+    `v_assignment_submissions` = `assignment_targets`에서 온다).
+
+    대상 행은 배정하는 순간의 로스터로 한 번 박힌다
+    (`rpc_add_assignment`가 `v_class_roster`에서 넣는다 —
+    `supabase/migrations/0029_null_guards_and_invite_invariants.sql`). 반에 나중에 들어온 학생에게
+    지난 배정을 소급하지 않는 것이 확정된 판단이고, `addStudentsToClass`도 대상 행을 채우지 않는다.
+
+    예전에는 `반 소속 ∪ 대상 행`이었다(주석은 "새로 만든 반에 들어간 학생이 과제를 못 받는다"고
+    적었다). 그런데 서버 제출 검사는 대상 행만 본다(`rpc_submit_attempt` → `배정받은 학습이
+    아니에요.`). 그래서 그 합집합은 학생에게 **끝까지 풀 수 있지만 제출에서 거부되는 과제**를
+    보여 주는 자리였고, 학원 집계는 같은 과제를 미제출로 세지도 않았다. 서버와 같은 기준으로
+    좁혀 세 역할이 같은 사실을 말하게 한다.
   */
-  const myClassIds = new Set(classIds);
   const academy = assignments
-    .filter(
-      (a) =>
-        (myClassIds.has(a.classId) || a.submissions.some((s) => s.studentId === account.userId)) &&
-        a.contentId,
-    )
+    .filter((a) => a.submissions.some((s) => s.studentId === account.userId) && a.contentId)
     .map((a) => {
       const content = findContent(sets, a.contentId!) as ContentSet | undefined;
       const item: LearningItem = {

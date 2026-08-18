@@ -28,9 +28,12 @@ const SETS = [...SEED_CONTENT, ...EXTRA_CONTENT];
 /**
  * 자녀가 속한 반 id.
  *
- * `buildChildReport`는 **화면이 넘긴 반 목록**으로 미제출 과제를 좁힌다 — 예전에는 fixture를
- * 직접 읽어서 학원이 새로 만든 반을 보지 못했다(마스터 플랜 S-013). 앱에서는 세션 스냅샷이
- * 이 값을 준다. 테스트는 같은 fixture에서 뽑아 넘긴다.
+ * `buildChildReport`는 **화면이 넘긴 반 목록**으로 그 달의 배정 수(`academySubmit`·`byWeekday`)를
+ * 좁힌다 — 예전에는 fixture를 직접 읽어서 학원이 새로 만든 반을 보지 못했다(마스터 플랜 S-013).
+ * 앱에서는 세션 스냅샷이 이 값을 준다. 테스트는 같은 fixture에서 뽑아 넘긴다.
+ *
+ * **미제출(`pending`)은 이 값을 쓰지 않는다** — 배정 대상 행이 근거다
+ * (`__tests__/assignedTargets.test.ts`).
  */
 function classIdsOf(childId: string): string[] {
   return ACADEMY_CLASSES.filter((c) => c.studentIds.includes(childId)).map((c) => c.id);
