@@ -34,6 +34,7 @@ import {
   type ReasonKind,
 } from '@/features/impersonation';
 import { listAuditLogsFor } from '@/repo/ops';
+import { loadPaymentOffers } from '@/repo/pricing';
 import { IMPERSONATION_MINUTES, useCurrentAccount, useSession } from '@/session';
 import { ROLE_LABEL, homeHrefFor } from '@/session/routing';
 import { colors, spacing } from '@/theme/tokens';
@@ -101,6 +102,18 @@ export default function AdminUserDetail() {
    * 주석에).
    */
   const [opened, setOpened] = useState<AuditEntry[]>([]);
+  /**
+   * 이 학부모가 **대신 내주기로 표시한** 자녀(`parent_payment_offers`).
+   *
+   * **표시를 읽는 쪽이 없었다.** 학부모 화면(`app/parent/children.tsx`)이 그 표에 행을 쓰는데,
+   * 결제가 연결되지 않은 동안 그 뜻을 처리할 사람은 운영자뿐인데도 운영자 화면에는 행이 한 줄도
+   * 보이지 않았다 — 쓰기 한 번에서 의도가 끊겼다. 청구를 만드는 것이 아니라(5절 범위 밖)
+   * **이미 서버에 있는 행을 보이게** 하는 것이다.
+   *
+   * `null`은 **읽지 못했다**는 뜻이다. `없음`으로 그리면 표시해 둔 학부모의 문의를 운영자가
+   * "표시가 없다"고 판단한다 — 실패와 빈 목록을 다르게 말한다(§9).
+   */
+  const [offers, setOffers] = useState<{ childId: string; name: string }[] | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -116,6 +129,31 @@ export default function AdminUserDetail() {
         setAccount(found);
         setClassNames(names);
         setOpened(audit.filter((e) => e.action === '대리 보기'));
+        /*
+          **학부모 계정에서만 표시를 읽는다.** 표는 `parent_id`로 좁히므로(`loadPaymentOffers`)
+          여기서 나오는 것은 "이 사람이 표시한 자녀"다. 학생 계정에서 "누가 이 학생 몫을
+          표시했나"를 보려면 `child_id`로 좁히는 조회가 따로 있어야 한다 — 지금 repo에 없다.
+
+          **실패해도 계정 화면은 뜬다.** 대리 보기 전에 계정을 이해하는 것이 이 화면의 일이라,
+          부수 조회 하나가 화면 전체를 `계정을 읽지 못했어요`로 만들지 않는다. 실패는 `null`로
+          남고 아래 요약이 `확인하지 못했어요`라고 말한다.
+        */
+        if (found?.roles.includes('parent')) {
+          const ids = await loadPaymentOffers(userId).catch((e) => {
+            console.warn('대신 내주기 표시를 읽지 못했어요:', e);
+            return null;
+          });
+          if (!alive) return;
+          setOffers(
+            ids
+              ? // 이름은 이미 읽어 둔 계정 목록에서 찾는다. 목록 상한을 넘은 자녀는 id로 남는다.
+                ids.map((cid) => ({
+                  childId: cid,
+                  name: list.find((a) => a.userId === cid)?.name ?? cid,
+                }))
+              : null,
+          );
+        }
         /*
           **학생이 아니면 활동을 읽지 않는다.** 학습 기록은 학생만 가진다 — 원장·학부모 계정에
           주별 활동일 그래프가 붙으면 그 사람이 국어 문항을 풀었다는 뜻이 된다.
@@ -281,6 +319,33 @@ export default function AdminUserDetail() {
           ) : (
             <Row title="이용권" trailing={<Val>없음</Val>} />
           )}
+          {/*
+            **대신 내주기 표시**(`parent_payment_offers`). 이용권 줄 바로 아래에 둔다 —
+            둘 다 "비용을 누가 내나"에 대한 사실이고, 이용권의 `결제 학부모`와 이 표시는
+            **다른 것**이다: 이용권은 지금 정해진 결제 주체이고, 표시는 아직 청구로 이어지지 않은
+            학부모의 뜻이다. 그 차이가 섞이지 않게 값과 캡션에서 표시라고 말한다.
+          */}
+          {account.roles.includes('parent') ? (
+            // 자녀가 여럿이어도 **줄은 하나**다. 같은 제목이 세 줄 서면 요약을 훑는 눈이 멈춘다.
+            <Row
+              testID="user-payment-offers"
+              title="대신 내주기 표시"
+              subtitle={
+                offers && offers.length > 0
+                  ? `자녀 ${offers.map((o) => o.name).join(' · ')}`
+                  : '자녀 몫을 내겠다고 표시한 기록이에요'
+              }
+              trailing={
+                <Val>
+                  {offers === null
+                    ? '확인하지 못했어요'
+                    : offers.length
+                      ? `${offers.length}명`
+                      : '없음'}
+                </Val>
+              }
+            />
+          ) : null}
           <Row title="가입일" trailing={<Val>{account.createdAt ?? '—'}</Val>} />
           <Row
             title="최근 활동"
@@ -302,6 +367,11 @@ export default function AdminUserDetail() {
             trailing={<Val>{phone}</Val>}
           />
         </Group>
+        {offers && offers.length > 0 ? (
+          <AppText variant="caption" tone="tertiary">
+            표시는 학부모의 뜻만 남아요. 실제 청구는 아직 연결되지 않았어요.
+          </AppText>
+        ) : null}
         {!account.phone && !account.kakaoLinked ? (
           <AppText variant="caption" tone="tertiary">
             로그인 수단이 없는 로스터 테스트 계정이에요.

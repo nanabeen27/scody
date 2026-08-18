@@ -141,10 +141,17 @@ test.describe('M3 학부모 흐름', () => {
     await expect(page.getByText('아직 담아 둔 오답이 없어요.')).toHaveCount(0);
   });
 
-  test('홈은 확인할 것을 먼저 말하고 리포트로 보낸다', async ({ page }) => {
+  test('홈은 마감이 지난 과제를 먼저 말하고 리포트로 보낸다', async ({ page }) => {
     await loginParent(page);
     await expect(page.getByText('최민지 님')).toBeVisible();
-    await expect(page.getByText('지금 확인할 것')).toBeVisible();
+    /*
+      맨 위 섹션 이름은 **그 섹션이 세는 것**과 같다. 예전 이름 `지금 확인할 것`은 담긴 것이
+      마감이 지난 미제출뿐인데도 넓게 읽혀, 마감이 남은 미제출이 있는 자녀에게도
+      `지금 확인할 건 없어요`가 떴다(자녀 줄은 같은 화면에서 `안 낸 과제 N개`를 말한다).
+      빈 상태 문장(`마감을 넘긴 과제가 없어요.`)과 제목이 서로 부분 문자열이 아니라
+      이 단정이 상태와 무관하게 제목 하나만 잡는다.
+    */
+    await expect(page.getByText('마감이 지난 학원 과제')).toBeVisible();
     await expect(page.getByText('이하은')).toBeVisible();
     await expect(page.getByText('정예린')).toBeVisible();
 
@@ -468,8 +475,12 @@ test.describe('M3 학부모 흐름', () => {
     await page.getByTestId(`billing-offer-${sid('u_student_both')}`).click();
     await expect(page.getByTestId('toast')).toHaveText('내가 내기로 표시했어요');
     await expect(page.getByText(/내가 내기로 표시했어요/).first()).toBeVisible();
-    // 실제 청구가 아니라는 사실을 화면이 밝힌다
-    await expect(page.getByText(/결제 연결은 아직 준비 중이에요/)).toBeVisible();
+    /*
+      실제 청구가 아니라는 사실을 화면이 밝힌다. 고지는 **각 자녀 섹션의 버튼 바로 위**에 있다 —
+      예전에는 화면 맨 아래 한 줄이라 자녀가 둘이면 해명이 스크롤 밖이었다(D-141). 자녀 수만큼
+      나오므로 `.first()`로 잡는다.
+    */
+    await expect(page.getByText(/실제로 청구되지 않아요/).first()).toBeVisible();
 
     /*
       **표시는 서버에 남는다.** 예전에는 provider의 `useState`라 새로고침하면 사라졌고, 화면은
