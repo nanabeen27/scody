@@ -458,6 +458,12 @@ test.describe('M1 소개·로그인·역할 분기', () => {
 
     // 다른 계정으로 들어가려면 지금 세션을 닫는다 — 닫으면 폼으로 돌아온다.
     await page.goto('/login');
+    /*
+      **누르기 전에 이 화면이 그려졌는지 확인한다.** `goto` 직후에는 DOM 노드가 이미 있어서
+      Playwright는 누를 수 있다고 판단하지만 React가 핸들러를 붙이기 전일 수 있다 — 그러면
+      클릭이 조용히 삼켜지고 화면은 로그인한 상태로 남는다(실측: 3/3 실패).
+    */
+    await expect(page.getByText('이미 로그인했어요')).toBeVisible();
     await page.getByTestId('login-switch').click();
     await expect(page.getByTestId('login-id')).toBeVisible();
     await expect(page.getByTestId('login-mine')).toHaveCount(0);
