@@ -213,7 +213,14 @@ test.describe('M1 소개·로그인·역할 분기', () => {
   test('다역할 계정은 공간을 선택한다', async ({ page }) => {
     await login(page, 'jihoon');
     await expect(page).toHaveURL(/\/select-space/);
-    await expect(page.getByText('어디로 갈까요')).toBeVisible();
+    // 화면 이름은 들어오는 컨트롤(`공간 바꾸기`)과 같은 말이다.
+    await expect(page.getByText('공간 바꾸기')).toBeVisible();
+    /*
+      로그인 직후에는 되돌릴 곳이 로그인 전 화면이라 뒤로가기를 두지 않는다.
+      대신 계정을 잘못 골랐을 때 나갈 길로 로그아웃을 둔다.
+    */
+    await expect(page.getByTestId('screen-back')).toHaveCount(0);
+    await expect(page.getByTestId('select-space-signout')).toBeVisible();
     await page.getByText('학원 공간').click();
     await expect(page).toHaveURL(/\/academy/);
   });
@@ -302,6 +309,14 @@ test.describe('M1 소개·로그인·역할 분기', () => {
     await page.getByRole('link', { name: '내 정보' }).click();
     await page.getByTestId('switch-space').click();
     await expect(page).toHaveURL(/\/select-space/);
+    /*
+      확인만 하러 들어왔을 수도 있다 — 온 곳으로 돌아가는 길이 있고, 로그아웃은 여기 없다
+      (`내 정보`에 있다).
+    */
+    await expect(page.getByTestId('select-space-signout')).toHaveCount(0);
+    await page.getByTestId('screen-back').click();
+    await expect(page).toHaveURL(/\/parent\/profile/);
+    await page.getByTestId('switch-space').click();
     const academySpace = page.getByRole('button', { name: '학원 공간' });
     await expect(academySpace).toBeVisible();
     await academySpace.click();
