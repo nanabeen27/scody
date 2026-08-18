@@ -5,7 +5,10 @@ module.exports = defineConfig([
   expoConfig,
   {
     // `supabase/functions/*`는 Deno에서 돈다(전역·모듈 해석이 다르다).
+    // `.claude/*`에는 병렬 작업용 git 워크트리가 들어온다 — 같은 소스의 사본이라 무시하지 않으면
+    // 같은 경고가 워크트리 수만큼 반복되고 어느 체크아웃의 문제인지 구분되지 않는다.
     ignores: [
+      '.claude/*',
       'dist/*',
       'node_modules/*',
       'playwright-report/*',

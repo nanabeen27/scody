@@ -49,7 +49,7 @@ const PREVIEW = 5;
  * 홈은 오늘 할 일을 말하는 곳이라, 이미 푼 것을 다시 하라는 말이 그 아래에 붙으면
  * 오늘 할 일이 둘로 갈린다.
  *
- * - 오늘의 학습은 담아 둔 학습을 먼저 쓴다. 학생이 직접 담은 것이 있으면 그것부터가 자연스럽다.
+ * - 오늘의 학습은 **마감이 급한 것부터** 쓴다. 출처가 순서를 정하지 않는다(아래 `next` 주석).
  * - 학원 과제와 담아 둔 학습은 개수를 따로 센다. 합쳐 세면 "학원 과제가 16개"처럼 읽힌다.
  * - Scody AI는 버튼이 아니라 입력창이다. 보내면 대화 화면에서 답이 이어진다.
  */
@@ -78,7 +78,8 @@ export default function StudentHome() {
     error: contentError,
     reload: reloadContent,
   } = useContent();
-  const { readOnly } = useSession();
+  // `answers`는 제출 전 자동 저장 답안이다. 히어로가 `N / M 풀었어요`를 말할 때 센다(A-112).
+  const { readOnly, answers } = useSession();
   const { show } = useToast();
   // 부모님이 보낸 칭찬 중 아직 확인하지 않은 것만. 확인하면 다시 뜨지 않는다.
   const praise = praiseFor(account.userId).filter((p) => !p.seen);
@@ -196,7 +197,7 @@ export default function StudentHome() {
   ].filter((s): s is string => !!s);
 
   /**
-   * 오늘의 학습 후보는 **학생이 약속한 일**뿐이다: 담아 둔 학습 → 남은 학원 과제(D-140).
+   * 오늘의 학습 후보는 **학생이 약속한 일**뿐이다: 담아 둔 학습 + 남은 학원 과제(D-140).
    * 바로 아래 진행 상황의 분모(`goalTotal`)와 **같은 집합**이라, 진행 상황이
    * `남은 학습이 없어요`라고 말하는 화면에서 히어로만 `시작하기`를 내놓는 일이 없다.
    *
@@ -205,9 +206,39 @@ export default function StudentHome() {
    * 학생이 고른 적도, 누가 시킨 적도 없는 항목이다. D-034가 진행 상황에서 이미 같은 판단을
    * 했고(카탈로그 크기를 할 일로 읽지 않는다) 히어로도 같은 기준을 쓴다. 새로 고르는 일은
    * 아래 캡션과 `담아 둔 학습` 빈 상태가 맡는다.
+   *
+   * **순서를 정하는 것은 출처가 아니라 마감이다.** D-140의 값은 `queued.items[0] ?? academyTodo[0]`
+   * 이라 담아 둔 학습이 하나라도 있으면 무조건 그것이 히어로였다. 그래서 개인 학습을 담아 두고
+   * 학원 과제 마감이 지난 학생의 홈에서는 **가장 큰 글자(제목)가 마감 없는 개인 학습**이고, 지난
+   * 마감은 아래 목록 한 줄과 `sm` 보조 버튼(`과제 먼저 하기`)으로만 나왔다 — 급한 것이 안 급한
+   * 것보다 작았다. 마스터 플랜 4절은 홈이 "오늘 해야 하는 학습을 **우선순위로**" 말하는 곳이라고
+   * 적는데, 그 우선순위가 마감이 아니라 출처였다.
+   *
+   * 이제 두 목록을 합쳐 `byDue` 하나로 고른다(학습 탭·학원 과제 목록과 같은 정렬 함수 — D-043):
+   * **마감이 있는 것 먼저 → 마감이 이른 순**. 마감이 없는 것끼리는 정렬이 안정적이라 입력 순서가
+   * 그대로 남으므로, 담아 둔 학습을 앞에 놓아 **담은 순서**를 지킨다(개인 학습에는 마감이 없다 —
+   * `contentToPersonalItem`). 급한 과제가 없는 학생에게는 예전과 같은 화면이다.
    */
-  const next = queued.items[0] ?? academyTodo[0];
+  const next = [...queued.items, ...academyTodo].sort(byDue)[0];
   const nextDue = dueLabel(next?.dueDate);
+  /**
+   * 히어로가 가리키는 학습을 **이미 시작했는지**. 한 문항이라도 답을 고르면 `in_progress`가 된다
+   * (`buildStudentItems`의 `merge` — 답안은 제출 전에도 자동 저장된다).
+   */
+  const nextStarted = next?.status === 'in_progress';
+  /**
+   * 이어서 풀 학습이면 어디까지 풀었는지 말한다(A-112). 형식은 풀이 화면과 같은
+   * `N / M 풀었어요`라, 홈에서 읽은 숫자가 들어간 화면 첫 줄에 그대로 이어진다.
+   *
+   * 세는 값은 자동 저장된 답안이다. 문항이 줄어든 세트에 지난 답이 남아 있으면 문항 수보다 큰
+   * 숫자가 나올 수 있어 잘라 둔다 — `4 / 3 풀었어요`는 학생이 고칠 수 없는 말이다.
+   */
+  const nextAnswered = next
+    ? Math.min(
+        Object.values(answers[next.id] ?? {}).filter((c) => c != null).length,
+        next.questionCount,
+      )
+    : 0;
   /**
    * 아직 아무 학습도 없는 계정에는 `다 끝냈어요`라고 말하지 않는다.
    *
@@ -418,8 +449,17 @@ export default function StudentHome() {
           <AppText variant="title" headingLevel={1}>
             {next.title}
           </AppText>
+          {/*
+            **이어서 풀 학습이면 문항 수 대신 진행을 말한다**(A-112). 예전에는 이 줄이 늘
+            `문항 수 · 마감`이라, 3문항까지 풀어 둔 학생의 홈이 그 사실을 한 글자도 말하지 않고
+            처음 시작하는 학습처럼 보였다. 분모가 문항 수라 `10문항`을 함께 두면 같은 숫자를
+            한 줄에서 두 번 말한다.
+          */}
           <AppText variant="caption" tone="secondary">
-            국어 · {next.area} · {next.questionCount}문항
+            국어 · {next.area} ·{' '}
+            {nextStarted
+              ? `${nextAnswered} / ${next.questionCount} 풀었어요`
+              : `${next.questionCount}문항`}
             {nextDue && !nextDue.overdue ? ` · ${nextDue.text}` : ''}
           </AppText>
           {/* 지난 마감은 다른 메타에 묻히지 않게 한 줄로 분리한다. */}
@@ -430,7 +470,13 @@ export default function StudentHome() {
           ) : null}
           {/* 남은 개수는 바로 아래 진행 상황이 말한다. 히어로에서 또 말하지 않는다. */}
           <View style={styles.heroCta}>
-            <Button label="시작하기" onPress={() => go(next.id)} />
+            {/*
+              **같은 행동은 같은 이름이다**(A-112). 이 버튼은 상태를 보지 않고 늘 `시작하기`라서
+              풀던 학습에 대해서도 처음 시작한다고 말했다 — 같은 학습을 목록은 `이어서 하기`,
+              상세는 `이어서 풀기`라고 부르고 있어 한 행동의 이름이 셋이었다. 이어서 푸는 일의
+              이름은 `이어서 풀기` 한 벌로 두고, 목적지(학습 상세)의 버튼과 글자까지 맞춘다.
+            */}
+            <Button label={nextStarted ? '이어서 풀기' : '시작하기'} onPress={() => go(next.id)} />
           </View>
         </View>
       ) : firstLoad ? (

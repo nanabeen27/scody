@@ -633,6 +633,12 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     /*
       정예린은 seed의 배정 4건을 모두 냈으므로 **남은 과제를 하나 만들어야** 이 상태가 된다.
       원장으로 반에 하나 배정하고(학원 흐름과 같은 헬퍼) 학생으로 돌아온다.
+
+      **마감을 정하지 않고 배정한다.** 히어로 후보는 이제 마감이 급한 것부터 고르므로
+      (담아 둔 학습 ∪ 남은 학원 과제를 `byDue`로 정렬), 마감이 있는 과제를 내면 그것이
+      히어로를 차지해 이 테스트가 보려는 상태가 만들어지지 않는다. 마감이 없는 것끼리는
+      담은 순서가 남아 담아 둔 학습이 먼저 온다 — 급한 과제가 없을 때의 화면이다.
+      마감이 있을 때 순서가 뒤집히는 것은 아래 테스트가 본다.
     */
     await page.goto('/login');
     await loginHere(page, 'hanbit.director');
@@ -641,7 +647,6 @@ test.describe('M2 학생 국어 학습 흐름', () => {
       classId: sid('c_kor1'),
       contentId: sid('ct_gram_1'),
       search: '맞춤법',
-      due: dayFromToday(14),
     });
     await expectAssigned(page);
     await page.getByRole('link', { name: '학원 관리' }).click();
@@ -682,6 +687,74 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await page.getByTestId('solve-submit').click();
     await page.getByTestId('result-done').click();
     await expect(page.getByText('오늘 할 일을 다 끝냈어요')).toBeVisible();
+  });
+
+  test('마감이 있는 학원 과제가 담아 둔 학습보다 히어로에 먼저 온다', async ({ page }) => {
+    /*
+      **홈 히어로의 우선순위는 출처가 아니라 마감이다.** 예전에는 담아 둔 학습이 하나라도 있으면
+      무조건 그것이 히어로여서, 개인 학습을 담아 두고 학원 과제 마감이 오늘까지인 학생의 홈에서
+      가장 큰 글자가 마감 없는 개인 학습이었다 — 급한 것이 안 급한 것보다 작았다.
+
+      위 테스트와 같은 준비를 하되 **마감을 오늘로** 정한다. 정예린은 seed의 배정 4건을
+      모두 냈으므로 남은 과제를 하나 만들어야 이 상태가 된다.
+    */
+    await page.goto('/login');
+    await loginHere(page, 'hanbit.director');
+    await page.getByRole('link', { name: '학습 배정' }).click();
+    await assignLearning(page, {
+      classId: sid('c_kor1'),
+      contentId: sid('ct_gram_1'),
+      search: '맞춤법',
+      due: dayFromToday(0),
+    });
+    await expectAssigned(page);
+    await page.getByRole('link', { name: '학원 관리' }).click();
+    await page.getByText('로그아웃').click();
+    await loginHere(page, 'yerin');
+
+    await pickTopic(page, { grade: 2, area: '독서', topic: '과학' });
+    await page.getByRole('checkbox', { name: '담아 두기' }).first().click();
+    await page.getByTestId('brand-home').click();
+
+    // 담아 둔 학습이 있어도 마감이 있는 과제가 먼저다
+    const hero = page.getByTestId('today-primary');
+    await expect(hero.getByText('헷갈리는 맞춤법·어법')).toBeVisible();
+    await expect(hero.getByText('오늘까지')).toBeVisible();
+    // 히어로가 이미 학원 과제를 가리키면 같은 행동을 두 번 두지 않는다
+    await expect(page.getByTestId('home-academy-first')).toHaveCount(0);
+    // 담아 둔 학습은 사라지지 않고 자기 섹션에 남는다
+    await expect(page.getByText('탄소 순환과 바다').first()).toBeVisible();
+  });
+
+  test('풀던 학습이 히어로에 오면 이어서 풀기라고 말한다', async ({ page }) => {
+    /*
+      **같은 행동은 같은 이름이다**(A-112). 히어로 버튼이 상태를 보지 않고 늘 `시작하기`라서
+      3문항까지 풀어 둔 학생의 홈이 처음 시작하는 학습처럼 보였다. 메타 줄도 문항 수만 말해
+      진행을 한 글자도 알리지 않았다.
+    */
+    await loginAs(page, 'seojun'); // 개인 이용권만 — 담아 둔 학습이 곧 히어로다
+    await pickTopic(page, { grade: 2, area: '독서', topic: '과학' });
+    await page.getByRole('checkbox', { name: '담아 두기' }).first().click();
+
+    // 아직 손대지 않았으면 `시작하기`이고 메타는 문항 수를 말한다
+    await page.getByTestId('brand-home').click();
+    const hero = page.getByTestId('today-primary');
+    await expect(hero.getByText('시작하기')).toBeVisible();
+    await expect(hero.getByText(/\d+문항/)).toBeVisible();
+
+    // 한 문항만 고르고 나온다(답안은 자동 저장된다)
+    await hero.getByText('시작하기').click();
+    await page.getByTestId('detail-start').click();
+    await page.getByRole('radio', { name: /보기 1$/ }).first().click();
+    // 풀이 몰입 모드에는 nav가 없다 — 나가는 길은 `나중에 다시 풀기`뿐이다(`RoleShell`).
+    await page.getByTestId('focus-exit').click();
+    await page.getByTestId('brand-home').click();
+
+    // 이름은 학습 상세와 같은 `이어서 풀기` 한 벌이고, 메타는 풀이 화면과 같은 형식이다
+    await expect(hero.getByText('이어서 풀기')).toBeVisible();
+    await expect(hero.getByText(/1 \/ \d+ 풀었어요/)).toBeVisible();
+    await hero.getByText('이어서 풀기').click();
+    await expect(page.getByTestId('detail-start')).toContainText('이어서 풀기');
   });
 
   test('진행 상황은 학원 과제와 담아 둔 학습만 센다', async ({ page }) => {
