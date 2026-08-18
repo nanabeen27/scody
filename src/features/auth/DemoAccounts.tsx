@@ -1,17 +1,17 @@
-import { useRef, useState } from "react";
-import { StyleSheet, View } from "react-native";
-import { AppText, Button, Group, Icon, LiveRegion, Row } from "@/components";
-import { useAuthReveal } from "@/features/auth/AuthShell";
-import { DEV_ACCOUNTS } from "@/session/devAccounts";
-import { ROLE_LABEL } from "@/session/routing";
-import { colors, spacing } from "@/theme/tokens";
+import { useRef, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { AppText, Button, Group, Icon, LiveRegion, Row } from '@/components';
+import { useAuthReveal } from '@/features/auth/AuthShell';
+import { DEV_ACCOUNTS } from '@/session/devAccounts';
+import { ROLE_LABEL } from '@/session/routing';
+import { colors, spacing } from '@/theme/tokens';
 
 /**
  * 개발용 테스트 계정 패널. `app/login.tsx`의 `below` 자리와 소개 페이지 푸터에서 쓴다.
  *
  * 펼침 상태는 **기본적으로 이 컴포넌트가 갖는다**. 소개 페이지처럼 화면 쪽에서 열고 닫을 이유가
- * 있는 자리만 `open`·`onOpenChange`를 넘겨 제어한다 — 두 자리가 같은 컨트롤을 쓰면서 상태의
- * 주인이 달라도 라벨·`aria-expanded`·낭독 문구는 한 벌로 남는다.
+ * 있는 자리만 `open`·`onOpenChange`를 넘겨 제어한다 — 상태의 주인이 달라도 라벨·`aria-expanded`·
+ * 낭독 문구는 한 벌로 남는다.
  *
  * ## 호출부가 스위치를 들고 있다
  *
@@ -70,18 +70,14 @@ export function DemoAccounts({
         aria-expanded={open}
         leading={
           <Icon
-            name={open ? "chevron-down" : "chevron-right"}
+            name={open ? 'chevron-down' : 'chevron-right'}
             size={15}
             color={colors.inkSecondary}
           />
         }
-        label={
-          open ? "테스트 계정 숨기기" : `테스트 계정 ${accounts.length}개 보기`
-        }
+        label={open ? '테스트 계정 숨기기' : `테스트 계정 ${accounts.length}개 보기`}
         /* 앞 아이콘이 읽히는 이름에 섞이지 않게 이름을 고정한다(§8). */
-        accessibilityLabel={
-          open ? "테스트 계정 숨기기" : `테스트 계정 ${accounts.length}개 보기`
-        }
+        accessibilityLabel={open ? '테스트 계정 숨기기' : `테스트 계정 ${accounts.length}개 보기`}
         onPress={() => {
           const next = !open;
           setOpenSelf(next);
@@ -93,11 +89,7 @@ export function DemoAccounts({
         보이지 않는 알림. 목록이 화면 아래에서 열리므로 화면을 못 보는 사용자에게는
         라벨이 바뀐 것 말고는 단서가 없다. 자리는 늘 렌더되고 문구만 바뀐다(`LiveRegion`).
       */}
-      <LiveRegion
-        message={
-          open ? `테스트 계정 ${accounts.length}개를 아래에 펼쳤어요.` : ""
-        }
-      />
+      <LiveRegion message={open ? `테스트 계정 ${accounts.length}개를 아래에 펼쳤어요.` : ''} />
       {open ? (
         <View
           style={styles.list}
@@ -120,7 +112,7 @@ export function DemoAccounts({
             {accounts.map((a) => (
               <Row
                 key={a.scodyId}
-                title={`${a.name} · ${a.roles.map((r) => ROLE_LABEL[r]).join("/")}`}
+                title={`${a.name} · ${a.roles.map((r) => ROLE_LABEL[r]).join('/')}`}
                 subtitle={a.note}
                 onPress={() => onEnter(a.scodyId)}
                 showChevron
@@ -134,7 +126,7 @@ export function DemoAccounts({
 }
 
 const styles = StyleSheet.create({
-  box: { gap: spacing.md, alignItems: "flex-start" },
+  box: { gap: spacing.md, alignItems: 'flex-start' },
   /* 목록은 컬럼 폭을 그대로 쓴다 — 토글만 내용 폭이다(`box`의 `flex-start`를 되돌린다). */
-  list: { alignSelf: "stretch", gap: spacing.md },
+  list: { alignSelf: 'stretch', gap: spacing.md },
 });

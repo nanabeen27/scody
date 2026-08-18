@@ -1,19 +1,12 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useRef,
-  type ReactNode,
-} from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
-import { useRouter } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { AppText, Brand, Divider, ThemeToggle } from "@/components";
-import { LEGAL_DOCS } from "@/features/legal/documents";
-import { colors, radius, spacing, touch } from "@/theme/tokens";
-import { useReduceMotion } from "@/theme/useReduceMotion";
-import { useResponsive } from "@/theme/useResponsive";
+import { createContext, useCallback, useContext, useMemo, useRef, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AppText, Brand, Divider, ThemeToggle } from '@/components';
+import { LEGAL_DOCS } from '@/features/legal/documents';
+import { colors, radius, spacing, touch } from '@/theme/tokens';
+import { useReduceMotion } from '@/theme/useReduceMotion';
+import { useResponsive } from '@/theme/useResponsive';
 
 /**
  * 패널 밖 아래 블록(`below`)을 화면 안으로 끌어오는 길.
@@ -23,9 +16,7 @@ import { useResponsive } from "@/theme/useResponsive";
  *
  * 껍데기 밖에서 부르면 아무 일도 하지 않는다. 스크롤을 못 하는 것이 화면을 깨뜨릴 이유는 아니다.
  */
-const AuthRevealContext = createContext<{ revealBelow: () => void }>({
-  revealBelow: () => {},
-});
+const AuthRevealContext = createContext<{ revealBelow: () => void }>({ revealBelow: () => {} });
 
 export function useAuthReveal() {
   return useContext(AuthRevealContext);
@@ -109,19 +100,12 @@ export function AuthShell({
             내렸을 때 마지막으로 만나는 것이 테마 전환이었다.
           */}
           <View style={styles.headRow}>
-            <Brand
-              center
-              testID={exitTestID}
-              accessibilityLabel={exitLabel}
-              onPress={onExit}
-            />
+            <Brand center testID={exitTestID} accessibilityLabel={exitLabel} onPress={onExit} />
             <View style={styles.headTool}>
               <ThemeToggle />
             </View>
           </View>
-          <View style={[styles.panel, isMobile && styles.panelFlat]}>
-            {children}
-          </View>
+          <View style={[styles.panel, isMobile && styles.panelFlat]}>{children}</View>
           {below ? (
             <View
               onLayout={(e) => {
@@ -158,10 +142,7 @@ export function AuthHeading({ title, sub }: { title: string; sub?: string }) {
 /** 단계형 화면의 진행 표시. 몇 단계가 남았는지 먼저 알려준다. */
 export function AuthSteps({ step, total }: { step: number; total: number }) {
   return (
-    <View
-      style={styles.steps}
-      accessibilityLabel={`${total}단계 중 ${step}단계`}
-    >
+    <View style={styles.steps} accessibilityLabel={`${total}단계 중 ${step}단계`}>
       {Array.from({ length: total }, (_, i) => (
         <View key={i} style={[styles.stepBar, i < step && styles.stepBarOn]} />
       ))}
@@ -264,10 +245,7 @@ function AuthFooter() {
             testID={`auth-footer-${d.slug}`}
             accessibilityRole="link"
             onPress={() => router.push(`/legal/${d.slug}` as never)}
-            style={({ pressed }) => [
-              styles.footerLink,
-              pressed && { opacity: 0.6 },
-            ]}
+            style={({ pressed }) => [styles.footerLink, pressed && { opacity: 0.6 }]}
           >
             <AppText variant="caption" tone="secondary">
               {d.label}
@@ -285,20 +263,14 @@ function AuthFooter() {
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: colors.bg },
   /* 워드마크는 가운데를 지키고 도구만 오른쪽 끝에 얹는다 — 절대 배치라 가운데 정렬이 흔들리지 않는다. */
-  headRow: { width: "100%", justifyContent: "center" },
-  headTool: {
-    position: "absolute",
-    right: 0,
-    top: 0,
-    bottom: 0,
-    justifyContent: "center",
-  },
-  page: { flexGrow: 1, paddingHorizontal: spacing.xl, alignItems: "center" },
-  column: { width: "100%", maxWidth: 420, gap: spacing.xl },
+  headRow: { width: '100%', justifyContent: 'center' },
+  headTool: { position: 'absolute', right: 0, top: 0, bottom: 0, justifyContent: 'center' },
+  page: { flexGrow: 1, paddingHorizontal: spacing.xl, alignItems: 'center' },
+  column: { width: '100%', maxWidth: 420, gap: spacing.xl },
   // 넓은 화면에서는 컬럼을 위아래 가운데에 둔다. 모바일은 키보드 때문에 위에서 시작한다.
   // `justifyContent: center`가 아니라 자동 여백을 쓴다. 내용이 화면보다 길어지면
   // 가운데 정렬은 위쪽을 잘라 스크롤로도 닿을 수 없게 만든다.
-  columnCenter: { marginVertical: "auto" },
+  columnCenter: { marginVertical: 'auto' },
 
   panel: {
     backgroundColor: colors.surface,
@@ -308,45 +280,32 @@ const styles = StyleSheet.create({
     padding: spacing.xxl,
     gap: spacing.xl,
   },
-  panelFlat: { backgroundColor: "transparent", borderWidth: 0, padding: 0 },
+  panelFlat: { backgroundColor: 'transparent', borderWidth: 0, padding: 0 },
 
   heading: { gap: spacing.sm },
   section: { gap: spacing.md },
   sectionHead: { gap: 2 },
 
-  steps: { flexDirection: "row", gap: spacing.xs },
-  stepBar: {
-    flex: 1,
-    height: 3,
-    borderRadius: radius.pill,
-    backgroundColor: colors.offset,
-  },
+  steps: { flexDirection: 'row', gap: spacing.xs },
+  stepBar: { flex: 1, height: 3, borderRadius: radius.pill, backgroundColor: colors.offset },
   stepBarOn: { backgroundColor: colors.accent },
 
-  labeled: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  labeledLine: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.border,
-  },
+  labeled: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  labeledLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
 
   /*
     인증 화면에서 가장 자주 눌리는 것이 이 링크들이다(회원가입·다른 방법으로 로그인·약관).
     커진 만큼 음수 마진으로 되돌려 패널 안 세로 리듬은 그대로 둔다.
   */
   link: {
-    alignSelf: "flex-start",
+    alignSelf: 'flex-start',
     minHeight: touch.min,
-    justifyContent: "center",
+    justifyContent: 'center',
     marginVertical: -spacing.md,
   },
   error: { color: colors.danger },
 
-  footer: { gap: spacing.md, alignItems: "flex-start" },
-  footerLinks: { flexDirection: "row", flexWrap: "wrap", gap: spacing.lg },
-  footerLink: {
-    minHeight: touch.min,
-    justifyContent: "center",
-    marginVertical: -spacing.md,
-  },
+  footer: { gap: spacing.md, alignItems: 'flex-start' },
+  footerLinks: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.lg },
+  footerLink: { minHeight: touch.min, justifyContent: 'center', marginVertical: -spacing.md },
 });
