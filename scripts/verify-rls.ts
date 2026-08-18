@@ -191,6 +191,11 @@ async function verify(anon: SupabaseClient) {
   const attemptsAtSeed = await count(admin, 'attempts');
   check('풀이 32건', attemptsAtSeed === 32);
   check('오답노트 11건', (await count(admin, 'wrong_notes')) === 11);
+  /*
+    복습 기록. **상태를 주장하는 노트에는 근거 행이 있어야 한다** — `graduated · streak 3`이
+    "서로 다른 날 세 번 맞혔다"는 주장이고 그 근거가 이 표다.
+  */
+  check('복습 기록 6건', (await count(admin, 'note_reviews')) === 6);
   check('반 3개', (await count(admin, 'classes')) === 3);
   const invitesAtSeed = await count(admin, 'invites');
   check('초대 4건(한빛 3 + 새길 1)', invitesAtSeed === 4);
@@ -264,9 +269,43 @@ async function verify(anon: SupabaseClient) {
   const jihoon = await signIn('jihoon'); // 한지훈 — 자녀: 박도윤(기록 없음), 선생님 겸직
   check('한지훈에게 자녀 풀이 0건(박도윤은 기록이 없다)', (await count(jihoon, 'attempts')) === 0);
 
+  /*
+    복습 기록의 열람 범위. 정책은 `can_read_student(student_id) or is_admin()`이라 본인·연결된
+    자녀·운영자만 읽는다 — **교직원 갈래가 없다.** 학생이 자기 말로 쓴 한 줄(`recap`)의 공개 범위가
+    이 표에 걸려 있으므로 네 방향으로 확인한다.
+  */
+  console.log('\n[복습 기록] 본인·자녀·운영자만 읽는다');
+  check('학생 본인은 자기 기록을 읽는다', (await count(seojun, 'note_reviews')) >= 0);
+  const { data: yerinReviews } = await (await signIn('yerin'))
+    .from('note_reviews')
+    .select('student_id');
+  check('정예린에게 6건(시드 전량이 자기 것)', (yerinReviews?.length ?? 0) === 6);
+  check(
+    '정예린의 기록에 남의 행이 없다',
+    (yerinReviews ?? []).every((r) => (r as { student_id: string }).student_id !== seojunUid),
+  );
+  check('김서준에게는 0건(자기 기록이 없다)', (await count(seojun, 'note_reviews')) === 0);
+  const minjiReviews = await count(await signIn('minji'), 'note_reviews');
+  check(`학부모(최민지)는 자녀 기록을 읽는다 — ${minjiReviews}건`, minjiReviews === 6);
+  check(
+    '한지훈에게 0건(박도윤은 복습 기록이 없다)',
+    (await count(await signIn('jihoon'), 'note_reviews')) === 0,
+  );
+  /*
+    **익명에는 두 겹으로 막혀 있다**(0041). 정책이 0행을 내고, `revoke select`가 권한 자체를
+    없앤다 — 0035가 좌석 단가 표에서 세운 규칙이다. `count`는 실패하면 −1을 돌려준다.
+  */
+  const anonReviews = await count(anon, 'note_reviews');
+  check(`익명은 복습 기록을 읽지 못한다 (${anonReviews})`, anonReviews <= 0);
+
   console.log('\n[학원] 개인 학습 오답은 어떤 경로로도 보이지 않는다');
   const teacher = await signIn('hanbit.teacher'); // 오선생 — c_kor1 담당
   check('선생님이 wrong_notes 표에서 0행', (await count(teacher, 'wrong_notes')) === 0);
+  check('선생님이 note_reviews 표에서 0행', (await count(teacher, 'note_reviews')) === 0);
+  check(
+    '원장도 note_reviews 표에서 0행',
+    (await count(await signIn('hanbit.director'), 'note_reviews')) === 0,
+  );
   const { data: academyNotes, error: noteErr } = await teacher
     .from('v_academy_visible_notes')
     .select('*');

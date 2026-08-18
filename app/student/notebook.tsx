@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { View, StyleSheet } from 'react-native';
 import {
   ActionBar,
@@ -30,6 +30,8 @@ import { useToast } from '@/features/toast';
 import { askScodyAIStream, isAiFailure, isAiSavable } from '@/features/openrouter';
 import { SCODY_WRONG_SYSTEM, WRONG_MEMO_SYSTEM, wrongCtx } from '@/features/prompts';
 import { findContent, type LearningItem } from '@/data';
+import { todayISO } from '@/features/clock';
+import { DAILY_CAP, nextReviewLabel, stateCounts, stuckAdvice } from '@/features/review';
 import { colors, spacing, typeface, font } from '@/theme/tokens';
 import { useColumn } from '@/theme/useColumn';
 
@@ -46,7 +48,23 @@ const PREVIEW = 5;
  * 영역만 접두사를 붙인다. 영역 이름은 데이터에서 오므로(`src/data`) 상태 값과 같은 값
  * 공간에 두면 `all`이라는 영역이 생기는 날 조용히 겹친다.
  */
-type NoteFilter = 'all' | 'pending' | 'starred' | `area:${string}`;
+type NoteFilter = 'all' | 'pending' | 'starred' | 'stuck' | `area:${string}`;
+
+/**
+ * 아직 정리하지 않은 오답인가.
+ *
+ * **`!n.dig`로 세면 대리 보기에서 거짓이 된다.** `maskDig`가 메모를 값째 지우므로(D-071),
+ * 여덟 개 중 다섯 개를 정리해 둔 학생의 오답노트를 운영자가 대리로 열면 화면이
+ * `8개 중 8개는 아직 정리하지 않았어요`라고 단정했다.
+ *
+ * **`digHidden`을 빼는 것만으로는 거짓의 방향이 뒤집힐 뿐이다.** 대리 보기에서는 `maskDig`가
+ * **모든** 노트에 그 플래그를 붙이므로 미정리가 0이 되고, 하나도 정리하지 않은 학생의 오답노트가
+ * `모두 정리했어요`가 된다. 그래서 대리 보기에서는 **세지 않고 셀 수 없다고 말한다**(아래
+ * `counting`).
+ */
+function needsMemo(note: { dig?: string; digHidden?: boolean }): boolean {
+  return !note.dig && !note.digHidden;
+}
 
 /**
  * 노트 카드의 머리 — 발문과 아이콘 줄(정리·별표·휴지통).
@@ -83,8 +101,18 @@ function NoteHead({
 /** 틀린 문제 모아보기 + Scody AI 대화 + 노트 정리. 지문이 있는 문항은 지문을 함께 보여준다. */
 export default function Notebook() {
   const router = useRouter();
+  /**
+   * 카드 복습의 완료 요약에서 넘어온 문항. 그 문항을 목록 맨 앞에 세운다.
+   *
+   * 두 화면이 서로를 가리키지 않던 것이 이 흐름의 가장 큰 끊김이었다(A-107) — AI와 여덟 개를 다
+   * 정리한 학생이 그것을 시험해 볼 곳으로 가는 길이 이 화면에 없었고, 반대로 복습에서 헷갈린
+   * 문항을 물어보려면 학습 탭을 거쳐 세 번 눌러야 했다.
+   */
+  const { note: focusId } = useLocalSearchParams<{ note?: string }>();
   const {
     wrongNotes: allNotes,
+    noteReviews,
+    requeueNote,
     removeWrongNote,
     restoreWrongNote,
     setDig,
@@ -106,6 +134,15 @@ export default function Notebook() {
   } = useContent();
   const { readOnly } = useSession();
   const { show } = useToast();
+  const today = todayISO();
+  /**
+   * 정리 개수를 셀 수 있는가.
+   *
+   * 대리 보기에서는 메모가 가려져 있어(`maskDig`) `정리했다/안 했다`를 판정할 수 없다. 세면
+   * 어느 방향으로든 거짓이 된다 — 값을 지우면 `전부 미정리`, `digHidden`을 빼면 `모두 정리`다.
+   * 그래서 개수 문장과 마무리 문장을 다른 갈래로 보낸다.
+   */
+  const counting = !readOnly;
   const [busy, setBusy] = useState<string | null>(null);
   const [input, setInput] = useState<Record<string, string>>({});
   const [convo, setConvo] = useState<Record<string, { q: string; a: string }[]>>({});
@@ -154,6 +191,8 @@ export default function Notebook() {
    * 일어나는지 알 수 없다.
    */
   const loadError = retrying ? null : (progressError ?? contentError);
+  /** 오늘 볼 것 · 나중 · 익힘 · 쉬는 것. 개수를 세는 곳은 `stateCounts` 하나다. */
+  const counts = useMemo(() => stateCounts(allNotes, today), [allNotes, today]);
 
   /** 두 조회를 함께 다시 시도한다. 실패가 어느 쪽에서 왔는지 학생이 고를 일은 아니다. */
   async function retryLoad() {
@@ -172,7 +211,7 @@ export default function Notebook() {
    * `모두 정리했어요`라고 말하고 주 버튼이 `학습 보러 가기`로 바뀌었다. 흐름의 마지막 문장이
    * 완료를 잘못 선언하면 학생은 남은 것을 모르고 나간다.
    */
-  const pendingAll = useMemo(() => allNotes.filter((n) => !n.dig), [allNotes]);
+  const pendingAll = useMemo(() => allNotes.filter(needsMemo), [allNotes]);
   /** 별표를 단 오답 전체. 별표 칸의 개수와 존재 여부를 함께 정한다. */
   const starredAll = useMemo(() => allNotes.filter((n) => n.starred), [allNotes]);
   /**
@@ -188,8 +227,16 @@ export default function Notebook() {
   const filterOptions = useMemo<readonly SegmentedOption<NoteFilter>[]>(
     () => [
       { value: 'all', label: '전체', count: allNotes.length },
-      ...(pendingAll.length > 0
+      ...(counting && pendingAll.length > 0
         ? [{ value: 'pending' as const, label: '정리 안 함', count: pendingAll.length }]
+        : []),
+      /*
+        **쉬는 중 칸.** 세 번 연속 틀려 큐에서 내려간 노트를 찾는 유일한 방법이 목록을 전부 펼쳐
+        훑는 것이었다 — 돌아오는 문(`다시 복습 목록에 넣기`)이 그 카드 안에만 있는데.
+        0건인 칸은 만들지 않는다(§8).
+      */
+      ...(counts.stuck > 0
+        ? [{ value: 'stuck' as const, label: '쉬는 중', count: counts.stuck }]
         : []),
       ...(starredAll.length > 0
         ? [{ value: 'starred' as const, label: '별표', count: starredAll.length }]
@@ -200,7 +247,7 @@ export default function Notebook() {
         count: allNotes.filter((n) => n.area === a).length,
       })),
     ],
-    [allNotes, areas, pendingAll, starredAll],
+    [allNotes, areas, counting, counts.stuck, pendingAll, starredAll],
   );
   /**
    * 실제로 걸러 볼 값. **옵션에서 사라진 값은 `전체`로 되돌린다.**
@@ -222,8 +269,9 @@ export default function Notebook() {
 
   const selected = useMemo(() => {
     if (activeFilter === 'all') return allNotes;
-    if (activeFilter === 'pending') return allNotes.filter((n) => !n.dig);
+    if (activeFilter === 'pending') return allNotes.filter(needsMemo);
     if (activeFilter === 'starred') return allNotes.filter((n) => n.starred);
+    if (activeFilter === 'stuck') return allNotes.filter((n) => n.state === 'stuck');
     const area = activeFilter.slice('area:'.length);
     return allNotes.filter((n) => n.area === area);
   }, [allNotes, activeFilter]);
@@ -235,11 +283,20 @@ export default function Notebook() {
    * 같은 상태 안에서는 서버 순서를 그대로 둔다(`sort`는 안정 정렬이다) — 담은 순서가 곧
    * 학습 순서라, 두 번째 기준을 얹으면 화면을 다시 열 때마다 자리가 달라진다.
    */
-  const wrongNotes = useMemo(
-    () => [...selected].sort((a, b) => Number(!!a.dig) - Number(!!b.dig)),
-    [selected],
-  );
-  const pending = useMemo(() => wrongNotes.filter((n) => !n.dig), [wrongNotes]);
+  const wrongNotes = useMemo(() => {
+    const sorted = [...selected].sort((a, b) => Number(!needsMemo(a)) - Number(!needsMemo(b)));
+    /*
+      **카드 복습에서 넘어온 문항을 맨 앞에 세운다.** 완료 요약의 `헷갈린 문항` 줄이 이 주소로
+      보내는데(`?note=`), 목록이 다섯 개까지만 접혀 있어서 그 문항이 접힌 쪽에 있으면 눌러도
+      아무 데도 도착하지 않은 것처럼 보인다. 필터를 건드리지 않고 자리만 옮긴다 — 학생이 고른
+      필터를 화면이 바꾸지 않는다.
+    */
+    if (!focusId) return sorted;
+    const found = sorted.findIndex((n) => n.id === focusId);
+    if (found <= 0) return sorted;
+    return [sorted[found], ...sorted.slice(0, found), ...sorted.slice(found + 1)];
+  }, [selected, focusId]);
+  const pending = useMemo(() => wrongNotes.filter(needsMemo), [wrongNotes]);
   /**
    * 상한을 걸어 접어 둔 상태인지.
    *
@@ -445,6 +502,23 @@ export default function Notebook() {
     show('정리와 대화를 지웠어요', 'removed');
   }
 
+  /**
+   * 멈춘 문항을 다시 복습 목록에 넣는다.
+   *
+   * **`stuck`이 조용한 삭제가 되지 않게 하는 유일한 길이다.** 서로 다른 날 세 번 연속 틀린
+   * 문항은 큐에서 내려가는데(같은 문항을 무한히 반복시키는 것은 학습이 아니다), 돌아올 문이
+   * 없으면 그 노트는 목록에 남아 있으면서 영원히 다시 나오지 않는다.
+   */
+  async function requeue(n: WrongNote) {
+    const res = await requeueNote(n.id);
+    if (readOnly) return;
+    if (!res.ok) {
+      show(res.error ?? '복습 목록에 넣지 못했어요', 'removed');
+      return;
+    }
+    show('복습 목록에 다시 넣었어요. 내일 다시 만나요');
+  }
+
   return (
     <Screen testID="student-notebook" backFallback="/student" title="오답노트">
       <View style={{ gap: 4 }}>
@@ -460,6 +534,28 @@ export default function Notebook() {
           이야기한 내용은 오답노트 메모로 남고, 카드로 모아 다시 공부할 수 있어요.
         </AppText>
       </View>
+
+      {/*
+        **다시 풀어 볼 곳으로 가는 길.** 이 화면은 질문하고 메모하는 곳이고 다시 푸는 곳은
+        카드 복습이다(D-150). 두 화면이 서로를 가리키지 않아서, 여덟 개를 다 정리한 학생이
+        `오답을 모두 정리했어요`를 읽고 나면 그것을 시험해 볼 곳으로 가는 길이 없었다(A-107).
+
+        **차례가 온 것이 있을 때만 그린다.** 없는데 두면 눌러도 빈 덱이 나오는 줄이 된다(§8).
+        개수는 밀린 것을 앞세우지 않는다 — 「서른 개 밀렸어요」가 아니라 오늘 볼 것을 말한다.
+
+        조회가 끝나기 전에는 그리지 않는다 — 읽지 못한 목록으로 센 개수를 말하지 않는다(§9).
+      */}
+      {!firstLoad && !loadError && counts.today > 0 ? (
+        <Group>
+          <Row
+            testID="notebook-to-review"
+            title="오늘 다시 볼 오답이 있어요"
+            subtitle={`${Math.min(counts.today, DAILY_CAP)}개만 풀면 오늘 몫은 끝이에요`}
+            onPress={() => router.push('/student/review' as never)}
+            showChevron
+          />
+        </Group>
+      ) : null}
 
       {/*
         **필터는 목록보다 먼저, 그리고 목록이 비어도 그린다.**
@@ -555,12 +651,14 @@ export default function Notebook() {
       ) : (
         <>
           <AppText variant="caption" tone="secondary">
-            {activeFilter === 'pending'
-              ? /* 이 칸은 미정리만 모았으므로 `N개 중 N개`라고 세면 같은 말을 두 번 한다. */
-                `정리할 오답 ${wrongNotes.length}개예요.`
-              : pending.length > 0
-                ? `${wrongNotes.length}개 중 ${pending.length}개는 아직 정리하지 않았어요.`
-                : `${wrongNotes.length}개 모두 정리했어요.`}
+            {!counting
+              ? `오답 ${wrongNotes.length}개예요. 메모는 대리 보기에서 보이지 않아 정리 여부는 셀 수 없어요.`
+              : activeFilter === 'pending'
+                ? /* 이 칸은 미정리만 모았으므로 `N개 중 N개`라고 세면 같은 말을 두 번 한다. */
+                  `정리할 오답 ${wrongNotes.length}개예요.`
+                : pending.length > 0
+                  ? `${wrongNotes.length}개 중 ${pending.length}개는 아직 정리하지 않았어요.`
+                  : `${wrongNotes.length}개 모두 정리했어요.`}
           </AppText>
           {/*
             **접어 둔 동안에는 몇 개를 보여 주는지 말한다.** 위 문장이 `20개 중 12개는`이라고
@@ -666,6 +764,44 @@ export default function Notebook() {
                       정답 · {n.choices[n.answerIndex]}
                     </AppText>
                     {/*
+                      **언제 다시 만나는지 말한다.** 예전에는 담아 둔 오답이 그 뒤로 어떻게 되는지
+                      화면 어디에도 없었다 — 담기는 1클릭인데 돌아올 이유가 0이었고, 그것이 이
+                      화면의 가장 큰 결함이었다.
+
+                      단계 숫자나 강등은 말하지 않는다. 감점으로 읽히면 복습 동기를 깎는다.
+                    */}
+                    <AppText variant="caption" tone="secondary" testID={`note-due-${n.qId}`}>
+                      {nextReviewLabel(n, today)}
+                      {/*
+                        **무엇이 나아졌는지를 말한다.** 스트릭·포인트를 두지 않는 대신 이것을
+                        둔다 — 유형·성과에 연동된 보상은 내재동기를 약화시키고(d = −0.28~−0.40,
+                        Deci, Koestner & Ryan 1999) 긍정 피드백은 강화한다. 몇 번 다시 풀었는지는
+                        학생이 실제로 한 일이다.
+                      */}
+                      {(noteReviews[n.id]?.length ?? 0) > 0
+                        ? ` · ${noteReviews[n.id].length}번 다시 풀었어요`
+                        : ''}
+                    </AppText>
+                    {/*
+                      **멈춘 문항에는 다른 길을 준다.** 세 번 연속 틀린 문항을 계속 큐에 두면
+                      세션 정확도가 떨어지고 복습 자체를 그만두게 된다 — 명시적 탈출구가 없는
+                      시스템에서 반복 관찰된 실패다. 학생 탓으로 말하지 않는다.
+                    */}
+                    {n.state === 'stuck' ? (
+                      <View style={{ gap: 6, marginTop: spacing.xs }}>
+                        <AppText variant="caption" tone="secondary">
+                          {stuckAdvice(n)}
+                        </AppText>
+                        <Button
+                          testID={`note-requeue-${n.qId}`}
+                          variant="secondary"
+                          hug
+                          label="다시 복습 목록에 넣기"
+                          onPress={() => void requeue(n)}
+                        />
+                      </View>
+                    ) : null}
+                    {/*
                       **학원 과제 오답의 메모는 담당 선생님이 본문까지 읽는다**(D-054).
                       정리하기 전에 알 수 있도록 메모가 아직 없을 때에도 둔다.
                       개인 학습 오답은 어떤 경로로도 학원에 나가지 않으므로 붙이지 않는다.
@@ -692,6 +828,50 @@ export default function Notebook() {
                         <MotionAsset name="pending" testID={`summ-pending-motion-${n.qId}`} />
                       </View>
                     ) : null}
+                    {/*
+                      **가린 것과 없는 것을 구분한다.** 대리 보기에서는 메모 본문이 가려지는데
+                      (`maskDig`) 값만 지우면 이 카드에 메모 블록이 아예 없어서 학생이 정리하지
+                      않은 것처럼 읽힌다. 위 개수는 `needsMemo`가 이미 바로잡았고, 여기서는
+                      그 사실을 한 줄로 말한다(카드 복습 화면과 같은 문장).
+                    */}
+                    {n.digHidden ? (
+                      <AppText
+                        variant="caption"
+                        tone="secondary"
+                        style={{ marginTop: spacing.sm }}
+                        testID={`dig-hidden-${n.qId}`}
+                      >
+                        메모는 대리 보기에서 보이지 않아요.
+                      </AppText>
+                    ) : null}
+                    {/*
+                      **학생이 쓴 한 줄을 되보여 준다.** 카드 복습에서 `내 말로 한 줄`을 저장하면
+                      서버에 남지만 그것을 읽는 화면이 없었다 — 자기설명을 쓰게 하고 다시 만날
+                      자리를 주지 않으면 어디로 갔는지 모르는 입력이 된다.
+
+                      마지막 한 줄만 보여 준다(회차가 쌓이면 카드가 길어진다). 가려진 경우는
+                      `recapHidden`이 말한다.
+                    */}
+                    {(() => {
+                      const last = [...(noteReviews[n.id] ?? [])]
+                        .reverse()
+                        .find((r) => r.recap || r.recapHidden);
+                      if (!last) return null;
+                      return (
+                        <View style={{ marginTop: spacing.sm, gap: 4 }}>
+                          <AppText
+                            variant="caption"
+                            tone="secondary"
+                            style={{ fontFamily: typeface.semibold }}
+                          >
+                            내 말로 쓴 한 줄
+                          </AppText>
+                          <AppText variant="caption" tone="secondary" testID={`recap-${n.qId}`}>
+                            {last.recapHidden ? '대리 보기에서는 보이지 않아요.' : last.recap}
+                          </AppText>
+                        </View>
+                      );
+                    })()}
                     {n.dig ? (
                       <View style={{ marginTop: spacing.sm, gap: 4 }}>
                         <AppText
@@ -912,7 +1092,9 @@ export default function Notebook() {
       {firstLoad || wrongNotes.length === 0 ? null : wrapUp ? (
         <Group>
           <View style={{ padding: spacing.lg, gap: spacing.xs }}>
-            {pendingAll.length === 0 ? (
+            {!counting ? (
+              <AppText variant="label">대리 보기에서는 정리 상태를 셀 수 없어요.</AppText>
+            ) : pendingAll.length === 0 ? (
               <AppText variant="label">오답을 모두 정리했어요.</AppText>
             ) : activeFilter !== 'all' && pending.length === 0 ? (
               <>
@@ -950,6 +1132,23 @@ export default function Notebook() {
             chevron은 화면을 떠나는 줄에만 둔다 — `더 정리할게요`는 이 화면에 남는다.
           */}
           <Row testID="wrapup-continue" title="더 정리할게요" onPress={() => setWrapUp(false)} />
+          {/*
+            **정리한 것을 시험해 보는 곳으로 보낸다.** 이 자리가 그 길이 가장 필요한 곳이었다 —
+            여덟 개를 다 정리한 학생이 `오답을 모두 정리했어요`를 읽고 나면 남은 행동이
+            `학습 보러 가기` 하나였다(A-107). 정리는 읽는 일이고, 해설 재독은 교육 텍스트에서
+            유의한 이득이 거의 없다(Callender & McDaniel 2009) — 다시 풀어야 뜻이 생긴다.
+
+            **차례가 온 것이 있을 때만 둔다**(§8) — 없으면 눌러도 빈 덱이 나온다.
+          */}
+          {counts.today > 0 ? (
+            <Row
+              testID="wrapup-to-review"
+              title="이제 다시 풀어 볼게요"
+              subtitle={`오늘 볼 오답 ${Math.min(counts.today, DAILY_CAP)}개예요`}
+              showChevron
+              onPress={() => router.push('/student/review' as never)}
+            />
+          ) : null}
           <Row
             testID="wrapup-later"
             title={pendingAll.length > 0 ? '나중에 할게요' : '학습 보러 가기'}

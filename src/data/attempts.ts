@@ -1,6 +1,7 @@
+import { addDaysISO, todayISO } from '@/features/clock';
 import { SEED_CONTENT } from './content';
 import { EXTRA_CONTENT } from './contentExtra';
-import type { ContentSet } from './types';
+import type { ContentSet, NoteEvidence, NoteState } from './types';
 
 /**
  * 개발용 풀이 기록 시드.
@@ -131,6 +132,28 @@ interface NoteSeed {
   /** AI와 정리한 메모. 없으면 아직 정리하지 않은 것. */
   dig?: string;
   starred?: boolean;
+  /**
+   * 복습 스케줄. 개발·테스트 fixture에서만 손으로 정한다 — **실제로는 서버만 쓴다**
+   * (`supabase/migrations/0037_note_reviews.sql`의 가드 트리거).
+   *
+   * 생략하면 `queued · 오늘 · 0 · 0`이다. 화면을 보려면 세 상태가 다 있어야 해서
+   * (`오늘 볼 것` · `졸업` · `멈춤`) 시드에 섞어 둔다.
+   */
+  state?: NoteState;
+  /** `+N`은 오늘부터 N일 뒤. 생략하면 오늘(=이미 밀린 것). `stuck`이면 무시된다. */
+  dueInDays?: number;
+  streak?: number;
+  missStreak?: number;
+  /**
+   * 복습 기록. **상태를 주장하면 근거 행이 있어야 한다.**
+   *
+   * `state: 'graduated', streak: 3`은 "서로 다른 날 세 번 맞혔다"는 주장인데 그 근거가 되는
+   * `note_reviews` 행이 0개면, 화면의 `지금까지 N번 다시 풀었어요`가 어떤 카드에도 뜨지 않고
+   * 시드가 스스로와 모순된다.
+   *
+   * `-N`은 오늘부터 N일 전이다.
+   */
+  reviews?: readonly { agoDays: number; correct: boolean; evidence?: NoteEvidence; recap?: string }[];
   mastered?: boolean;
 }
 
@@ -143,6 +166,20 @@ const NOTE_SEEDS: readonly NoteSeed[] = [
     source: 'personal',
     dig: '인물의 심리를 묻는 문항은 **행동 묘사**부터 찾는다. 직접 말하지 않고 행동으로 드러낸다.',
     starred: true,
+    /*
+      **익힌 것도 큐에서 빠지지 않는다** — 30일마다 유지 복습으로 돌아온다(1회 정답 후 시험을
+      중단하면 지연 회상 이득이 사라진다: Karpicke & Roediger 2008). 화면에서 그 상태를 확인할
+      수 있게 하나 둔다.
+    */
+    state: 'graduated',
+    dueInDays: 22,
+    streak: 3,
+    /* 서로 다른 날 세 번 맞혔다는 주장의 근거다. 이 행이 없으면 시드가 스스로와 모순된다. */
+    reviews: [
+      { agoDays: 29, correct: true, evidence: 'passage' },
+      { agoDays: 22, correct: true, evidence: 'passage', recap: '행동 묘사에서 심리를 읽는다' },
+      { agoDays: 8, correct: true, evidence: 'passage' },
+    ],
   },
   {
     studentId: 'u_student_both',
@@ -158,7 +195,23 @@ const NOTE_SEEDS: readonly NoteSeed[] = [
     createdAt: '2026-07-23',
     source: 'personal',
     dig: '글쓴이의 주장과 근거를 갈라 읽어야 한다. 근거가 사실인지 의견인지 먼저 본다.',
+    /*
+      `mastered`는 남겨 둔다 — 확정 정책 2절이 이 이름으로 학원 공개 여부를 정하고
+      `__tests__/report.test.ts`가 학부모 리포트에서의 부재를 고정한다. **학생 화면은 이제 이
+      값을 보지 않는다**(A-087).
+    */
     mastered: true,
+    /*
+      세 번 연속 틀려 복습 목록에서 쉬고 있는 문항. 같은 문항을 무한히 반복시키지 않고 다른
+      길(개념 학습·질문)로 넘기는 화면을 확인하려면 하나가 필요하다.
+    */
+    state: 'stuck',
+    missStreak: 3,
+    reviews: [
+      { agoDays: 5, correct: false, evidence: 'unsure' },
+      { agoDays: 3, correct: false, evidence: 'choices' },
+      { agoDays: 1, correct: false, evidence: 'unsure' },
+    ],
   },
   /*
     학원 배정에서 나온 오답. 문항 번호는 `fixtures.ts`의 제출 기록 `wrongQIds`와 일치시킨다 —
@@ -253,6 +306,11 @@ export interface SeededNote {
   starred?: boolean;
   mastered?: boolean;
   createdAt: string;
+  state: NoteState;
+  dueOn?: string;
+  streak: number;
+  missStreak: number;
+  reviews: readonly { on: string; correct: boolean; evidence?: NoteEvidence; recap?: string }[];
 }
 
 /** 학생별 오답노트 시드. `progress.tsx`의 초기 상태로 들어간다. */
@@ -281,6 +339,20 @@ export const WRONG_NOTES_SEED: Record<string, SeededNote[]> = (() => {
         starred: seed.starred,
         mastered: seed.mastered,
         createdAt: seed.createdAt,
+        state: seed.state ?? 'queued',
+        // `stuck`만 다시 볼 날이 없다(DB의 `wrong_notes_due_matches_state`와 같은 규칙).
+        dueOn:
+          (seed.state ?? 'queued') === 'stuck'
+            ? undefined
+            : addDaysISO(todayISO(), seed.dueInDays ?? 0),
+        streak: seed.streak ?? 0,
+        missStreak: seed.missStreak ?? 0,
+        reviews: (seed.reviews ?? []).map((r) => ({
+          on: addDaysISO(todayISO(), -Math.abs(r.agoDays)),
+          correct: r.correct,
+          evidence: r.evidence,
+          recap: r.recap,
+        })),
       },
     ];
   }

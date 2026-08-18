@@ -801,6 +801,64 @@ export type Database = {
           },
         ]
       }
+      note_reviews: {
+        Row: {
+          created_at: string
+          evidence: Database["public"]["Enums"]["note_evidence"] | null
+          id: string
+          is_correct: boolean
+          note_id: string
+          picked_index: number | null
+          recap: string | null
+          reviewed_on: string
+          student_id: string
+        }
+        Insert: {
+          created_at?: string
+          evidence?: Database["public"]["Enums"]["note_evidence"] | null
+          id?: string
+          is_correct: boolean
+          note_id: string
+          picked_index?: number | null
+          recap?: string | null
+          reviewed_on?: string
+          student_id: string
+        }
+        Update: {
+          created_at?: string
+          evidence?: Database["public"]["Enums"]["note_evidence"] | null
+          id?: string
+          is_correct?: boolean
+          note_id?: string
+          picked_index?: number | null
+          recap?: string | null
+          reviewed_on?: string
+          student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_reviews_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "v_academy_visible_notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_reviews_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "wrong_notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_reviews_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       parent_children: {
         Row: {
           created_at: string
@@ -1278,39 +1336,57 @@ export type Database = {
           content_set_id: string
           created_at: string
           dig: string | null
+          dismissed_at: string | null
+          due_on: string | null
           id: string
           mastered: boolean
+          miss_streak: number
           picked_index: number | null
           question_id: string
           source: Database["public"]["Enums"]["learning_source"]
           starred: boolean
+          state: Database["public"]["Enums"]["note_state"]
+          streak: number
           student_id: string
+          updated_at: string
         }
         Insert: {
           assignment_id?: string | null
           content_set_id: string
           created_at?: string
           dig?: string | null
+          dismissed_at?: string | null
+          due_on?: string | null
           id?: string
           mastered?: boolean
+          miss_streak?: number
           picked_index?: number | null
           question_id: string
           source: Database["public"]["Enums"]["learning_source"]
           starred?: boolean
+          state?: Database["public"]["Enums"]["note_state"]
+          streak?: number
           student_id: string
+          updated_at?: string
         }
         Update: {
           assignment_id?: string | null
           content_set_id?: string
           created_at?: string
           dig?: string | null
+          dismissed_at?: string | null
+          due_on?: string | null
           id?: string
           mastered?: boolean
+          miss_streak?: number
           picked_index?: number | null
           question_id?: string
           source?: Database["public"]["Enums"]["learning_source"]
           starred?: boolean
+          state?: Database["public"]["Enums"]["note_state"]
+          streak?: number
           student_id?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -1631,6 +1707,16 @@ export type Database = {
         }
         Returns: string
       }
+      rpc_add_wrong_note: {
+        Args: {
+          p_assignment_id?: string
+          p_content_set_id: string
+          p_picked_index?: number
+          p_question_id: string
+          p_source: Database["public"]["Enums"]["learning_source"]
+        }
+        Returns: Json
+      }
       rpc_admin_overview: { Args: never; Returns: Json }
       rpc_class_comparison: {
         Args: { p_assignment_id: string; p_student_id: string }
@@ -1648,7 +1734,17 @@ export type Database = {
         }
         Returns: string
       }
+      rpc_defer_note: { Args: { p_note_id: string }; Returns: Json }
       rpc_invite_info: { Args: { p_token: string }; Returns: Json }
+      rpc_log_note_review: {
+        Args: {
+          p_evidence?: Database["public"]["Enums"]["note_evidence"]
+          p_note_id: string
+          p_picked_index: number
+          p_recap?: string
+        }
+        Returns: Json
+      }
       rpc_reassign: {
         Args: { p_assignment_id: string; p_due_date: string }
         Returns: undefined
@@ -1657,8 +1753,13 @@ export type Database = {
         Args: { p_assignment_id: string }
         Returns: undefined
       }
+      rpc_requeue_note: { Args: { p_note_id: string }; Returns: Json }
       rpc_revenue_estimate: {
         Args: { p_include_churned?: boolean }
+        Returns: Json
+      }
+      rpc_set_note_review_recap: {
+        Args: { p_note_id: string; p_recap: string }
         Returns: Json
       }
       rpc_signup_phone_taken: { Args: { p_phone: string }; Returns: boolean }
@@ -1697,6 +1798,8 @@ export type Database = {
         | "review_done"
       learning_source: "personal" | "academy"
       link_status: "pending" | "linked"
+      note_evidence: "passage" | "choices" | "unsure"
+      note_state: "queued" | "graduated" | "stuck"
       payer_kind: "student" | "parent" | "academy"
       payment_status: "pending" | "paid" | "failed" | "refunded"
       praise_kind: "steady" | "submitted" | "reviewed" | "thanks"
@@ -1849,6 +1952,8 @@ export const Constants = {
       ],
       learning_source: ["personal", "academy"],
       link_status: ["pending", "linked"],
+      note_evidence: ["passage", "choices", "unsure"],
+      note_state: ["queued", "graduated", "stuck"],
       payer_kind: ["student", "parent", "academy"],
       payment_status: ["pending", "paid", "failed", "refunded"],
       praise_kind: ["steady", "submitted", "reviewed", "thanks"],

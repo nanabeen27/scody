@@ -1,4 +1,4 @@
-import type { Assignment, Submission } from '@/data/types';
+import type { Assignment, NoteState, Submission } from '@/data/types';
 import { errorMessage, supabase } from '@/lib/supabase';
 import { itemIdOf, toAssignment, toSubmission } from './mappers';
 
@@ -51,9 +51,30 @@ export interface WrongNote {
   answerIndex: number;
   pickedIndex?: number;
   dig?: string;
+  /**
+   * 메모가 **가려져 있다**(대리 보기). `dig`가 없는 것과 다른 사실이다 — 화면이 이 값을 보지
+   * 않으면 "아직 정리하지 않았어요"로 단정하고, 그것이 거짓이 된다.
+   */
+  digHidden?: boolean;
   starred?: boolean;
+  /**
+   * 학생이 눌렀던 `이해 완료`.
+   *
+   * **학생 화면에서는 쓰지 않는다.** 자기 예측은 실제 성과와 무상관이고(Karpicke & Roediger
+   * 2008, Science 319:966) 이 값은 어떤 화면도 바꾸지 않았다(A-087). 이제 숙달은
+   * `state`·`streak`이 말한다. 컬럼과 필드는 남긴다 — 확정 정책 2절이 이 이름으로 학원 공개
+   * 여부를 정하고 `__tests__/report.test.ts`가 학부모 리포트에서의 부재를 고정한다.
+   */
   mastered?: boolean;
   createdAt?: string;
+  /** 복습 스케줄. **서버만 쓴다**(`src/repo/notes.ts`). */
+  state: NoteState;
+  /** 다시 볼 날(`YYYY-MM-DD`). `stuck`이면 없고, 그때만 없다. */
+  dueOn?: string;
+  /** 서로 다른 날 연속으로 맞힌 횟수. 3이면 졸업이다. */
+  streak: number;
+  /** 서로 다른 날 연속으로 틀린 횟수. 3이면 `stuck`이다. */
+  missStreak: number;
 }
 
 /**
@@ -63,10 +84,17 @@ export interface WrongNote {
  * 타입 검사를 통과한다(구조적 타이핑). DB 쪽에서도 뷰에 그 컬럼이 아예 없다
  * (`v_academy_visible_notes`). 두 겹으로 막는다.
  */
-export type AcademyNote = Omit<WrongNote, 'starred' | 'mastered' | 'pickedIndex'> & {
+export type AcademyNote = Omit<
+  WrongNote,
+  'starred' | 'mastered' | 'pickedIndex' | 'state' | 'dueOn' | 'streak' | 'missStreak'
+> & {
   starred?: never;
   mastered?: never;
   pickedIndex?: never;
+  state?: never;
+  dueOn?: never;
+  streak?: never;
+  missStreak?: never;
 };
 
 export interface QueueEntry {
@@ -323,7 +351,7 @@ export async function saveDraft(input: {
 
 const NOTE_SELECT = `
   id, student_id, question_id, content_set_id, source, assignment_id, picked_index,
-  dig, starred, mastered, created_at,
+  dig, starred, mastered, created_at, state, due_on, streak, miss_streak,
   questions ( prompt, choices, answer_index, position ),
   content_sets ( title, area )
 ` as const;
@@ -340,6 +368,10 @@ interface NoteRow {
   starred: boolean;
   mastered: boolean;
   created_at: string;
+  state: NoteState;
+  due_on: string | null;
+  streak: number;
+  miss_streak: number;
   questions: { prompt: string; choices: string[]; answer_index: number; position: number } | null;
   content_sets: { title: string; area: string } | null;
 }
@@ -361,13 +393,24 @@ function toNote(row: NoteRow): WrongNote {
     starred: row.starred,
     mastered: row.mastered,
     createdAt: row.created_at.slice(0, 10),
+    state: row.state,
+    dueOn: row.due_on ?? undefined,
+    streak: row.streak,
+    missStreak: row.miss_streak,
   };
 }
 
+/**
+ * 오답노트 전부. **지운 것은 빼고 읽는다.**
+ *
+ * 지우기가 물리 삭제에서 소프트 삭제로 바뀌었다(0037) — 복습 로그가 자식 표라, 물리 삭제는
+ * 되돌리기가 정답 3회의 근거를 되살릴 수 없게 만든다. 그래서 목록에서 빼는 것은 여기다.
+ */
 export async function loadNotes(): Promise<Record<string, WrongNote[]>> {
   const { data, error } = await supabase()
     .from('wrong_notes')
     .select(NOTE_SELECT)
+    .is('dismissed_at', null)
     .order('created_at');
   if (error) throw new Error(errorMessage(error));
   const out: Record<string, WrongNote[]> = {};
@@ -429,11 +472,15 @@ export async function loadAcademyNotes(): Promise<Record<string, AcademyNote[]>>
 }
 
 /**
- * 오답을 담는다.
+ * 오답을 담는다. **담기와 되살리기가 한 함수다**(`rpc_add_wrong_note`).
  *
  * **개인 학습과 학원 과제를 다른 행으로 둔다**(A-085): 유니크 키가
  * `(student_id, question_id, source, coalesce(assignment_id, content_set_id))`라, 개인 학습에서
  * 담은 것을 지워도 학원 배정 오답과 메모가 남는다.
+ *
+ * **플레인 INSERT일 수 없다**: 지우기가 소프트 삭제라, 지웠던 문항을 다시 담으면 그 유니크
+ * 키에 걸린다(23505). 표현식 인덱스라 PostgREST의 `onConflict`로 지정할 수 없어 클라이언트에서
+ * 원자적으로 처리할 방법이 없다. 서버 함수가 없으면 담을 때마다 실패한다.
  */
 export async function addNote(input: {
   questionId: string;
@@ -441,58 +488,65 @@ export async function addNote(input: {
   source: 'personal' | 'academy';
   assignmentId?: string;
   pickedIndex?: number;
-}): Promise<WriteResult & { id?: string }> {
-  const uid = (await supabase().auth.getSession()).data.session?.user.id;
-  if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
-  const { data, error } = await supabase()
-    .from('wrong_notes')
-    .insert({
-      student_id: uid,
-      question_id: input.questionId,
-      content_set_id: input.contentId,
-      source: input.source,
-      assignment_id: input.assignmentId ?? null,
-      picked_index: input.pickedIndex ?? null,
-    })
-    .select('id')
-    .single();
+}): Promise<WriteResult & { id?: string; restored?: boolean }> {
+  const { data, error } = await supabase().rpc('rpc_add_wrong_note', {
+    p_question_id: input.questionId,
+    p_content_set_id: input.contentId,
+    p_source: input.source,
+    // 기본값이 있는 인자는 생성된 타입이 optional이다 — `null`이 아니라 생략으로 넘긴다.
+    p_assignment_id: input.assignmentId ?? undefined,
+    p_picked_index: input.pickedIndex ?? undefined,
+  });
   if (error) return fail(error);
-  return { ok: true, id: data.id };
+  const row = data as unknown as { id?: string; restored?: boolean } | null;
+  /*
+    **`restored`를 화면까지 넘긴다.** 되살린 것은 스케줄이 그대로 보존되므로(D-033) 오늘 복습에
+    나오지 않을 수 있다 — 그것을 `담았어요`라고 말하면 일어나지 않은 일을 알리는 셈이다.
+  */
+  return { ok: true, id: row?.id, restored: row?.restored ?? false };
 }
 
 /**
  * 지운 오답을 되돌린다.
  *
- * 메모·별표·이해 완료까지 그대로 살린다 — 지우기 되돌리기는 "없던 일"이어야 한다(D-033).
- * **같은 id로 다시 넣는다**: 화면이 되돌리기 배너에서 그 id를 들고 있고, 목록의 자리도 그
- * 값으로 맞춘다.
+ * 메모·별표는 물론 **복습 스케줄과 복습 기록까지 그대로 있다** — 행을 지우지 않았으므로
+ * 되돌릴 것이 없다. 지우기 되돌리기가 "없던 일"이 되는 것이 D-033이고, 물리 삭제로는 그것이
+ * 성립하지 않았다(자식 로그가 cascade로 함께 사라진다).
+ *
+ * 인자로 노트를 통째로 받는 시그니처를 유지한다 — 화면이 되돌리기 배너에서 그 값을 들고 있고,
+ * 목록의 자리도 그것으로 맞춘다.
  */
 export async function restoreNote(note: WrongNote): Promise<WriteResult> {
-  const uid = (await supabase().auth.getSession()).data.session?.user.id;
-  if (!uid) return { ok: false, error: '다시 로그인해 주세요.' };
-  const { error } = await supabase().from('wrong_notes').insert({
-    id: note.id,
-    student_id: uid,
-    question_id: note.qId,
-    content_set_id: note.contentId ?? '',
-    source: note.source,
-    assignment_id: note.source === 'academy' ? note.itemId : null,
-    picked_index: note.pickedIndex ?? null,
-    dig: note.dig ?? null,
-    starred: note.starred ?? false,
-    mastered: note.mastered ?? false,
-  });
+  const { error } = await supabase()
+    .from('wrong_notes')
+    .update({ dismissed_at: null })
+    .eq('id', note.id);
   return error ? fail(error) : { ok: true };
 }
 
+/**
+ * 오답노트에서 뺀다. **물리 삭제가 아니다.**
+ *
+ * DB에서 `delete` 권한을 회수했으므로(0037) 이 경로가 유일하다. 되돌리기가 복습 기록을
+ * 되살릴 수 있어야 하고, `graduated` 판정의 근거가 그 기록이다.
+ */
 export async function removeNote(id: string): Promise<WriteResult> {
-  const { error } = await supabase().from('wrong_notes').delete().eq('id', id);
+  const { error } = await supabase()
+    .from('wrong_notes')
+    .update({ dismissed_at: new Date().toISOString() })
+    .eq('id', id);
   return error ? fail(error) : { ok: true };
 }
 
+/**
+ * 메모와 별표. **스케줄은 여기로 못 쓴다** — DB 트리거가 막는다(0037 §5).
+ *
+ * `mastered`는 화이트리스트에서 뺐다. 쓰는 화면이 없어졌고(A-087), 남겨 두면 다음 사람이
+ * 숙달 판정에 다시 끌어 쓸 수 있는 자리가 된다.
+ */
 export async function setNoteFields(
   id: string,
-  fields: { dig?: string; starred?: boolean; mastered?: boolean },
+  fields: { dig?: string; starred?: boolean },
 ): Promise<WriteResult> {
   const { error } = await supabase().from('wrong_notes').update(fields).eq('id', id);
   return error ? fail(error) : { ok: true };

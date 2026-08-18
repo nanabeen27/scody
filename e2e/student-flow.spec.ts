@@ -2,7 +2,14 @@ import { test, expect } from './_fixtures';
 import { type Page } from '@playwright/test';
 import { loginHere } from './_auth';
 import { actThenToast, waitForQuietToast } from './_toast';
-import { answerAll, choices, keepWrongNotes, openFirstPersonal, pickTopic } from './_solve';
+import {
+  answerAll,
+  choices,
+  keepWrongNotes,
+  openFirstPersonal,
+  pickTopic,
+  reviewCard,
+} from './_solve';
 import { assignLearning, expectAssigned } from './_assign';
 import { dayFromToday, sid } from './_ids';
 
@@ -126,7 +133,12 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await expect(toast).toHaveCount(0);
 
     await page.getByRole('checkbox', { name: '오답노트에 담기' }).first().click();
-    await expect(toast).toHaveText('문항을 오답노트에 담았어요');
+    /*
+      **담는 순간 다음 차례를 말한다.** 새로 담은 오답의 첫 차례는 내일이라(틀린 직후 같은 세션
+      재시험은 근거가 없다) 그 사실을 말하지 않으면 담은 날과 다음 날 사이가 비어 있는 것으로
+      읽힌다. 되살린 것은 스케줄이 보존되므로 다른 문장을 쓴다.
+    */
+    await expect(toast).toHaveText('오답노트에 담았어요. 내일 다시 만나요');
 
     // 다시 누르면 뺐다고 알려준다
     await page.getByRole('checkbox', { name: '오답노트에서 빼기' }).first().click();
@@ -195,14 +207,26 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     */
     await loginAs(page, 'yerin');
     await page.getByRole('link', { name: '학습' }).click();
-    await page.getByText('전체 복습하기').first().click();
+    await page.getByText('담아 둔 오답 전체 보기').first().click();
     await expect(page).toHaveURL(/\/student\/review/);
-    // 진행 표시(`1 / 8`)는 덱이 실제로 잡혔을 때만 그려진다.
-    await expect(page.getByText(/^\d+ \/ \d+$/)).toBeVisible();
+    /*
+      진행 표시는 덱이 실제로 잡혔을 때만 그려진다. **`eyebrow`가 아니라 캡션이다** — 예전에는
+      12px `tertiary`(대비 2.96:1 · AA 미달)가 유일한 진행 정보였고, 칸(`Steps`)은 13장부터
+      렌더되지 않아 문법 25문항 덱에서는 그 숫자 하나만 남았다.
+
+      **조회가 끝나기를 먼저 기다린다.** 이 테스트가 주장하는 것은 `새로고침해도 덱이 남는다`이고
+      첫 조회의 속도가 아니다. 이 화면은 조회가 끝난 뒤에 덱을 마운트하므로(D-153) 로딩 문장이
+      사라지는 것이 그 계약의 끝이다 — 전체 실행 부하에서 그 시점이 기본 단정 창(5초)을 넘기면
+      `element(s) not found`로 실패해서 원인이 지연인지 결함인지 구분되지 않는다.
+    */
+    const loading = page.getByText('오답을 불러오고 있어요');
+    await expect(loading).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByTestId('review-progress')).toBeVisible();
 
     await page.reload();
     // 새로고침 뒤에도 카드가 온다. 빈 상태로 떨어지지 않는다.
-    await expect(page.getByText(/^\d+ \/ \d+$/)).toBeVisible();
+    await expect(loading).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByTestId('review-progress')).toBeVisible();
     await expect(page.getByText('복습할 오답이 없어요.')).toHaveCount(0);
   });
 
@@ -1119,34 +1143,81 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     */
     await page.getByRole('link', { name: '학습' }).click();
     await expect(page.getByText('오답노트', { exact: true })).toBeVisible();
-    await expect(page.getByText('다시 풀 범위를 골라요.')).toBeVisible();
+    /*
+      캡션은 **왜 지금 해야 하는지**를 말한다. 방금 담은 오답은 차례가 오늘이므로 개수가 보인다.
+      예전 문장(`다시 풀 범위를 골라요.`)은 목록이 무엇인지만 말했고, 담아 둔 오답을 다시 열
+      이유는 화면 어디에도 없었다.
+    */
+    /*
+      **방금 담은 오답은 내일이 차례다.** 틀린 직후 같은 세션에서 다시 묻는 것은 근거가 없어서
+      (집중 반복은 1회 후 빼는 것과 차이가 없다) 첫 차례를 내일로 잡는다. 담은 날 할 일은
+      오답노트에서 정리하는 것이고, 다시 푸는 것은 그다음이다 — 화면이 그 사실을 말한다.
+    */
+    await expect(page.getByText('다시 볼 차례는 내일이에요.')).toBeVisible();
+    await expect(page.getByTestId('learn-review-today')).toHaveCount(0);
 
     /*
-      카드 복습: 다시 풀면 정답·해설·내 메모 자리를 보여준다.
-      답을 고르기 전 안내는 **그 문항에 해설이 있는지**로 갈린다 — 해설이 등록된 문항이면
-      `정답과 해설을`, 없으면 `정답과 내 메모를`이라고 말한다. 어느 콘텐츠가 뽑힐지에 이 단정을
-      묶지 않으려고 둘 다 받는다.
+      차례를 기다리지 않고 지금 풀어 보는 길은 `담아 둔 오답 전체 보기`다 — 시험 직전에 범위를
+      넓게 돌아보는 것은 스케줄과 다른 목적이고, 그 판단은 학생의 시험 일정이 정한다.
+
+      카드 복습 한 장: **답 → 근거 → 확인** 순서다. 확인하기 전에는 정답이 보이지 않는다 —
+      해설을 먼저 열면 인출이 일어나지 않는다(인출 g=0.50 vs 재독).
     */
     await page.getByTestId('learn-review').click();
     await expect(page).toHaveURL(/\/student\/review/);
-    await expect(
-      page.getByText(/답을 고르면 정답과 (해설을|내 메모를) 함께 볼 수 있어요\./),
-    ).toBeVisible();
+    /*
+      **무엇을 해야 하는 화면인지 첫 화면에서 말한다.** 예전에는 이 안내가 문서 맨 아래 캡션이라
+      390에서 첫 화면 밖이었다 — 카드에 처음 들어온 학생 화면에는 버튼이 하나도 없고 그 이유를
+      설명하는 문장도 보이지 않았다.
+    */
+    await expect(page.getByTestId('review-guide')).toContainText(
+      /답을 고르면 근거를 묻고, 확인하면 정답과 (해설을|내 메모를) 함께 볼 수 있어요\./,
+    );
+
+    // 답만 고른 상태에서는 근거를 묻고, 확인 버튼이 아직 없다
     await page.getByTestId('review-choice-1').click();
+    await expect(page.getByTestId('review-evidence')).toBeVisible();
+    await expect(page.getByTestId('review-check')).toHaveCount(0);
+    await expect(page.getByTestId('review-feedback')).toHaveCount(0);
+
+    // 근거를 고르면 확인할 수 있다
+    await expect(page.getByTestId('review-guide')).toContainText('근거를 고르면 확인할 수 있어요.');
+    await page.getByTestId('review-evidence-passage').click();
+    await expect(page.getByTestId('review-guide')).toContainText(
+      '확인하면 답을 바꿀 수 없어요.',
+    );
+    await page.getByTestId('review-check').click();
+
+    await expect(page.getByTestId('review-feedback')).toBeVisible();
     await expect(page.getByText(/이번엔 맞혔어요|아직 헷갈려요/)).toBeVisible();
     // 왜 틀렸는지가 정답 줄 아래에 있다(그 자리가 없어 AI에게만 물어봐야 했다)
     await expect(page.getByTestId('review-explanation')).toBeVisible();
+    // 언제 다시 만나는지 말한다 — 예전에는 카드를 넘기면 알 길이 없었다
+    await expect(page.getByTestId('review-next-due')).toBeVisible();
     await expect(page.getByText('질문하고 메모하기')).toBeVisible();
+    /*
+      **`이제 이해했어요`는 없어졌다**(A-087). 자기 신고는 실제 성과와 무상관이고 그 값은 어떤
+      화면도 바꾸지 않았다 — 숙달은 서로 다른 날 연속 정답 3회가 말한다.
+    */
+    await expect(page.getByTestId('review-master')).toHaveCount(0);
 
-    // 별표를 달면 집중 복습 목록에 들어간다
-    await page.getByRole('button', { name: '별표 달기' }).click();
+    /*
+      **확인한 카드는 오늘 몫을 다 했다** — 서버가 하루 한 노트 한 번만 받으므로(`note_reviews`의
+      `(note_id, reviewed_on)` 유니크) 어느 덱에서도 다시 나오지 않는다. 그래서 별표는 **아직
+      확인하지 않은 다음 카드**에 단다. 그러지 않으면 별표 덱이 비어 있는 것이 맞는 동작이 된다.
+    */
     await page.getByTestId('review-next').click();
+    await expect(page.getByTestId('review-progress')).toContainText('2번째 카드');
+    await page.getByRole('button', { name: '별표 달기' }).click();
+    // 확인하지 않고 넘긴다 — 기록을 남기지 않으므로 별표 덱에 그대로 남는다
+    await page.getByTestId('review-skip').click();
+
     await page.getByRole('link', { name: '학습' }).click();
     const starred = page.getByTestId('learn-review-starred');
     await expect(starred).toBeVisible();
     await starred.click();
     await expect(page.getByText('별표 카드 복습')).toBeVisible();
-    await expect(page.getByText(/1 \/ 1/)).toBeVisible();
+    await expect(page.getByTestId('review-progress')).toContainText('모두 1개');
   });
 
   test('오답노트: 카테고리 칩으로 걸러 보고 학원 오답은 학원에도 전달된다', async ({ page }) => {
@@ -1169,4 +1240,433 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await expect(page.getByText(/배정 학습 오답노트 [1-9]\d*개/)).toBeVisible();
     await expect(page.getByText('박도윤', { exact: false }).first()).toBeVisible();
   });
+});
+
+/**
+ * 오답 복습 스케줄.
+ *
+ * 이 흐름에는 **회귀를 잡을 장치가 하나도 없었다** — `review-master`·`review-restart`·
+ * `review-load-failed`·`note-filter-starred`, 그리고 복습 중 이탈 후 재진입에 대한 단정이 e2e에
+ * 0건이었다(A-084가 기록한 공백의 일부다). 새로 만든 규칙은 여기서 지킨다.
+ */
+test.describe('오답 복습', () => {
+  test('중간에 나가도 진행이 남는다', async ({ page }) => {
+    /*
+      **예전에는 진행이 전부 화면 로컬 `useState`였다**(A-114). 8장 중 5장을 풀고 나가면 다시
+      들어올 때 `1 / 8`부터였고, 이미 맞힌 것을 또 풀어야 했다.
+
+      이제 진행은 서버의 복습 기록이 말한다 — 하루 한 노트 한 행만 허용하므로(`note_reviews`의
+      `(note_id, reviewed_on)` 유니크) "오늘 본 것"이 곧 진행이다. 따로 저장하는 표가 없다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review-today').click();
+
+    await expect(page.getByTestId('review-progress')).toContainText('1번째 카드');
+    /*
+      **총계 산술로 확인하지 않는다.** 하루 상한(`DAILY_CAP`)이 걸려 있어서, 차례가 여섯 개인
+      계정의 덱은 다섯 장이고 한 장을 끝내도 남은 다섯 장이 그대로 다섯이다 — 큐 크기를 늘리지
+      않고 우선순위만 바꾸는 것이 그 규칙이다. 그래서 **같은 카드가 다시 오지 않는 것**을 본다.
+    */
+    const first = await page.locator('[data-testid^="review-card-"]').getAttribute('data-testid');
+    expect(first).toBeTruthy();
+
+    // 한 장을 끝낸다
+    await reviewCard(page);
+
+    // 화면을 떠난다(세션 폐기와 같은 경로)
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review-today').click();
+    await expect(page.getByTestId('review-progress')).toContainText('1번째 카드');
+
+    // 첫 카드가 방금 푼 그 카드가 아니다 — 진행이 서버에 남았다
+    const again = await page.locator('[data-testid^="review-card-"]').getAttribute('data-testid');
+    expect(again).not.toBe(first);
+    await expect(page.getByTestId(first!)).toHaveCount(0);
+  });
+
+  test('건너뛴 문항은 기록을 남기지 않아 다음에 다시 나온다', async ({ page }) => {
+    /*
+      예전에는 답을 고르지 않으면 넘길 버튼이 렌더되지 않아 좌상단 뒤로가기가 유일한 출구였다.
+      건너뛰기는 **포기가 아니다** — 기록을 남기지 않으므로 차례가 그대로 남는다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review-today').click();
+
+    await expect(page.getByTestId('review-progress')).toContainText('1번째 카드');
+    const first = await page.locator('[data-testid^="review-card-"]').getAttribute('data-testid');
+
+    await expect(
+      page.getByText('건너뛴 문항은 기록에 남지 않고 내일 다시 나와요.'),
+    ).toBeVisible();
+    await page.getByTestId('review-skip').click();
+    // 같은 세션에서는 스냅샷이라 자리만 넘어간다
+    await expect(page.getByTestId('review-progress')).toContainText('2번째 카드');
+
+    /*
+      **건너뛰기는 서버가 하루 미룬다.** 미루지 않으면 `due_on`이 과거에 남고 다음 날 밀린 일수가
+      1 늘어 우선순위에서 더 앞으로 가서, 모르는 카드 다섯 장을 건너뛰면 다음 날 덱이 같은 다섯
+      장이고 그 상태가 영구히 유지된다(`miss_streak`도 늘지 않아 탈출구가 없다).
+
+      **기록은 남기지 않는다** — 건너뛴 것은 다시 풀어 본 사실이 아니다. 그래서 내일 다시 나온다.
+
+      미룸이 서버에 닿은 것을 **오답노트에서 직접 확인한다.** 덱의 첫 카드가 달라지는 것으로 보면
+      RPC가 끝나기 전에 화면을 옮겨 그 사실이 반영되지 않은 채 단정할 수 있다.
+    */
+    const qId = first?.replace('review-card-', '');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-notebook').click();
+    const more = page.getByTestId('notebook-more');
+    if ((await more.count()) > 0) await more.click();
+    await expect(page.getByTestId(`note-due-${qId}`)).toContainText('내일 다시 만나요');
+  });
+
+  test('확인하기 전에는 정답이 보이지 않는다', async ({ page }) => {
+    /*
+      해설을 먼저 열면 인출이 일어나지 않는다 — 인출은 재독보다 g=0.50 낫고, 교육 텍스트 재독은
+      유의한 이득이 거의 없다. 그리고 근거는 **정답을 보기 전에** 물어야 되짚을 수 있는 값이다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review-today').click();
+
+    await expect(page.getByTestId('review-feedback')).toHaveCount(0);
+    await expect(page.getByTestId('review-explanation')).toHaveCount(0);
+    // 정오 표식은 확인 뒤에만 붙는다
+    await expect(page.getByText('정답', { exact: true })).toHaveCount(0);
+
+    await page.getByTestId('review-choice-0').click();
+    // 답만 골라도 정답은 아직 없다
+    await expect(page.getByTestId('review-feedback')).toHaveCount(0);
+    await expect(page.getByTestId('review-guide')).toContainText('근거를 고르면 확인할 수 있어요.');
+
+    await page.getByTestId('review-evidence-choices').click();
+    await expect(page.getByTestId('review-guide')).toContainText('확인하면 답을 바꿀 수 없어요.');
+    await page.getByTestId('review-check').click();
+    await expect(page.getByTestId('review-feedback')).toBeVisible();
+  });
+
+  test('한 줄 정리는 확인한 뒤에 쓰고, 안 써도 넘어갈 수 있다', async ({ page }) => {
+    /*
+      자기설명은 피드백을 읽은 뒤에 뜻이 생긴다(g=0.55). 그런데 **쓰기를 강제하면 복습이 노동이
+      된다** — 한국에서 종이 오답노트가 실패한 단일 원인이 그것이다. 그래서 선택이다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review-today').click();
+
+    // 확인 전에는 한 줄 칸이 없다
+    await expect(page.getByTestId('review-recap')).toHaveCount(0);
+    await reviewCard(page);
+    await expect(page.getByText('내 말로 한 줄', { exact: true })).toBeVisible();
+    await expect(page.getByText('안 써도 괜찮아요. 다음 문제로 넘기면 저장돼요.')).toBeVisible();
+
+    await page.getByTestId('review-recap').fill('선지 3번이 지문 2단락과 어긋난다');
+    await actThenToast(page, () => page.getByTestId('review-recap-save').click(), '한 줄을 저장했어요');
+    await expect(page.getByTestId('review-recap-done')).toBeVisible();
+
+    // 안 쓴 카드도 그냥 넘어간다
+    await page.getByTestId('review-next').click();
+    await expect(page.getByTestId('review-recap')).toHaveCount(0);
+  });
+
+  test('복습을 끝내면 헷갈린 문항을 이름으로 말하고 오답노트로 보낸다', async ({ page }) => {
+    /*
+      예전 완료 요약은 `3개는 아직 헷갈려요. 별표를 달아 두면 집중 복습에서 다시 만나요.`라고만
+      했다 — 화면은 그 셋이 무엇인지 알고 있으면서 말하지 않고, 이미 지나간 화면에서 할 행동을
+      지시했다. 그 자리에서 별표를 달 장치도 없었다.
+
+      **오답노트와 카드 복습이 서로를 가리키지 않던 것**이 이 흐름의 가장 큰 끊김이었다(A-107).
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review-today').click();
+
+    /*
+      **덱이 그려지기를 기다린 뒤에 돈다.** `count()`는 기다리지 않으므로, 조회가 끝나기 전에
+      루프에 들어가면 첫 판정에서 0을 보고 곧바로 빠져나온다.
+    */
+    await expect(page.getByTestId('review-progress')).toBeVisible();
+    // 덱을 끝까지 돈다. 선지를 섞으므로 어느 것이 정답인지 테스트는 알 수 없다.
+    for (let guard = 0; guard < 12; guard++) {
+      if ((await page.getByTestId('review-choice-0').count()) === 0) break;
+      await reviewCard(page);
+      await page.getByTestId('review-next').click();
+    }
+
+    await expect(page.getByText('복습을 끝냈어요')).toBeVisible();
+    await expect(page.getByText(/\d+개를 다시 풀었고 \d+개를 맞혔어요\./)).toBeVisible();
+
+    // 틀린 것이 있으면 그 문항이 줄로 서고, 누르면 오답노트에서 맨 앞에 온다
+    const missed = page.getByTestId(/^review-missed-/);
+    if ((await missed.count()) > 0) {
+      await missed.first().click();
+      await expect(page).toHaveURL(/\/student\/notebook\?note=/);
+      await expect(page.getByText('오답노트', { exact: true })).toBeVisible();
+    }
+  });
+
+  test('오답노트가 다음 차례를 말하고 복습으로 가는 길을 준다', async ({ page }) => {
+    /*
+      **담아 둔 오답을 다시 열 이유가 화면 어디에도 없던 것**이 이 화면의 가장 큰 결함이었다.
+      담기는 결과 화면 1클릭인데 돌아오는 유인이 0이었다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-notebook').click();
+
+    await expect(page.getByTestId('notebook-to-review')).toBeVisible();
+    await expect(page.getByText('오늘 다시 볼 오답이 있어요')).toBeVisible();
+    // 노트마다 언제 다시 만나는지 말한다
+    await expect(page.getByText(/오늘 다시 볼 차례예요|다시 만나요|쉬고 있어요/).first()).toBeVisible();
+
+    await page.getByTestId('notebook-to-review').click();
+    await expect(page).toHaveURL(/\/student\/review/);
+  });
+
+  test('세 번 연속 틀린 문항은 쉬고, 다시 복습 목록에 넣을 수 있다', async ({ page }) => {
+    /*
+      명시적 탈출구가 없는 시스템은 leech를 쌓고 그것이 복습 자체를 그만두게 만든다. 그런데
+      **돌아올 문이 없으면 `stuck`은 조용한 삭제다** — 목록에 남아 있으면서 영원히 다시 나오지
+      않는다. seed에 그 상태의 노트가 하나 있다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-notebook').click();
+    // 상한(5개) 때문에 접혀 있을 수 있다 — 전부 펼친다
+    const more = page.getByTestId('notebook-more');
+    if ((await more.count()) > 0) await more.click();
+
+    await expect(page.getByText('지금은 복습 목록에서 쉬고 있어요').first()).toBeVisible();
+    await expect(
+      page.getByText(/세 번 연속 헷갈렸어요\./).first(),
+    ).toBeVisible();
+
+    const requeue = page.getByTestId(/^note-requeue-/).first();
+    await actThenToast(page, () => requeue.click(), '복습 목록에 다시 넣었어요. 내일 다시 만나요');
+    // 쉬고 있다는 문장이 사라진다(그 노트가 큐로 돌아갔다)
+    await expect(page.getByTestId(/^note-requeue-/)).toHaveCount(0);
+  });
+
+  test('홈이 오늘 다시 볼 오답을 말하고 복습으로 보낸다', async ({ page }) => {
+    /*
+      D-132는 홈에 오답노트로 가는 길을 두지 않기로 정했고, 근거는 "이미 푼 것을 다시 하라는 말이
+      오늘 할 일을 둘로 가른다"였다. **복습에 시점이 생기면 그것은 오늘 할 일이다** — 그래서
+      `확인할 것` 줄에 둔다(히어로에는 올리지 않는다: 마감이 오늘인 학원 과제를 밀어낸다).
+    */
+    await loginAs(page, 'yerin');
+    const due = page.getByTestId('home-review-due');
+    await expect(due).toBeVisible();
+    await expect(due).toContainText(/오늘 다시 볼 오답 \d+개가 있어요/);
+    await due.click();
+    await expect(page).toHaveURL(/\/student\/review/);
+  });
+
+  test('결과 화면에서 틀린 문항을 한 번에 담는다', async ({ page }) => {
+    /*
+      **문항당 1클릭이 유일한 길이었다.** 열 문항 중 일곱을 틀린 학생은 오답노트로 넘어가기 전에
+      일곱 번 눌러야 했고, 여기서 담지 않은 오답은 기록 탭에서 이 결과를 다시 열지 않으면 다시
+      담을 길이 없었다.
+    */
+    await loginAs(page, 'seojun');
+    await openFirstPersonal(page);
+    await page.getByTestId('detail-start').click();
+    await answerAll(page);
+    await page.getByTestId('solve-submit').click();
+
+    const all = page.getByTestId('result-note-all');
+    await expect(all).toBeVisible();
+    /*
+      **몇 개가 담기는지 먼저 세고 그 수를 단정한다.** 정규식으로 받으면 하나만 담겨도 통과한다 —
+      이 버튼의 뜻은 `모두`다.
+    */
+    const pending = await page.getByRole('checkbox', { name: '오답노트에 담기' }).count();
+    expect(pending).toBeGreaterThan(1);
+    await actThenToast(page, () => all.click(), `${pending}개를 오답노트에 담았어요`);
+
+    // 전부 담겼으므로 그 버튼은 사라진다(누를 대상이 없다)
+    await expect(page.getByTestId('result-note-all')).toHaveCount(0);
+    await expect(page.getByRole('checkbox', { name: '오답노트에 담기' })).toHaveCount(0);
+  });
+
+  test('같은 날 같은 카드를 두 번 복습하지 않는다', async ({ page }) => {
+    /*
+      **"서로 다른 세션"을 날짜로 정의한다.** 같은 날 반복해서 맞히면 졸업 조건 3회를 한 자리에서
+      만들 수 있고, 그러면 집중 반복이 분산 인출로 계산된다 — 문헌이 구분하는 바로 그 차이다
+      (같은 세션 3회는 1회 후 빼는 것과 차이가 없다).
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review-today').click();
+    await reviewCard(page);
+
+    // 같은 범위를 다시 열면 방금 푼 카드는 없다
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review').click();
+    await expect(page.getByText('전체 카드 복습')).toBeVisible();
+    // 오늘 이미 본 것은 범위를 고른 덱에서도 빠진다(눌러도 서버가 거부하는 카드를 두지 않는다)
+    await expect(page.getByTestId('review-progress')).toBeVisible();
+  });
+});
+
+/**
+ * 검토가 찾은 결함을 고친 자리. **회귀를 잡을 단정을 여기 둔다.**
+ *
+ * 여섯 관점(교육적 효과 · 수험생 UX · 반복 사용성 · 모바일 · 디자인 일관성 · 정확성·보안)의
+ * 검토에서 나온 것 중 화면으로 확인할 수 있는 것들이다. 서버 쪽은
+ * `scripts/verify-note-schedule.ts`(84 단정)가 맡는다.
+ */
+test.describe('오답 복습 — 검토 반영', () => {
+  test('범위 덱의 복습은 다음 차례를 앞당기지 않는다', async ({ page }) => {
+    /*
+      `담아 둔 오답 전체 보기`는 차례를 보지 않고 열린다(시험 직전에 범위를 넓게 돌아보는 것은
+      스케줄과 다른 목적이다). 그 복습이 일정을 전진시키면 **3일 연속 전체 복습으로 사다리를
+      3일로 압축해 전부 졸업**시킬 수 있었다 — 유니크 키가 날짜로 막으려던 바로 그 상태다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review').click();
+    await expect(page.getByText('전체 카드 복습')).toBeVisible();
+
+    // 차례가 오늘이 아닌 카드를 찾을 때까지 넘긴다(익힘 상태 노트가 시드에 있다)
+    let found = false;
+    for (let guard = 0; guard < 10; guard++) {
+      if ((await page.getByTestId('review-choice-0').count()) === 0) break;
+      await reviewCard(page);
+      const due = page.getByTestId('review-next-due');
+      if ((await due.textContent())?.includes('차례가 아닌 복습')) {
+        found = true;
+        break;
+      }
+      await page.getByTestId('review-next').click();
+    }
+    if (found) {
+      await expect(page.getByTestId('review-next-due')).toContainText(
+        '차례가 아닌 복습이라 다음 차례는 그대로예요.',
+      );
+    }
+  });
+
+  test('쉬는 문항은 어느 덱에도 오지 않고 오답노트 칸에서 찾는다', async ({ page }) => {
+    /*
+      서버가 `stuck` 노트의 복습을 받지 않는다. 덱에 넣으면 카드가 열리고 확인은 거부되며,
+      화면은 그 문항을 복습시키면서 `쉬고 있어요`라고 말한다 — 두 화면이 반대되는 사실을 말했다.
+
+      그리고 그 노트를 찾는 유일한 방법이 목록을 전부 펼쳐 훑는 것이었다(돌아오는 문이 그 카드
+      안에만 있는데). `쉬는 중` 칸을 뒀다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-notebook').click();
+
+    const stuckTab = page.getByRole('radio', { name: /쉬는 중/ });
+    await expect(stuckTab).toBeVisible();
+    await stuckTab.click();
+    await expect(page.getByText('지금은 복습 목록에서 쉬고 있어요').first()).toBeVisible();
+    await expect(page.getByTestId(/^note-requeue-/).first()).toBeVisible();
+  });
+
+  test('학습 탭이 한 화면에서 두 숫자를 말하지 않는다', async ({ page }) => {
+    /*
+      캡션이 상한을 적용하지 않은 원값을 말하면서 바로 아래 줄이 상한값을 말했다 — 서른 개가
+      밀린 학생이 `30개예요`와 `5개`를 위아래로 읽는다. 개수를 세는 곳은 `todayCount` 하나다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+
+    const caption = page.getByText(/오늘 다시 볼 오답이 \d+개예요\./);
+    await expect(caption).toBeVisible();
+    const n = Number(/(\d+)개/.exec((await caption.textContent()) ?? '')?.[1] ?? 0);
+    // 상한이 적용된 값이다
+    expect(n).toBeLessThanOrEqual(5);
+    // 바로 아래 줄이 같은 수를 말한다
+    await expect(page.getByTestId('learn-review-today')).toContainText(`오답 ${n}개`);
+  });
+
+  test('줄에 적힌 개수와 덱 개수가 같다', async ({ page }) => {
+    /*
+      `오답 60개`를 누른 학생이 `모두 55개`를 받았다 — 오늘 이미 본 것과 쉬는 것이 덱에서 빠지는데
+      그 사실이 어디에도 없었다. 개수는 덱을 만드는 같은 함수로 센다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    const row = page.getByTestId('learn-review');
+    const meta = /오답 (\d+)개/.exec((await row.textContent()) ?? '')?.[1];
+    await row.click();
+    await expect(page.getByTestId('review-progress')).toContainText(`모두 ${meta}개`);
+  });
+
+  test('한 줄을 저장하면 쓴 문장을 되보여 주고 오답노트에도 남는다', async ({ page }) => {
+    /*
+      자기설명을 쓰게 하고 다시 만날 자리를 주지 않으면 어디로 갔는지 모르는 입력이 된다.
+      저장한 값을 읽는 화면이 하나도 없었다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review-today').click();
+    await reviewCard(page);
+
+    await page.getByTestId('review-recap').fill('선지 2번이 지문 마지막 문장과 어긋난다');
+    await actThenToast(page, () => page.getByTestId('review-recap-save').click(), '한 줄을 저장했어요');
+    // 쓴 문장을 그대로 보여 준다
+    await expect(page.getByTestId('review-recap-done')).toContainText(
+      '선지 2번이 지문 마지막 문장과 어긋난다',
+    );
+
+    // 오답노트에서도 다시 만난다
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-notebook').click();
+    const more = page.getByTestId('notebook-more');
+    if ((await more.count()) > 0) await more.click();
+    await expect(
+      page.getByText('선지 2번이 지문 마지막 문장과 어긋난다').first(),
+    ).toBeVisible();
+  });
+
+  test('쓰고 저장하지 않은 한 줄을 넘길 때 버리지 않는다', async ({ page }) => {
+    /*
+      `한 줄은 선택이다`는 **쓰지 않아도 된다**는 뜻이고 쓴 것을 버려도 된다는 뜻이 아니다.
+      예전에는 `다음 문제`가 무조건 입력을 비웠다.
+    */
+    await loginAs(page, 'yerin');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review-today').click();
+    await reviewCard(page);
+
+    const card = await page.locator('[data-testid^="review-card-"]').getAttribute('data-testid');
+    await page.getByTestId('review-recap').fill('저장을 누르지 않고 넘긴다');
+    await expect(page.getByText('안 써도 괜찮아요. 다음 문제로 넘기면 저장돼요.')).toBeVisible();
+    await page.getByTestId('review-next').click();
+
+    // 오답노트에서 그 문장을 만난다
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-notebook').click();
+    const more = page.getByTestId('notebook-more');
+    if ((await more.count()) > 0) await more.click();
+    await expect(page.getByText('저장을 누르지 않고 넘긴다').first()).toBeVisible();
+    expect(card).toBeTruthy();
+  });
+
+  test('지문이 없는 문항에서는 근거를 다른 말로 묻는다', async ({ page }) => {
+    /*
+      문법 세트는 지문이 없는데 첫 선택지가 `지문에서 근거를 찾았어요`였다 — 뜻이 서지 않는 3택에서
+      학생은 아무거나 골라야 확인 버튼이 나타났고, 문법은 오답이 가장 많이 쌓이는 영역이다.
+    */
+    await loginAs(page, 'seojun');
+    await pickTopic(page, { grade: 1, area: '문법', topic: '어문 규정 - 맞춤법' });
+    await page.getByText('맞춤법 집중', { exact: false }).first().click();
+    await page.getByTestId('detail-start').click();
+    await answerAll(page);
+    await page.getByTestId('solve-submit').click();
+    await keepWrongNotes(page);
+
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review').click();
+    await page.getByTestId('review-choice-0').click();
+    await expect(page.getByText('어떻게 답을 골랐나요?')).toBeVisible();
+    await expect(page.getByTestId('review-evidence-passage')).toContainText('규칙을 알고 골랐어요');
+    await expect(page.getByText('지문에서 근거를 찾았어요')).toHaveCount(0);
+  });
+
 });

@@ -74,6 +74,8 @@ export default function ResultScreen() {
   const recommendations = useRecommendations(2);
   const [scope, setScope] = useState<'wrong' | 'all'>('wrong');
   const [showAllQuestions, setShowAllQuestions] = useState(false);
+  /** 일괄 담기가 도는 중. 여러 번 부르면 같은 문항을 두 번 담으려 해서 유니크에 걸린다. */
+  const [busyAll, setBusyAll] = useState(false);
   const { show } = useToast();
 
   const item = all.find((i) => i.id === id);
@@ -239,7 +241,60 @@ export default function ResultScreen() {
       show(added.error ?? '오답노트에 담지 못했어요', 'removed');
       return;
     }
-    show('문항을 오답노트에 담았어요');
+    /*
+      **되살린 것을 담았다고 말하지 않는다.** 예전에 담아 두었던 문항이면 서버가 스케줄을 그대로
+      보존하고 되살린다(D-033의 "없던 일") — 그 사실을 모른 학생은 오늘 복습에 나오리라
+      기대하지만 몇 주 뒤 차례일 수 있다. 서버가 `restored`로 알려 주는데 그것을 버리고 있었다.
+
+      새로 담은 것은 첫 차례가 내일이다(틀린 직후 같은 세션 재시험은 근거가 없다). 그 사실을
+      담는 순간 말하지 않으면 담은 날과 다음 날 사이가 비어 있는 것으로 읽힌다.
+    */
+    show(added.restored ? '오답노트에 다시 담았어요' : '오답노트에 담았어요. 내일 다시 만나요');
+  }
+
+  /**
+   * 틀린 문항을 한 번에 담는다.
+   *
+   * **문항당 1클릭이 유일한 길이었다.** 열 문항 중 일곱을 틀린 학생은 오답노트로 넘어가기 전에
+   * 일곱 번 눌러야 했고, 여기서 담지 않은 오답은 기록 탭에서 이 결과를 다시 열지 않으면 다시
+   * 담을 길이 없었다(그 경로는 이 화면에서 안내되지 않는다).
+   *
+   * **이미 담은 것은 건드리지 않는다.** 토글이 아니라 담기만 하는 행동이다 — 한 번 더 누르면
+   * 방금 담은 것이 전부 빠지는 버튼은 되돌리기 없이 파괴적이다(D-033).
+   *
+   * 하나라도 실패하면 몇 개가 담겼는지 그대로 말한다. 부분 성공을 전체 성공으로 말하지 않는다.
+   */
+  async function addAllWrong() {
+    if (busyAll) return;
+    const targets = wrong.filter(({ q }) => !hasNote(q.qId, item!.id));
+    if (targets.length === 0) return;
+    setBusyAll(true);
+    let added = 0;
+    let failed = 0;
+    for (const { q } of targets) {
+      const res = await addWrongNote({
+        questionId: q.qId,
+        contentId: content!.id,
+        source: item!.source,
+        assignmentId: item!.source === 'academy' ? item!.id : undefined,
+        pickedIndex: q.pickedIndex,
+      });
+      if (res.ok) added += 1;
+      else failed += 1;
+    }
+    setBusyAll(false);
+    if (readOnly) return;
+    if (failed > 0) {
+      show(
+        added > 0
+          ? `${added}개를 담았어요. ${failed}개는 담지 못했어요.`
+          : '오답노트에 담지 못했어요',
+        'removed',
+      );
+      return;
+    }
+    show(`${added}개를 오답노트에 담았어요`);
+
   }
 
   return (
@@ -351,6 +406,28 @@ export default function ResultScreen() {
           <AppText variant="caption" tone="secondary">
             담아 두면 오답노트에서 Scody AI와 함께 다시 볼 수 있어요.
           </AppText>
+          {/*
+            **아직 담지 않은 것이 둘 이상일 때만 둔다.** 하나뿐이면 그 줄의 토글을 누르는 것과
+            같은 수의 클릭이라 버튼이 늘어난 것 말고는 달라지는 것이 없다(§8 — 죽은 컨트롤을
+            만들지 않는다). 전부 담았으면 누를 대상이 없다.
+
+            **이 섹션에 딸린 행동이라 제목 옆이 아니라 목록 위에 둔다.** 제목 옆은 이미
+            `질문하고 메모하기`(다른 화면으로 가는 길)가 쓰고 있고, 둘을 나란히 두면 어느 것이
+            지금 할 일인지 흐려진다.
+
+            진행은 라벨로 말하고 버튼을 언마운트하지 않는다 — 웹에서 포커스된 요소가 사라지면
+            `<body>`로 떨어진다(A-130).
+          */}
+          {wrong.filter(({ q }) => !hasNote(q.qId, item.id)).length > 1 ? (
+            <Button
+              testID="result-note-all"
+              variant="secondary"
+              tone="accent"
+              hug
+              label={busyAll ? '담는 중이에요' : '틀린 문항 모두 담기'}
+              onPress={() => void addAllWrong()}
+            />
+          ) : null}
           {/*
             **알리는 시점이 담기 뒤가 아니라 앞이어야 한다.** 같은 문장이 오답노트 화면에도
             있지만(D-110) 그때는 이미 담은 뒤다. 무엇이 공개되는지 모른 채 담게 두지 않는다.

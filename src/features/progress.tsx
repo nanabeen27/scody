@@ -12,9 +12,12 @@ import type { Assignment, LearningItem } from '@/data';
 import type { Account } from '@/data/types';
 import { errorMessage } from '@/lib/supabase';
 import * as repo from '@/repo/learning';
+import * as notesRepo from '@/repo/notes';
+import type { LoggedReview, NoteEvidence, NoteReview } from '@/repo/notes';
 import * as parentRepo from '@/repo/parent';
 import { useSession } from '@/session';
 import { useAcademyStaff } from './academy';
+import { addDaysISO, todayISO } from './clock';
 
 /**
  * 학습 기록 경계: 풀이 · 오답노트 · 담아 둔 학습 · 배정 · 학부모 기능.
@@ -148,13 +151,38 @@ interface ProgressValue {
     source: 'personal' | 'academy';
     assignmentId?: string;
     pickedIndex?: number;
-  }) => Promise<WriteResult>;
+    /** 이미 담아 두었던 문항을 되살렸는지. 화면이 무엇을 말할지 갈린다(D-033). */
+  }) => Promise<WriteResult & { restored?: boolean }>;
   removeWrongNote: (id: string) => Promise<WriteResult>;
   /** 지운 오답을 되돌린다(D-033). 메모·별표도 함께 살아난다. */
   restoreWrongNote: (note: WrongNote, index: number) => Promise<WriteResult>;
   setDig: (id: string, text: string) => Promise<WriteResult>;
   toggleStar: (id: string) => Promise<WriteResult>;
-  setMastered: (id: string, value: boolean) => Promise<WriteResult>;
+  /**
+   * 노트별 복습 기록. 대리 보기에서는 `recap`이 가려진다.
+   *
+   * **`mastered`를 바꾸는 함수는 없다.** 자기 신고는 실제 성과와 무상관이고(Karpicke &
+   * Roediger 2008) 그 값은 어떤 화면도 바꾸지 않았다(A-087). 숙달은 이 기록이 말한다.
+   */
+  noteReviews: Record<string, NoteReview[]>;
+  /**
+   * 다시 풀어 본 사실을 남기고 결과를 서버에서 받는다.
+   *
+   * **정오를 화면이 정하지 않는다** — 고른 자리만 보내고 서버가 채점한다(0040). 돌려주는
+   * `review`에 정오·서버 날짜·스케줄을 움직였는지가 실려 온다.
+   */
+  logCard: (input: {
+    noteId: string;
+    pickedIndex: number;
+    evidence?: NoteEvidence;
+    recap?: string;
+  }) => Promise<WriteResult & { review?: LoggedReview }>;
+  /** 차례가 온 문항을 하루 미룬다. 건너뛰기가 부른다. */
+  deferNote: (id: string) => Promise<WriteResult>;
+  /** 오늘 복습에 한 줄 정리를 채운다. 확인을 누른 뒤에 쓰는 값이라 `logCard`와 시점이 다르다. */
+  setRecap: (noteId: string, recap: string) => Promise<WriteResult>;
+  /** 멈춘 문항을 다시 복습 목록에 넣는다. */
+  requeueNote: (id: string) => Promise<WriteResult>;
   /** 그 문항을 이 학습에서 이미 담았는지. 학습이 다르면 따로 센다. */
   hasNote: (questionId: string, itemId: string) => boolean;
   /** 학원이 볼 수 있는 오답노트: 담당 반 학생의 배정 학습 오답만. */
@@ -211,9 +239,14 @@ const ProgressContext = createContext<ProgressValue | null>(null);
  * **한곳에 둔다.** 예전에는 같은 식이 `wrongNotes`·`wrongNotesOf`·`academyNotesOf` 세 곳에
  * 복제돼 있었고, 그중 하나(`academyNotesOf`)에 빠진 것이 D-159가 고친 결함이었다. 가리는 필드가
  * 하나 늘거나 조건이 넓어질 때 세 자리를 다 찾지 않아도 되게 한다.
+ *
+ * **가린 것과 없는 것을 구분한다.** 값만 지우면 화면이 "아직 정리하지 않았어요"로 단정한다 —
+ * 실제로 여덟 개 중 다섯 개를 정리해 둔 학생의 오답노트를 운영자가 대리로 열면
+ * `8개 중 8개는 아직 정리하지 않았어요`가 나왔다(거짓을 사실처럼 말한 자리다). `digHidden`이
+ * 그 차이를 화면에 넘긴다.
  */
-function maskDig<T extends { dig?: string }>(notes: T[], hide: boolean): T[] {
-  return hide ? notes.map((n) => ({ ...n, dig: undefined })) : notes;
+function maskDig<T extends { dig?: string; digHidden?: boolean }>(notes: T[], hide: boolean): T[] {
+  return hide ? notes.map((n) => ({ ...n, dig: undefined, digHidden: true })) : notes;
 }
 
 const NO_ATTEMPTS: Record<string, Attempt> = {};
@@ -249,6 +282,11 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   const [attemptsByUser, setAttemptsByUser] = useState<Record<string, Record<string, Attempt>>>({});
   const [notesByUser, setNotesByUser] = useState<Record<string, WrongNote[]>>({});
   const [academyNotes, setAcademyNotes] = useState<Record<string, AcademyNote[]>>({});
+  /**
+   * 노트별 복습 기록. **오늘 본 것이 곧 진행이다** — 서버가 하루 한 노트 한 행만 허용하므로
+   * 세션 진행을 따로 저장할 자리가 없다(A-114를 이 값으로 닫는다).
+   */
+  const [noteReviews, setNoteReviews] = useState<Record<string, NoteReview[]>>({});
   const [retryByUser, setRetryByUser] = useState<Record<string, string[]>>({});
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -313,6 +351,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       setAttemptsByUser({});
       setNotesByUser({});
       setAcademyNotes({});
+      setNoteReviews({});
       setRetryByUser({});
       setQueue([]);
       setAssignments([]);
@@ -334,7 +373,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     setReading(true);
     try {
       const isAcademy = target.roles.includes('academy');
-      const [attemptRows, notes, retry, q, asgn, summaries, praises, aNotes] = await Promise.all([
+      const [attemptRows, notes, retry, q, asgn, summaries, praises, aNotes, reviews] =
+        await Promise.all([
         repo.loadAttempts(),
         repo.loadNotes(),
         parentRepo.loadRetryRequests(),
@@ -343,6 +383,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         parentRepo.loadWeekSummaries(),
         parentRepo.loadPraises(),
         isAcademy ? repo.loadAcademyNotes() : Promise.resolve({}),
+        notesRepo.loadNoteReviews(),
       ]);
       if (!alive()) return await awaitSuccessor(id);
       setAttemptsByUser(attemptRows);
@@ -353,6 +394,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       setWeekSummaries(summaries);
       setPraiseByChild(praises);
       setAcademyNotes(aNotes);
+      setNoteReviews(reviews);
       /*
         반 비교는 **기록을 읽을 수 있는 학생마다** 한 번씩 받는다(본인 + 연결된 자녀).
         제출한 학원 과제가 있는 학생만 대상이다 — 없으면 빈 객체가 온다.
@@ -453,6 +495,21 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     의미가 없다 — 학부모·학원 화면이 이 함수로 자녀·학생 노트를 읽는다(실측: `parent/attempt`,
     `academy/classes/student/[id]`). 운영자가 대리 보기로 들어오면 그 경로도 열린다.
   */
+  /**
+   * 복습 기록. **`recap`도 학생이 쓴 글이라 `dig`와 같은 규칙으로 가린다**(D-071 · D-159).
+   *
+   * 가린 것과 없는 것을 구분해야 하므로 행을 지우지 않는다 — 개수·정오·날짜는 남고 본문만
+   * 사라진다. 복습을 몇 번 했는지는 화면이 계속 셀 수 있어야 한다.
+   */
+  const visibleReviews = useMemo(() => {
+    if (!readOnly) return noteReviews;
+    const out: Record<string, NoteReview[]> = {};
+    for (const [id, rows] of Object.entries(noteReviews)) {
+      out[id] = rows.map((r) => ({ ...r, recap: undefined, recapHidden: true }));
+    }
+    return out;
+  }, [noteReviews, readOnly]);
+
   const wrongNotesOf = useCallback(
     (studentId: string) => maskDig(notesByUser[studentId] ?? NO_NOTES, readOnly),
     [notesByUser, readOnly],
@@ -638,7 +695,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   const patchNote = useCallback(
     (
       id: string,
-      fields: { dig?: string; starred?: boolean; mastered?: boolean },
+      fields: { dig?: string; starred?: boolean },
     ): Promise<WriteResult> =>
       mutateLocal(
         () => {
@@ -660,9 +717,117 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     },
     [patchNote, rawNotes],
   );
-  const setMastered = useCallback(
-    (id: string, value: boolean) => patchNote(id, { mastered: value }),
-    [patchNote],
+  /**
+   * 복습 한 장의 결과를 남긴다.
+   *
+   * 서버가 다음 차례를 정해 돌려주므로 **재조회를 기다리지 않고** 그 값으로 화면을 맞춘다.
+   * 실패하면 다시 읽어 되돌린다 — 스케줄을 화면이 추측해서 그리면 서버 규칙과 어긋난다.
+   */
+  const logCard = useCallback<ProgressValue['logCard']>(
+    (input) =>
+      write(async () => {
+        if (denied) return DENIED;
+        const result = await notesRepo.logNoteReview(input);
+        if (!result.ok) return result;
+        const next = result.review;
+        /*
+          **서버 날짜를 쓴다.** 기기 로컬 날짜로 "오늘 본 것"을 판정하면 시간대가 KST와 다른
+          기기에서 어긋나 큐에는 보이는데 어떤 복습도 받지 못하는 카드가 생긴다.
+        */
+        const on = next?.reviewedOn ?? todayISO();
+        setNoteReviews((prev) => ({
+          ...prev,
+          [input.noteId]: [
+            ...(prev[input.noteId] ?? []),
+            {
+              id: `local_${input.noteId}_${on}`,
+              noteId: input.noteId,
+              reviewedOn: on,
+              pickedIndex: input.pickedIndex,
+              isCorrect: next?.isCorrect ?? false,
+              evidence: input.evidence,
+              recap: input.recap,
+            },
+          ],
+        }));
+        /*
+          **차례가 아닌 복습은 스케줄을 움직이지 않는다**(`scheduled: false`). 별표·영역·전체
+          덱은 차례를 보지 않고 열리므로, 그 복습이 일정을 전진시키면 3일 연속 전체 복습으로
+          사다리를 압축해 전부 졸업시킬 수 있다(0040).
+        */
+        if (next?.scheduled) {
+          setNotesByUser((prev) => ({
+            ...prev,
+            [uid]: (prev[uid] ?? []).map((w) =>
+              w.id === input.noteId
+                ? {
+                    ...w,
+                    state: next.state,
+                    dueOn: next.dueOn ?? undefined,
+                    streak: next.streak,
+                    missStreak: next.missStreak,
+                  }
+                : w,
+            ),
+          }));
+        }
+        return result;
+      }),
+    [denied, uid, write],
+  );
+
+  const deferNote = useCallback<ProgressValue['deferNote']>(
+    (id) =>
+      write(async () => {
+        if (denied) return DENIED;
+        const result = await notesRepo.deferNote(id);
+        if (!result.ok) return result;
+        if (result.dueOn) {
+          setNotesByUser((prev) => ({
+            ...prev,
+            [uid]: (prev[uid] ?? []).map((w) => (w.id === id ? { ...w, dueOn: result.dueOn } : w)),
+          }));
+        }
+        return result;
+      }),
+    [denied, uid, write],
+  );
+
+  const setRecap = useCallback<ProgressValue['setRecap']>(
+    (noteId, recap) =>
+      write(async () => {
+        if (denied) return DENIED;
+        const result = await notesRepo.setReviewRecap(noteId, recap);
+        if (!result.ok) return result;
+        setNoteReviews((prev) => ({
+          ...prev,
+          [noteId]: (prev[noteId] ?? []).map((r) =>
+            r.reviewedOn === todayISO() ? { ...r, recap: recap.trim() || undefined } : r,
+          ),
+        }));
+        return result;
+      }),
+    [denied, write],
+  );
+
+  const requeueNote = useCallback<ProgressValue['requeueNote']>(
+    (id) =>
+      write(async () => {
+        if (denied) return DENIED;
+        const result = await notesRepo.requeueNote(id);
+        if (!result.ok) return result;
+        // 서버가 `queued · 내일 · miss_streak 0`으로 맞춘다. 같은 값을 화면에 얹는다.
+        setNotesByUser((prev) => ({
+          ...prev,
+          [uid]: (prev[uid] ?? []).map((w) =>
+            w.id === id
+              ? { ...w, state: 'queued', dueOn: addDaysISO(todayISO(), 1), missStreak: 0 }
+              : w,
+          ),
+        }));
+        return result;
+      }),
+    [denied, uid, write],
   );
 
   const addToQueue = useCallback<ProgressValue['addToQueue']>(
@@ -833,7 +998,11 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       restoreWrongNote,
       setDig,
       toggleStar,
-      setMastered,
+      noteReviews: visibleReviews,
+      logCard,
+      deferNote,
+      setRecap,
+      requeueNote,
       hasNote,
       academyNotesOf,
       comparisonsOf,
@@ -873,7 +1042,11 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       restoreWrongNote,
       setDig,
       toggleStar,
-      setMastered,
+      visibleReviews,
+      logCard,
+      deferNote,
+      setRecap,
+      requeueNote,
       hasNote,
       academyNotesOf,
       comparisonsOf,

@@ -183,3 +183,23 @@ export interface Assignment {
   contentId?: string;
   submissions: Submission[];
 }
+
+/**
+ * 오답 복습의 스케줄 상태. DB의 `public.note_state`와 값이 같다.
+ *
+ * - `queued` — 다시 볼 차례가 정해져 있다.
+ * - `graduated` — 서로 다른 날 3회 연속으로 맞혔다. 큐에서 빠지지 않고 유지 복습으로 돌아온다.
+ * - `stuck` — 서로 다른 날 3회 연속으로 틀렸다. 큐에서 내리고 화면이 다른 길로 넘긴다.
+ *
+ * **지움은 이 값이 아니다** — `dismissed_at`이 따로 있다. 지움을 상태로 두면 되돌릴 때 무엇으로
+ * 돌아갈지가 사라진다(D-033의 "없던 일"이 성립하지 않는다).
+ */
+export type NoteState = 'queued' | 'graduated' | 'stuck';
+
+/**
+ * 답의 근거를 어디서 잡았는가. DB의 `public.note_evidence`와 값이 같다.
+ *
+ * 국어에서 「선지 vs 지문」 구분이 다음에 할 일을 가른다. **답을 확인하기 전에 묻는다** —
+ * 확인한 뒤에는 되짚을 수 없는 값이다.
+ */
+export type NoteEvidence = 'passage' | 'choices' | 'unsure';

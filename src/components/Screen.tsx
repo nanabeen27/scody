@@ -81,6 +81,24 @@ export function Screen({
       ref={scrollRef}
       testID={testID}
       style={styles.scroll}
+      /*
+        **키보드가 떠 있을 때의 첫 탭을 삼키지 않는다.**
+
+        RN `ScrollView`의 `keyboardShouldPersistTaps` 기본값은 `'never'`라, 키보드가 올라와 있으면
+        자식에게 닿는 첫 탭이 키보드를 닫는 데 쓰이고 `onPress`가 발화하지 않는다. 카드 복습의
+        `내 말로 한 줄`과 오답노트의 노트별 질문 입력이 정확히 그 자리다 — 학생이 저장을 누르면
+        첫 탭에는 아무 일이 없고 키보드만 닫힌다. 한 줄은 선택 입력이라 실패해도 조용해서, 저장이
+        안 된 줄 모르고 다음으로 넘기면 그 문장이 사라진다.
+
+        `automaticallyAdjustKeyboardInsets`는 iOS에서 포커스된 입력이 키보드에 가리지 않게 스크롤
+        여백을 붙인다. 웹에서는 react-native-web이 이 두 prop을 구현하지 않고 브라우저가 대신
+        처리하므로 영향이 없다.
+
+        이 화면 밖에 입력을 두는 유일한 예외는 AI 대화 화면이고(§17-1) 그쪽은 `Screen`을 쓰지
+        않는다.
+      */
+      keyboardShouldPersistTaps="handled"
+      automaticallyAdjustKeyboardInsets
       contentContainerStyle={[
         styles.content,
         {

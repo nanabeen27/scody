@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { View, Pressable, StyleSheet } from 'react-native';
 import {
@@ -20,6 +20,7 @@ import { useCurrentAccount, useSession } from '@/session';
 import { useStudentItems, useQueuedItems, byDue, dueLabel } from '@/features/learning';
 import { useContent } from '@/features/content';
 import { useProgress, PRAISE_LABEL } from '@/features/progress';
+import { todayCount } from '@/features/review';
 import { todayISO } from '@/features/clock';
 import { useToast } from '@/features/toast';
 import { useResponsive } from '@/theme/useResponsive';
@@ -314,6 +315,20 @@ export default function StudentHome() {
   */
   /** 오답노트에 담아 둔 것이 있을 때만 오답 복습을 가리킬 수 있다. */
   const canReview = wrongNotes.length > 0;
+  /**
+   * 오늘 차례가 온 오답 수. **홈에 복습을 두는 근거가 이 값이다.**
+   *
+   * D-132는 홈에 오답노트로 가는 길을 두지 않기로 정했고, 근거는 "이미 푼 것을 다시 하라는 말이
+   * 오늘 할 일 아래에 붙으면 오늘 할 일이 둘로 갈린다"였다. **그 근거는 복습에 시점이 없을 때
+   * 성립한다** — 아무 때나 해도 되는 일은 오늘 할 일이 아니다. 서버가 정한 차례가 오늘이면
+   * 그것은 오늘 할 일이고, D-170이 정한 것도 히어로의 순서를 정하는 것은 출처가 아니라 마감이라는
+   * 규칙이다.
+   *
+   * **그래도 히어로에는 올리지 않는다.** 히어로는 하나이고, 복습이 그 자리를 차지하면 마감이 오늘인
+   * 학원 과제를 밀어낼 수 있다. `확인할 것` 줄에 둔다 — 화면 맨 위는 확인할 것이고 그 아래가
+   * 할 일이라는 이 화면의 위계를 그대로 쓴다.
+   */
+  const dueToday = useMemo(() => todayCount(wrongNotes, todayISO()), [wrongNotes]);
   /** 새로 고를 수 없는 계정에 그 이유(또는 지금 기다리는 것)를 말하는 한 줄. */
   const noPickReason = account.academyName
     ? '학원에서 과제를 내주면 여기에서 알려 줘요.'
@@ -403,6 +418,43 @@ export default function StudentHome() {
               : '아직 시작하지 않은 과제가 있어요'}
           </AppText>
         </View>
+      ) : null}
+
+      {/*
+        **오늘 차례가 온 오답.** 담기는 1클릭인데 돌아올 이유가 화면 어디에도 없던 것이 이
+        흐름의 가장 큰 결함이었다 — 남은 과제가 하나라도 있으면 홈은 오답을 한 글자도 말하지
+        않았고, 학습 탭 세 번째 섹션까지 스크롤해야 `오답 20개`를 만났다.
+
+        **개수는 밀린 것을 앞세우지 않는다.** 서른 개가 밀려도 오늘 볼 것은 하루 상한까지다 —
+        「37개 밀렸어요」는 겁주는 문장이고, 큐를 정직하게 쌓아 둔 서비스에서 반복 관찰된 이탈
+        원인이다. 위 학원 과제 줄과 같은 모양의 조용한 한 줄로 둔다(카드로 만들지 않는다).
+      */}
+      {ready && dueToday > 0 ? (
+        /*
+          **글자 한 줄인 링크는 `tap.textLine`으로 44를 만든다**(§10 · D-166). 캡션 한 줄의 높이는
+          약 20px이고, 이 줄은 홈에서 카드 복습으로 가는 두 진입점 중 하나다 — 손가락으로 조준할
+          수 없으면 없는 것과 같다. 음수 마진이 늘어난 높이를 되돌리므로 덩어리 여백은 그대로다.
+
+          **위아래 두 줄(칭찬·새 과제)은 눌리지 않는다.** 같은 모양이면 학생은 이 줄이 눌린다는
+          것을 모른다 — 이동 표시를 오른쪽 끝에 둔다(§8).
+        */
+        <Pressable
+          testID="home-review-due"
+          accessibilityRole="link"
+          accessibilityLabel={`오늘 다시 볼 오답 ${dueToday}개, 카드 복습으로 가기`}
+          onPress={() => router.push('/student/review' as never)}
+          style={({ pressed }) => [
+            styles.notice,
+            tap.textLine,
+            pressed && { backgroundColor: colors.hover },
+          ]}
+        >
+          <Icon name="refresh-cw" size={15} color={colors.accent} />
+          <AppText variant="caption" tone="accent" style={styles.noticeText}>
+            오늘 다시 볼 오답 {dueToday}개가 있어요
+          </AppText>
+          <Icon name="chevron-right" size={14} color={colors.accent} />
+        </Pressable>
       ) : null}
 
       {/*

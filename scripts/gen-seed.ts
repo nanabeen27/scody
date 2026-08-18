@@ -105,6 +105,13 @@ function arr(values: readonly string[]): string {
 }
 
 /** 원본 고정 날짜 → seed 실행일 기준 상대 날짜 SQL. */
+/** 오늘부터 며칠 뒤/전인가. 복습 스케줄은 `ANCHOR`가 아니라 실제 오늘이 기준이다. */
+function daysFromToday(iso: string): number {
+  const now = new Date();
+  const todayUTC = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((Date.parse(`${iso}T00:00:00Z`) - todayUTC) / 86_400_000);
+}
+
 function day(iso: string): string {
   const diff = Math.round(
     (Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${ANCHOR}T00:00:00Z`)) / 86_400_000,
@@ -425,6 +432,11 @@ w(
     'public.praises',
     'public.retry_requests',
     'public.study_queue',
+    /*
+      `wrong_notes`의 cascade가 자식을 함께 지우지만 **명시한다** — FK가 바뀌면 조용히 남고,
+      목록을 읽는 사람이 이 표의 존재를 알아야 한다.
+    */
+    'public.note_reviews',
     'public.wrong_notes',
     'public.answer_drafts',
     'public.attempt_answers',
@@ -955,8 +967,20 @@ w(`-- ── 오답노트 ${noteRows.length}건 ──────────�
 w(`--`);
 w(`-- 학원 배정에서 나온 오답은 \`assignment_id\`를 채운다 — 학원 열람 경계가 그 값으로 출처를`);
 w(`-- 되짚는다. 개인 학습 오답은 비워 둔다.`);
+w(`--`);
+w(`-- ## 복습 스케줄을 seed가 직접 쓴다`);
+w(`--`);
+w(`-- 0037의 가드 트리거는 INSERT의 스케줄 값을 무조건 \`queued · 내일\`로 덮는다(클라이언트가`);
+w(`-- 자기 일정을 정하지 못하게 하는 장치다). 그대로 두면 **seed를 넣은 직후 오늘 볼 오답이`);
+w(`-- 0개**가 되어, 학생 홈·학습 탭·카드 복습을 화면에서 확인할 수 없다.`);
+w(`--`);
+w(`-- 그래서 서버 플래그를 세우고 값을 직접 넣는다. \`is_local = false\`(세션 범위)를 쓰는 것은`);
+w(`-- 이 파일이 한 트랜잭션인지에 기대지 않으려는 것이다 — **끝에서 반드시 되돌린다.**`);
+w(`-- RPC 안에서는 절대 세션 범위로 세우지 않는다(PostgREST가 연결을 재사용하므로 그 연결에서`);
+w(`-- 가드가 영구히 꺼진다).`);
+w(`select set_config('scody.note_schedule', 'on', false);`);
 w(
-  `insert into public.wrong_notes (id, student_id, question_id, content_set_id, source, assignment_id, picked_index, dig, starred, mastered, created_at) values`,
+  `insert into public.wrong_notes (id, student_id, question_id, content_set_id, source, assignment_id, picked_index, dig, starred, mastered, created_at, state, due_on, streak, miss_streak) values`,
 );
 w(
   noteRows
@@ -967,12 +991,63 @@ w(
         (found ? (found.q.answerIndex + 1) % found.q.choices.length : 0);
       // 학원 학습의 `itemId`는 배정 id다(`li_`로 시작하지 않는다).
       const assignment = note.source === 'academy' ? q(uuidFor(note.itemId)) : 'null';
-      return `  (${q(uuidFor(`wn_${studentId}_${note.id}`))}, ${q(uuidFor(studentId))}, ${q(uuidFor(note.qId))}, ${q(uuidFor(note.contentId))}, ${q(note.source)}, ${assignment}, ${picked}, ${qn(note.dig)}, ${note.starred ? 'true' : 'false'}, ${note.mastered ? 'true' : 'false'}, (${day(note.createdAt)})::timestamptz)`;
+      /*
+        **다시 볼 날은 `day()`로 옮기지 않는다.** 그 함수는 원본 시드가 '오늘'로 삼았던 날
+        (`ANCHOR`)로부터의 간격을 계산하는데, 스케줄의 `dueOn`은 **실제 오늘**에서 파생된
+        값이라(`WRONG_NOTES_SEED`) 두 기준이 섞이면 며칠씩 어긋난다. 오늘로부터의 간격을
+        직접 센다.
+      */
+      const dueDays = note.dueOn ? daysFromToday(note.dueOn) : 0;
+      const dueSql =
+        note.state === 'stuck'
+          ? 'null'
+          : `(current_date ${dueDays >= 0 ? '+' : '-'} ${Math.abs(dueDays)})::date`;
+      return `  (${q(uuidFor(`wn_${studentId}_${note.id}`))}, ${q(uuidFor(studentId))}, ${q(uuidFor(note.qId))}, ${q(uuidFor(note.contentId))}, ${q(note.source)}, ${assignment}, ${picked}, ${qn(note.dig)}, ${note.starred ? 'true' : 'false'}, ${note.mastered ? 'true' : 'false'}, (${day(note.createdAt)})::timestamptz, ${q(note.state)}, ${dueSql}, ${note.streak}, ${note.missStreak})`;
     })
     .join(',\n'),
 );
 w(`;`);
+w(`select set_config('scody.note_schedule', '', false);`);
 w();
+
+// ── 복습 기록 ────────────────────────────────────────────────────────────────
+
+const reviewRows = noteRows.flatMap(({ studentId, note }) =>
+  note.reviews.map((r) => ({ studentId, note, r })),
+);
+if (reviewRows.length > 0) {
+  w(`-- ── 복습 기록 ──────────────────────────────────────────────────────────`);
+  w(`--`);
+  w(`-- **상태를 주장하면 근거 행이 있어야 한다.** \`state = 'graduated'\`는 "서로 다른 날 세 번`);
+  w(`-- 맞혔다"는 주장이고, 그 근거가 이 표다. 없으면 화면의 \`지금까지 N번 다시 풀었어요\`가`);
+  w(`-- 어떤 카드에도 뜨지 않고 시드가 스스로와 모순된다.`);
+  w(`--`);
+  w(`-- \`note_reviews\`에는 쓰기 정책이 없다(0037). 트리거는 \`after insert\`라 막지 않지만,`);
+  w(`-- 여기서 넣는 것은 소유자 권한이므로 정책을 지나지 않는다. 활동 이벤트 트리거만 끈다 —`);
+  w(`-- 이벤트는 아래에서 실제 날짜에 맞춰 직접 넣는다.`);
+  w(`alter table public.note_reviews disable trigger note_reviews_event;`);
+  w(
+    `insert into public.note_reviews (note_id, student_id, reviewed_on, picked_index, is_correct, evidence, recap) values`,
+  );
+  w(
+    reviewRows
+      .map(({ studentId, note, r }) => {
+        const found = questionByOldId.get(note.qId);
+        const answer = found ? found.q.answerIndex : 0;
+        // 정오는 고른 답과 정답의 관계다 — 서버가 그렇게 판정한다(0040).
+        const picked = r.correct ? answer : (answer + 1) % (found?.q.choices.length ?? 4);
+        return `  (${q(uuidFor(`wn_${studentId}_${note.id}`))}, ${q(uuidFor(studentId))}, (current_date ${
+          daysFromToday(r.on) >= 0 ? '+' : '-'
+        } ${Math.abs(daysFromToday(r.on))})::date, ${picked}, ${r.correct ? 'true' : 'false'}, ${
+          r.evidence ? q(r.evidence) : 'null'
+        }, ${qn(r.recap)})`;
+      })
+      .join(',\n'),
+  );
+  w(`;`);
+  w(`alter table public.note_reviews enable trigger note_reviews_event;`);
+  w();
+}
 
 // ── 활동 이벤트 ──────────────────────────────────────────────────────────────
 
@@ -992,12 +1067,21 @@ w(
       ({ studentId, note }) =>
         `  (${q(uuidFor(studentId))}, ${day(note.createdAt)}, 'note_added', ${q(uuidFor(`wn_${studentId}_${note.id}`))})`,
     ),
-    ...noteRows
-      .filter(({ note }) => note.mastered)
-      .map(
-        ({ studentId, note }) =>
-          `  (${q(uuidFor(studentId))}, ${day(note.createdAt)}, 'review_done', ${q(uuidFor(`wn_${studentId}_${note.id}`))})`,
+    /*
+      **`review_done`은 이제 다시 풀어 본 횟수다**(0037). 예전에는 `mastered`(이해했다고 누른
+      값)에서 만들었는데 그 트리거가 사라졌다. 하루에 한 번만 센다 — 한 세션에서 다섯 장을
+      풀면 복습을 다섯 번 한 것이 아니라 하루 복습을 한 것이다.
+    */
+    ...Array.from(
+      new Set(
+        reviewRows.map(
+          ({ studentId, r }) =>
+            `  (${q(uuidFor(studentId))}, (current_date ${
+              daysFromToday(r.on) >= 0 ? '+' : '-'
+            } ${Math.abs(daysFromToday(r.on))})::date, 'review_done', null)`,
+        ),
       ),
+    ),
   ].join(',\n'),
 );
 w(`;`);

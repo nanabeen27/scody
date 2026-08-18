@@ -29,6 +29,14 @@ interface Props {
   testID?: string;
   sendTestID?: string;
   accessibilityLabel?: string;
+  /**
+   * 보내기 버튼의 읽히는 이름. 기본은 `물어보기`다.
+   *
+   * **AI에게 묻는 것이 아닌 자리에서는 반드시 넘긴다.** 카드 복습의 `내 말로 한 줄`이 이
+   * 컴포넌트를 저장 입력으로 쓰는데, 이름이 고정이면 스크린리더 사용자가 자기 요약을 저장하려고
+   * `물어보기`를 누른다. 동사는 실제로 일어나는 일과 같아야 한다(§8 · D-043).
+   */
+  sendLabel?: string;
 }
 
 /**
@@ -70,6 +78,7 @@ export function AskField({
   testID,
   sendTestID,
   accessibilityLabel,
+  sendLabel = '물어보기',
 }: Props) {
   const [focused, setFocused] = useState(false);
   const [height, setHeight] = useState(MIN_H);
@@ -140,7 +149,7 @@ export function AskField({
         <Pressable
           testID={sendTestID}
           accessibilityRole="button"
-          accessibilityLabel="물어보기"
+          accessibilityLabel={sendLabel}
           disabled={!canSend || busy}
           onPress={send}
           style={({ pressed }) => [

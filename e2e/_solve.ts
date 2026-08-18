@@ -1,4 +1,4 @@
-import { type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 
 /**
  * 풀이 화면의 **보기** 라디오. 이름으로 고른다.
@@ -63,9 +63,42 @@ export async function pickTopic(
   await page.getByTestId(`learn-topic-${topic}`).click();
 }
 
-/** 결과 화면에서 아직 담지 않은 오답을 위에서부터 오답노트에 담는다. */
+/**
+ * 결과 화면에서 아직 담지 않은 오답을 위에서부터 오답노트에 담는다.
+ *
+ * **한 번 담긴 것을 확인한 뒤 다음을 누른다.** 예전에는 연속으로 눌렀는데, 담기가 서버를 한 번
+ * 지나는 동안 그 줄의 이름이 아직 `오답노트에 담기`라서 `.first()`가 **같은 줄**을 다시 집었다.
+ * 담기는 멱등이므로(`rpc_add_wrong_note`가 있으면 되살린다 — 지운 것을 다시 담는 길이다) 두 번째
+ * 클릭이 조용히 삼켜지고 두 개를 담은 줄 알았던 테스트가 하나만 얻었다.
+ *
+ * 기다림이 곧 단정이다 — 이 헬퍼를 쓰는 스펙은 담긴 개수를 전제로 하므로, 여기서 어긋나면
+ * 뒤에서 엉뚱한 자리가 실패한다.
+ */
 export async function keepWrongNotes(page: Page, count = 1) {
+  const saved = page.getByRole('checkbox', { name: '오답노트에서 빼기' });
   for (let i = 0; i < count; i++) {
+    const before = await saved.count();
     await page.getByRole('checkbox', { name: '오답노트에 담기' }).first().click();
+    await expect(saved).toHaveCount(before + 1);
   }
+}
+
+/**
+ * 카드 복습에서 카드 한 장을 끝낸다.
+ *
+ * **한 번의 클릭이 아니다.** 복습 한 장의 순서는 `답 고르기 → 근거 고르기 → 확인`이고, 근거는
+ * 답을 **확인하기 전에** 물어야 하는 값이라 단계를 합칠 수 없다(확인한 뒤에 물으면 정답을 본
+ * 다음의 답이 된다). 이 세 줄이 스펙 여러 곳에 복제되지 않게 여기 둔다.
+ *
+ * `slot`은 화면에 보이는 선지 자리다 — **원본 순서가 아니다.** 카드마다 선지를 섞으므로
+ * (`shuffleOrder`) 몇 번째가 정답인지는 테스트가 알 수 없다. 정오에 기대는 단정을 쓰지 않는다.
+ */
+export async function reviewCard(
+  page: Page,
+  { slot = 0, evidence = 'passage' }: { slot?: number; evidence?: 'passage' | 'choices' | 'unsure' } = {},
+) {
+  await page.getByTestId(`review-choice-${slot}`).click();
+  await page.getByTestId(`review-evidence-${evidence}`).click();
+  await page.getByTestId('review-check').click();
+  await page.getByTestId('review-feedback').waitFor();
 }

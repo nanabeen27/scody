@@ -20,7 +20,7 @@ import {
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
 import { useAcademyStaff } from '@/features/academy';
-import { useProgress, type WrongNote } from '@/features/progress';
+import { useProgress, type AcademyNote } from '@/features/progress';
 import { useToast } from '@/features/toast';
 import { todayISO } from '@/features/clock';
 import { dayAfter, dueLabel, formatDate, parseDueDate } from '@/features/learning';
@@ -79,7 +79,12 @@ interface NeedStudent {
 
 /** 배정 학습 오답노트 한 줄. 어느 학생·어느 과제에서 나왔는지 함께 들고 간다. */
 interface NoteRow {
-  note: WrongNote;
+  /**
+   * **`AcademyNote`다.** `academyNotesOf`가 투영해 준 값이고, 별표·이해 완료·고른 답·복습
+   * 스케줄이 없다(D-085 · 확정 정책 2절). `WrongNote`로 적으면 이 화면이 `note.dueOn` 같은
+   * 없는 값을 읽어도 컴파일이 서고 `undefined`가 조용히 흐른다 — D-085가 막으려던 종류다.
+   */
+  note: AcademyNote;
   studentId: string;
   studentName: string;
   taskId: string;

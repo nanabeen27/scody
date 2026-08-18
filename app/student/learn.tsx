@@ -13,6 +13,8 @@ import {
 } from '@/components';
 import { useContent } from '@/features/content';
 import { useProgress } from '@/features/progress';
+import { todayISO } from '@/features/clock';
+import { DAILY_CAP, scopedDeck, soonestDueDays, todayCount } from '@/features/review';
 import { useStudentItems, useQueuedItems, byTodoThenDue } from '@/features/learning';
 import { useCurrentAccount, useSession } from '@/session';
 import { spacing } from '@/theme/tokens';
@@ -38,6 +40,7 @@ export default function StudentLearn() {
   const queued = useQueuedItems();
   const {
     wrongNotes,
+    noteReviews,
     loading: progressLoading,
     loaded: progressLoaded,
     error: progressError,
@@ -92,7 +95,30 @@ export default function StudentLearn() {
 
   const hasQueue = queued.items.length > 0;
 
-  const starred = wrongNotes.filter((n) => n.starred).length;
+  /**
+   * 각 줄이 실제로 열 덱. **줄에 적는 개수와 덱 개수가 같아야 한다.**
+   *
+   * 범위 덱은 오늘 이미 본 것과 쉬는 것을 뺀다(서버가 그 노트의 복습을 받지 않는다). 그러지
+   * 않으면 `오답 60개`를 누른 학생이 `모두 55개`를 받고 왜 다른지 알 길이 없다.
+   */
+  const allDeck = useMemo(
+    () => scopedDeck(wrongNotes, noteReviews, {}, todayISO()),
+    [wrongNotes, noteReviews],
+  );
+  const starredDeck = useMemo(
+    () => scopedDeck(wrongNotes, noteReviews, { onlyStarred: true }, todayISO()),
+    [wrongNotes, noteReviews],
+  );
+  /** 화면이 말하는 오늘 개수. 상한이 적용된 값이다(밀린 것을 앞세우지 않는다). */
+  const today0 = useMemo(() => todayCount(wrongNotes, todayISO()), [wrongNotes]);
+  /**
+   * 가장 이른 차례까지 며칠.
+   *
+   * **담은 날에는 차례가 없다** — 새로 담은 오답의 첫 차례는 내일이다(틀린 직후 같은 세션의
+   * 재시험은 근거가 없다). 이 값을 모르면 화면이 방금 다섯 개를 담은 학생에게 `차례가 된 오답이
+   * 없어요`라고 말해서 기능이 죽은 것처럼 읽힌다.
+   */
+  const soonest = useMemo(() => soonestDueDays(wrongNotes, todayISO()), [wrongNotes]);
   /** 영역별 오답 수. 약한 영역부터 고를 수 있게 많은 순으로. */
   const byArea = useMemo(() => {
     const acc: Record<string, number> = {};
@@ -263,27 +289,75 @@ export default function StudentLearn() {
             없어 어디로 가야 하는지도 알 수 없었다 — 그 일은 제목 옆 버튼이 맡는다.
             여기서는 이 목록이 무엇을 고르는 것인지만 말한다.
           */}
+          {/*
+            **왜 지금 해야 하는지를 말한다.** 예전 문장(`다시 풀 범위를 골라요.`)은 이 목록이
+            무엇인지만 말했고, 담아 둔 오답을 다시 열 이유는 화면 어디에도 없었다 — 담기는
+            1클릭인데 돌아올 유인이 0이었다.
+          */}
           <AppText variant="caption" tone="secondary">
-            다시 풀 범위를 골라요.
+            {/*
+              **밀린 개수를 앞세우지 않는다.** 여기서 원값(`counts.today`)을 말하면 서른 개가
+              밀린 학생이 `30개예요`를 읽고 바로 아래 줄에서 `5개`를 읽는다 — 한 블록이 두 숫자를
+              말한다. 개수를 세는 곳은 `todayCount` 하나다.
+
+              **`방금 담은`이라고 단정하지 않는다.** 조건은 `차례가 내일`뿐이라, 어제 다시 틀려
+              내일이 차례가 된 노트도 같은 문장을 받았다.
+            */}
+            {today0 > 0
+              ? `오늘 다시 볼 오답이 ${today0}개예요.`
+              : soonest === 1
+                ? '다시 볼 차례는 내일이에요.'
+                : soonest != null
+                  ? `다시 볼 차례는 ${soonest}일 뒤예요.`
+                  : '차례가 된 오답이 없어요. 범위를 골라 더 볼 수 있어요.'}
           </AppText>
           <Group>
+            {/*
+              **오늘 볼 것이 첫 줄이다.** 서버가 정한 차례이고 하루 상한이 걸려 있어, 서른 개가
+              밀려도 다섯 개다 — 큐 크기를 늘리지 않고 우선순위만 바꾼다. 아래 세 줄(전체·별표·
+              영역)은 학생이 범위를 직접 고르는 길이고 차례를 보지 않는다.
+
+              차례가 온 것이 없으면 그리지 않는다(§8) — 눌러도 빈 덱이 나온다.
+            */}
+            {today0 > 0 ? (
+              <Row
+                testID="learn-review-today"
+                title="오늘 볼 오답 복습하기"
+                /* 숫자 형식을 나머지 세 줄과 한 벌로 맞춘다(D-130) — `5개`만 단위가 달랐다. */
+                meta={`오답 ${today0}개`}
+                subtitle={`하루에 ${DAILY_CAP}개까지 봐요`}
+                onPress={() => router.push('/student/review' as never)}
+              />
+            ) : null}
             {/*
               숫자는 부제가 아니라 `meta`(오른쪽)에 두고 **형식을 하나로** 맞춘다.
               예전에는 줄마다 `오답 8개` / `3개`(단위 없음) / `오답 4개 · 별표 2개`로 갈려
               오른쪽 열을 세로로 훑을 수 없었다.
             */}
-            <Row
-              testID="learn-review"
-              title="전체 복습하기"
-              meta={`오답 ${wrongNotes.length}개`}
-              showChevron
-              onPress={() => router.push('/student/review' as never)}
-            />
-            {starred > 0 ? (
+            {/*
+              **범위를 고르는 줄이다.** 첫 줄(오늘 볼 오답)과 목적지가 같은 주소이면 두 줄이
+              같은 일을 하게 되므로, 이 줄은 `?area=`를 붙이지 않는 대신 차례를 보지 않는 덱을
+              연다 — `/student/review?all=1`이 그 뜻이다.
+            */}
+            {/*
+              **줄에 적은 개수와 덱 개수를 맞춘다.** `wrongNotes.length`를 쓰면 `오답 60개`를
+              누른 학생이 `모두 55개`를 받는다 — 오늘 이미 본 것과 쉬는 것이 덱에서 빠지는데
+              그 사실이 어디에도 없었다. 개수는 덱을 만드는 같은 함수로 센다.
+            */}
+            {allDeck.length > 0 ? (
+              <Row
+                testID="learn-review"
+                title="담아 둔 오답 전체 보기"
+                meta={`오답 ${allDeck.length}개`}
+                showChevron
+                onPress={() => router.push('/student/review?all=1' as never)}
+              />
+            ) : null}
+            {starredDeck.length > 0 ? (
               <Row
                 testID="learn-review-starred"
                 title="별표 친 것만 복습하기"
-                meta={`오답 ${starred}개`}
+                meta={`오답 ${starredDeck.length}개`}
                 showChevron
                 onPress={() => router.push('/student/review?starred=1' as never)}
               />

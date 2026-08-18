@@ -617,3 +617,52 @@ test.describe('총괄관리자 대리 보기', () => {
     await expect(star).toHaveAttribute('aria-label', '별표 빼기');
   });
 });
+
+test.describe('대리 보기 — 카드 복습', () => {
+  test('복습을 기록할 수 없다고 먼저 말하고 확인 버튼을 두지 않는다', async ({ page }) => {
+    /*
+      `logCard`가 대리 보기에서 거부되므로 확인은 **영구히 실패**한다. 예전에는 그 버튼을 그리고
+      누르면 2.4초 토스트만 띄웠다 — 눌러도 아무 일이 없는 컨트롤이다(§8·D-036·A-115).
+
+      그리고 카드 안의 다른 쓰기(한 줄 정리)도 그리지 않는다. 대리 보기로 들어온 운영자가 첫
+      카드에서 막히면서 화면이 계속 `확인하면 정답을 볼 수 있어요`라고 약속하던 자리다.
+    */
+    await login(page, 'admin');
+    await impersonate(page, 'u_student_both', 'yerin', '복습 화면 점검');
+    await expect(page).toHaveURL(/\/student$/);
+
+    /*
+      **`page.goto`를 쓰지 않는다.** 하드 로드는 앱을 새로 띄우고 대리 보기 세션은 그때 사라진다 —
+      운영자는 학생이 아니므로 라우트 가드가 `/login`으로 보낸다. 화면 안 링크로 이동한다.
+    */
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-review-today').click();
+    await expect(page.getByTestId('review-readonly')).toContainText(
+      '대리 보기에서는 복습을 기록할 수 없어요.',
+    );
+    await page.getByTestId('review-choice-0').click();
+    await page.getByTestId('review-evidence-unsure').click();
+    await expect(page.getByTestId('review-check')).toHaveCount(0);
+    // 한 줄 입력도 두지 않는다 — 저장이 조용히 거부되던 자리다
+    await expect(page.getByTestId('review-recap')).toHaveCount(0);
+  });
+
+  test('오답노트가 정리 개수를 세지 않고 셀 수 없다고 말한다', async ({ page }) => {
+    /*
+      `maskDig`가 메모를 가리므로 정리 여부를 판정할 수 없다. 세면 어느 방향으로든 거짓이 된다 —
+      값을 지우면 `전부 미정리`, 가림 플래그를 빼면 `모두 정리`다. 실제로 여덟 개 중 다섯 개를
+      정리해 둔 학생의 오답노트가 `8개 중 8개는 아직 정리하지 않았어요`였다가, 그것을 고치자
+      하나도 정리하지 않은 학생이 `모두 정리했어요`가 됐다.
+    */
+    await login(page, 'admin');
+    await impersonate(page, 'u_student_both', 'yerin', '오답노트 점검');
+    await page.getByRole('link', { name: '학습' }).click();
+    await page.getByTestId('learn-notebook').click();
+
+    await expect(
+      page.getByText(/메모는 대리 보기에서 보이지 않아 정리 여부는 셀 수 없어요\./),
+    ).toBeVisible();
+    // 정리 안 함 칸도 두지 않는다 — 셀 수 없는 값으로 칸을 만들지 않는다
+    await expect(page.getByRole('radio', { name: /정리 안 함/ })).toHaveCount(0);
+  });
+});
