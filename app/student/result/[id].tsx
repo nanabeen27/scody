@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { View, StyleSheet } from 'react-native';
 import {
   ActionBar,
   Screen,
@@ -7,6 +8,7 @@ import {
   Group,
   Button,
   SegmentedControl,
+  Icon,
   IconButton,
   ScoreCard,
   SourceTag,
@@ -15,12 +17,13 @@ import {
   AppText,
 } from '@/components';
 import { useSession } from '@/session';
-import { useStudentItems } from '@/features/learning';
+import { byDue, useQueuedItems, useStudentItems } from '@/features/learning';
 import { useContent } from '@/features/content';
 import { useProgress, type PerQuestion } from '@/features/progress';
 import { useRecommendations } from '@/features/recommend';
 import { useToast } from '@/features/toast';
 import { findContent, type LearningItem } from '@/data';
+import { colors, spacing } from '@/theme/tokens';
 
 /** 한 화면 목록 상한(§8). 그 이상은 섹션 제목 옆 `N개 더 보기`로 펼친다. */
 const PREVIEW = 5;
@@ -44,6 +47,8 @@ export default function ResultScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { readOnly } = useSession();
   const { all } = useStudentItems();
+  /** 담아 둔 순서대로 이어 풀 수 있게 — 홈 히어로와 **같은 후보 집합**을 쓴다(D-140). */
+  const queued = useQueuedItems();
   const { sets, loading: contentLoading, error: contentError, reload: reloadContent } = useContent();
   const {
     attempts,
@@ -145,6 +150,21 @@ export default function ResultScreen() {
    * 필터를 바꿔도 접힘 상태는 그대로 둔다 — 학생이 펼친 선택을 되감지 않는다.
    */
   const visibleListed = showAllQuestions ? listed : listed.slice(0, PREVIEW);
+
+  /**
+   * 다음에 풀 학습. 후보와 순서는 **홈 히어로와 같다**(D-140): 담아 둔 학습 → 남은 학원 과제
+   * (마감이 이른 것부터). 공개 카탈로그는 후보가 아니다 — 학생이 고른 적도, 누가 시킨 적도
+   * 없는 항목을 다음 할 일로 올리지 않는다. 비슷한 유형 추천은 위 섹션이 맡는다.
+   *
+   * **방금 푼 학습은 뺀다.** 개인 학습은 제출하면 서버가 담아 둔 목록에서 지우고
+   * (`rpc_submit_attempt`) 학원 과제는 `status`가 `done`이 되지만, 조회가 아직 도착하지 않은
+   * 창에서는 둘 다 남아 있어 `다음 학습`이 방금 낸 것을 가리킬 수 있다.
+   */
+  const nextItem =
+    queued.items.find((i) => i.id !== item.id) ??
+    all
+      .filter((i) => i.source === 'academy' && i.status !== 'done' && i.id !== item.id)
+      .sort(byDue)[0];
 
   /**
    * 추천 학습 담기/빼기. 오답노트 문항 담기와 문구를 구분한다.
@@ -377,20 +397,85 @@ export default function ResultScreen() {
       ) : null}
 
       {/*
+        **이 학습으로 돌아가는 길은 줄 하나다.** 끝 행동이 `홈으로 갈게요` 하나였을 때, 방금 푼
+        학습을 다시 풀려면 홈 → 학습 탭 → 목록에서 그 학습을 다시 찾아야 했다.
+        확인 단계는 상세가 이미 갖고 있으므로(`app/student/[id].tsx`의 `ConfirmStep`) 여기서는
+        그 화면으로 보내기만 한다 — 결과 화면이 재풀이 확인까지 안고 있을 이유는 없고,
+        기록이 바뀐다는 고지도 한곳에만 있어야 한다.
+        **바로 화면을 여는 줄이라 chevron을 둔다**(§8).
+      */}
+      <Group>
+        <Row
+          testID="result-retry"
+          title="다시 풀기"
+          subtitle="기록이 바뀌기 전에 한 번 더 물어봐요"
+          showChevron
+          onPress={() => router.push(`/student/${item.id}` as never)}
+        />
+      </Group>
+
+      {/*
         화면을 끝내는 행동 하나만 남긴다. 오답노트로 가는 길은 그 문항들이 있는 섹션 제목 옆으로
         올라갔다 — 여기 나란히 두면 둘 다 `가기`로 끝나는 버튼이라 어느 것이 이 화면의 끝인지
         모양으로 알 수 없었다.
+
+        **끝 행동은 다음에 할 일이 있으면 그것을 가리킨다.** 담아 둔 순서대로 푸는 학생은
+        한 세트마다 `상세 → 풀이 → 결과 → 홈 → 히어로 → 상세`를 돌아 홈을 매번 경유했다.
+        후보는 홈 히어로와 같고(위 `nextItem`), 없으면 지금처럼 홈으로 보낸다.
+        `testID`는 둘이 같다 — 이 자리의 뜻은 `이 화면을 끝내는 행동`이고, 그것이 어디로 가는지는
+        학생의 남은 할 일이 정한다(E2E도 그 자리를 누른다).
       */}
-      <ActionBar>
-        <Button
-          testID="result-done"
-          label="홈으로 갈게요"
-          onPress={() => router.replace('/student' as never)}
-        />
-      </ActionBar>
+      {nextItem ? (
+        <View style={styles.nextBlock}>
+          {/*
+            무엇을 풀게 되는지 버튼 밖 한 줄로 말한다 — `Button`에는 부제 자리가 없고, 라벨에
+            제목을 넣으면 버튼 이름이 학습마다 달라져 같은 행동으로 읽히지 않는다(§8).
+            그래서 이름은 `accessibilityLabel`이 지킨다.
+            출처는 여기서도 태그다(§18) — 위쪽 태그는 방금 푼 학습, 이 태그는 다음 학습이다.
+          */}
+          <View style={styles.nextHead}>
+            <SourceTag source={nextItem.source} />
+            <AppText variant="caption" tone="secondary" style={styles.nextTitle}>
+              {nextItem.title}
+            </AppText>
+          </View>
+          <ActionBar>
+            <Button
+              testID="result-done"
+              label="다음 학습 풀기"
+              trailing={<Icon name="arrow-right" size={16} color={colors.accentText} />}
+              accessibilityLabel={`다음 학습 풀기, ${nextItem.title}`}
+              /*
+                `replace`다 — 결과 화면이 스택에 쌓이면 다음 학습의 상세에서 뒤로가기가 방금 본
+                결과로 돌아온다. `홈으로 갈게요`도 같은 이유로 `replace`였다.
+              */
+              onPress={() => router.replace(`/student/${nextItem.id}` as never)}
+            />
+          </ActionBar>
+        </View>
+      ) : (
+        <ActionBar>
+          <Button
+            testID="result-done"
+            label="홈으로 갈게요"
+            onPress={() => router.replace('/student' as never)}
+          />
+        </ActionBar>
+      )}
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  /*
+    이름 줄과 행동 줄을 한 덩어리로 묶는다. `Screen`의 컬럼 간격을 그대로 받으면 이름이 위
+    섹션에 붙어 무엇에 대한 이름인지 흐려진다 — 음수 마진으로 당기지 않고 덩어리를 만든다.
+  */
+  nextBlock: { gap: spacing.sm },
+  nextHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  // 제목이 길면 태그 옆에서 접힌다.
+  nextTitle: { flex: 1 },
+});
 
 /**
  * 오답노트 담기 토글. 안 담긴 상태는 책갈피, 담긴 상태는 체크로 바뀐다. 다시 누르면 빠진다.
