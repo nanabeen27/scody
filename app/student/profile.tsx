@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { View } from 'react-native';
 import { ActionBar, ConfirmStep, Screen, Section, Group, Row, Button, AppText, AccountSettings } from '@/components';
+import { maskPhone } from '@/data';
 import { useCurrentAccount, useSession } from '@/session';
 import { spacing } from '@/theme/tokens';
 
@@ -12,6 +13,8 @@ export default function StudentProfile() {
   const { academyLinked, setAcademyLinked } = useSession();
   const [confirming, setConfirming] = useState(false);
   const hasAcademy = !!account.academyName;
+  // 운영자 계정 상세와 같은 규칙으로 가린 번호. 없으면 `undefined`고 화면이 사실을 적는다.
+  const phone = account.phone ? maskPhone(account.phone) : undefined;
 
   return (
     <Screen testID="student-profile" title="내 정보">
@@ -23,7 +26,8 @@ export default function StudentProfile() {
                 key={e.kind}
                 title={e.label}
                 subtitle={e.kind === 'personal' ? '개인 맞춤 학습' : '학원 지정 학습'}
-                meta={`결제 ${PAYER[e.payer]}`}
+                /* 누가 결제하는지는 읽고 판단하는 값이라 `meta`가 아니라 `trailing`이다(§20). */
+                trailing={<AppText variant="label">{`결제 ${PAYER[e.payer]}`}</AppText>}
               />
             ))
           ) : (
@@ -31,7 +35,7 @@ export default function StudentProfile() {
           )}
         </Group>
         {account.entitlements.length > 1 ? (
-          <AppText variant="caption" tone="tertiary">
+          <AppText variant="caption" tone="secondary">
             개인 이용권과 학원 이용권을 함께 가지고 있어요. 학습 출처는 항상 구분돼요.
           </AppText>
         ) : null}
@@ -111,10 +115,31 @@ export default function StudentProfile() {
             subtitle="문의할 때 이 코드를 알려 주세요"
             trailing={<AppText variant="label">{account.supportCode ?? '—'}</AppText>}
           />
-          <Row title="스코디 아이디" meta={account.scodyId} />
-          <Row title="휴대폰 번호" meta="인증·복구·초대 확인용" />
+          <Row
+            title="스코디 아이디"
+            trailing={<AppText variant="label">{account.scodyId}</AppText>}
+          />
+          {/*
+            **값 자리에는 번호를 두고, 용도는 부제로 내린다.** 예전에는 값 자리에
+            `인증·복구·초대 확인용`이 들어 있어서 이 줄만 위의 두 줄과 규칙이 달랐고, 내 번호가
+            무엇으로 등록돼 있는지 확인할 길이 없었다. 마스킹은 운영자 계정 상세와 **같은 함수**를
+            써서 두 화면이 갈리지 않게 한다(`maskPhone`).
+
+            **바꾸는 행동은 두지 않는다.** 번호를 바꾸려면 새 번호로 인증을 받아야 하는데 실제
+            인증이 아직 없다(M-DB-2) — 지금 버튼을 두면 확인할 수 없는 번호로 갈아 끼우게 된다.
+          */}
+          <Row
+            title="휴대폰 번호"
+            subtitle="인증·복구·초대 확인에 써요"
+            trailing={
+              /* 번호가 없을 때는 값이 아니라 사실을 적는 자리라 `secondary`로 낮춘다. */
+              <AppText variant="label" tone={phone ? 'default' : 'secondary'}>
+                {phone ?? '등록된 번호가 없어요'}
+              </AppText>
+            }
+          />
         </Group>
-        <AppText variant="caption" tone="tertiary">
+        <AppText variant="caption" tone="secondary">
           이 코드로는 로그인할 수 없어요.
         </AppText>
       </Section>
