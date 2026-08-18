@@ -1008,12 +1008,21 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await expect(page.getByText('오답노트', { exact: true })).toBeVisible();
     await expect(page.getByText('다시 풀 범위를 골라요.')).toBeVisible();
 
-    // 카드 복습: 다시 풀면 정답과 내 메모 자리를 보여준다
+    /*
+      카드 복습: 다시 풀면 정답·해설·내 메모 자리를 보여준다.
+      답을 고르기 전 안내는 **그 문항에 해설이 있는지**로 갈린다 — 해설이 등록된 문항이면
+      `정답과 해설을`, 없으면 `정답과 내 메모를`이라고 말한다. 어느 콘텐츠가 뽑힐지에 이 단정을
+      묶지 않으려고 둘 다 받는다.
+    */
     await page.getByTestId('learn-review').click();
     await expect(page).toHaveURL(/\/student\/review/);
-    await expect(page.getByText('답을 고르면 정답과 내 메모를 함께 볼 수 있어요.')).toBeVisible();
+    await expect(
+      page.getByText(/답을 고르면 정답과 (해설을|내 메모를) 함께 볼 수 있어요\./),
+    ).toBeVisible();
     await page.getByTestId('review-choice-1').click();
     await expect(page.getByText(/이번엔 맞혔어요|아직 헷갈려요/)).toBeVisible();
+    // 왜 틀렸는지가 정답 줄 아래에 있다(그 자리가 없어 AI에게만 물어봐야 했다)
+    await expect(page.getByTestId('review-explanation')).toBeVisible();
     await expect(page.getByText('질문하고 메모하기')).toBeVisible();
 
     // 별표를 달면 집중 복습 목록에 들어간다

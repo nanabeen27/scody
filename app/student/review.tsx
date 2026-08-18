@@ -115,6 +115,11 @@ export default function Review() {
  * 오답노트 카드 복습.
  * 카드 한 장에 문항 하나. 다시 풀어 보고 → 정답·해설·내 메모를 확인하고 → 필요하면 더 물어본다.
  * 별표한 문항만 모아 집중 복습할 수 있고, 이해가 끝난 문항은 완료로 표시한다.
+ *
+ * **카드 구성은 `정답 → 해설 → (학원 고지) → 메모 → 이해 완료` 한 순서다**(`DESIGN.md` §17). 해설이
+ * 없던 동안 이 화면은 다시 틀린 학생에게 `아직 헷갈려요` + 정답 선지만 주고, 이유를 알려면
+ * AI에게 물어보게 했다 — AI가 실패하면(`isAiFailure`) 그 길도 없었다. 위 설명은 그때도
+ * `해설`을 약속하고 있었다. 질문은 해설을 읽은 **다음** 단계다(아래 `질문하고 메모하기`).
  */
 function ReviewDeck({
   area,
@@ -342,9 +347,15 @@ function ReviewDeck({
               ? '오답노트에서 별표를 달면 여기에 모여요.'
               : '결과 화면에서 틀린 문제를 담으면 카드로 복습할 수 있어요.'
           }
+          /*
+            빈 덱의 다음 행동과 완료 요약의 끝 행동은 **모양도 testID도 갈라 둔다.** 라벨과
+            `testID`가 같으면(`review-to-records`) 테스트가 어느 화면을 짚은 것인지 알 수 없고,
+            이름이 가리키는 `records`는 목적지도 아니다(둘 다 `/student/learn`으로 간다).
+            여기는 아직 복습할 것이 없는 자리라 `EmptyState`의 `hug` 그대로 둔다.
+          */
           action={
             <Button
-              testID="review-to-records"
+              testID="review-to-learn"
               variant="secondary"
               hug
               label="학습으로 돌아가기"
@@ -390,10 +401,10 @@ function ReviewDeck({
             onPress={restart}
           />
         </Group>
-        {/* 이 흐름을 끝내는 행동 하나만 남긴다. */}
+        {/* 이 흐름을 끝내는 행동 하나만 남긴다 — 그래서 여기만 전폭 primary다(빈 덱은 `hug`). */}
         <ActionBar>
           <Button
-            testID="review-to-records"
+            testID="review-done-to-learn"
             label="학습으로 돌아가기"
             onPress={() => router.replace('/student/learn' as never)}
           />
@@ -403,6 +414,13 @@ function ReviewDeck({
   }
 
   const content = card.contentId ? findContent(sets, card.contentId) : undefined;
+  /*
+    **해설은 콘텐츠에만 있다** — 오답노트 행(`WrongNote`, `src/repo/learning.ts`)에는 해설 필드가
+    없다. 결과 화면도 같은 이유로 같은 자리에서 찾는다(`result/[id].tsx` → `QuestionReview`).
+    콘텐츠 조회가 실패했으면 위 겉(`Review`)이 이미 실패로 말했으므로, 여기서 `undefined`는
+    **이 문항에 해설이 등록되지 않았다**는 뜻이다(`Question.explanation`은 선택 필드다).
+  */
+  const explanation = content?.questions.find((q) => q.id === card.qId)?.explanation;
 
   return (
     <Screen
@@ -527,10 +545,31 @@ function ReviewDeck({
             <AppText variant="caption" tone="secondary">
               정답 · {card.choices[card.answerIndex]}
             </AppText>
+            {/* 읽어야 하는 문장은 `tertiary`(대비 3.23:1, AA 미달)로 두지 않는다 — 결과 화면의
+                `내 답 · 정답` 줄도 `secondary`다(`QuestionReview`). */}
             {card.pickedIndex != null ? (
-              <AppText variant="caption" tone="tertiary">
+              <AppText variant="caption" tone="secondary">
                 처음 풀 때 고른 답 · {card.choices[card.pickedIndex]}
               </AppText>
+            ) : null}
+
+            {/*
+              **왜 틀렸는지는 이 자리에서 말한다.** 해설이 없던 동안 다시 틀린 학생이 얻는 것은
+              `아직 헷갈려요` + 정답 선지뿐이라, 이유를 알려면 아래에서 AI에게 물어봐야 했다.
+              이름(`해설`)과 문장 무게는 결과 화면과 같게 둔다 — 같은 문항의 같은 글이다.
+
+              **접지 않는다.** `Passage`를 접는 이유는 지문이 여러 단락이고 발문·선지를 화면 밖으로
+              밀기 때문인데(그 화면에서 되돌아와 다시 읽는 글이다), 해설은 seed 192문항 전부가
+              한두 문장(최대 40자)이고 이 화면에 온 목적 자체다. 목적을 한 번 더 눌러서 펼치게
+              만들지 않는다.
+            */}
+            {explanation ? (
+              <View style={{ gap: 4 }} testID="review-explanation">
+                <AppText variant="caption" tone="secondary" weight="semibold">
+                  해설
+                </AppText>
+                <AppText tone="secondary">{explanation}</AppText>
+              </View>
             ) : null}
 
             {/*
@@ -552,7 +591,7 @@ function ReviewDeck({
                 <RichText text={card.dig} />
               </View>
             ) : (
-              <AppText variant="caption" tone="tertiary">
+              <AppText variant="caption" tone="secondary">
                 아직 메모가 없어요. 아래에서 물어보고 정리해 둘 수 있어요.
               </AppText>
             )}
@@ -700,8 +739,14 @@ function ReviewDeck({
           </ActionBar>
         </Section>
       ) : (
-        <AppText variant="caption" tone="tertiary">
-          답을 고르면 정답과 내 메모를 함께 볼 수 있어요.
+        /*
+          **약속은 이 카드에 있는 것만 한다.** 해설이 등록되지 않은 문항에서 `해설`을 말하면
+          답을 고른 뒤 없는 것을 찾게 된다(D-133과 같은 규칙 — 없는 것을 있다고 말하지 않는다).
+        */
+        <AppText variant="caption" tone="secondary">
+          {explanation
+            ? '답을 고르면 정답과 해설을 함께 볼 수 있어요.'
+            : '답을 고르면 정답과 내 메모를 함께 볼 수 있어요.'}
         </AppText>
       )}
     </Screen>
