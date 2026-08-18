@@ -1,19 +1,21 @@
 import { test, expect } from './_fixtures';
-import { login, PHONE_BY_ID, PHONE_PENDING } from './_auth';
+import { login } from './_auth';
 import { answerAll, openFirstPersonal } from './_solve';
 
 test.describe('M6 접근성', () => {
   test('로그인 폼 요소에 접근 가능한 라벨이 있다', async ({ page }) => {
     await page.goto('/login');
+    // 입력 필드가 접근 가능한 이름을 가진다(로그인은 아이디 + 비밀번호다, D-166)
+    await expect(page.getByRole('textbox', { name: '스코디 아이디' })).toBeVisible();
+    await expect(page.getByLabel('비밀번호')).toBeVisible();
     // 버튼은 역할과 이름으로 접근 가능
+    await expect(page.getByRole('button', { name: '로그인', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '카카오로 로그인' })).toBeVisible();
-    await page.getByTestId('login-phone').click();
-    // 입력 필드가 접근 가능한 이름을 가진다
-    await expect(page.getByRole('textbox', { name: '휴대폰 번호' })).toBeVisible();
-    await page.getByTestId('login-phone-number').fill(PHONE_BY_ID.seojun);
-    await page.getByTestId('login-phone-send').click();
-    // 휴대폰 인증은 아직 연결되지 않았다. 안내도 접근 가능한 텍스트로 읽혀야 한다.
-    await expect(page.getByText(PHONE_PENDING)).toBeVisible();
+    // 펼침 컨트롤은 상태까지 읽힌다
+    const demo = page.getByRole('button', { name: /테스트 계정/ });
+    await expect(demo).not.toHaveAttribute('aria-expanded', 'true');
+    await demo.click();
+    await expect(demo).toHaveAttribute('aria-expanded', 'true');
   });
 
   test('담기 토글 두 개가 서로 다른 이름으로 읽힌다', async ({ page }) => {

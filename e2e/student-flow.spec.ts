@@ -731,13 +731,13 @@ test.describe('M2 학생 국어 학습 흐름', () => {
   test('세션 없이 학습 URL로 직접 들어오면 로그인으로 보낸다', async ({ page }) => {
     await page.goto('/student/result/does-not-exist');
     await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByTestId('login-phone')).toBeVisible();
+    await expect(page.getByTestId('login-submit')).toBeVisible();
   });
 
   test('세션 없이 고르기 단계 URL로 들어오면 로그인으로 보낸다', async ({ page }) => {
     await page.goto('/student/pick?grade=1&area=문법');
     await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByTestId('login-phone')).toBeVisible();
+    await expect(page.getByTestId('login-submit')).toBeVisible();
   });
 
   test('풀이 중 이탈 후 돌아오면 선택이 유지된다(자동 저장)', async ({ page }) => {

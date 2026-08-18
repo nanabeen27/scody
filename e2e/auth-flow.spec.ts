@@ -1,5 +1,5 @@
 import { test, expect } from './_fixtures';
-import { login, loginHere, PHONE_BY_ID, PHONE_PENDING, SIGNUP_PENDING, DEMO_CODE } from './_auth';
+import { login, loginHere, PHONE_BY_ID, SIGNUP_PENDING, DEMO_CODE } from './_auth';
 import { inviteToken , devPassword } from './_seed';
 
 /*
@@ -175,29 +175,45 @@ test.describe('M1 소개·로그인·역할 분기', () => {
   });
 
   /*
-    휴대폰 인증은 아직 서버에 연결되지 않았다. **없는 기능을 있는 것처럼 두지 않는다** —
-    번호를 받는 단계는 남기고, 인증번호를 보낼 수 없다는 사실을 그 자리에서 말한다.
-    실제 OTP가 붙으면 이 두 스펙이 원래의 '가입되지 않은 번호'·'잘못된 인증번호'로 돌아온다.
+    **아이디 + 비밀번호가 정식 로그인이다**(D-166). 가입 화면이 그 둘을 받는데 그것을 쓰는 공개
+    로그인이 없었고, 대신 로그인 화면이 휴대폰 번호를 받아 **도달할 수 없는 인증번호 단계**를
+    약속했다(`setStep('code')`가 코드에 없었다). 휴대폰은 인증·복구·알림 자리로 돌아갔다.
   */
-  test('휴대폰 인증은 아직 연결되지 않았다고 말한다', async ({ page }) => {
+  test('아이디와 비밀번호로 로그인한다', async ({ page }) => {
     await page.goto('/login');
-    await page.getByTestId('login-phone').click();
-    await page.getByTestId('login-phone-number').fill(PHONE_BY_ID.doyun);
-    await page.getByTestId('login-phone-send').click();
-    await expect(page.getByText(PHONE_PENDING)).toBeVisible();
-    // 인증번호 단계로 넘어가지 않는다 — 보낼 수 없는 번호를 기다리게 두지 않는다.
-    await expect(page.getByTestId('login-phone-code')).toHaveCount(0);
-    await expect(page).toHaveURL(/\/login/);
+    await page.getByTestId('login-id').fill('doyun');
+    await page.getByTestId('login-password').fill(devPassword());
+    await page.getByTestId('login-submit').click();
+    await expect(page).toHaveURL(/\/student/);
+    await expect(page.getByText(/박도윤님/)).toBeVisible();
   });
 
-  test('연결되지 않았다는 오류에서 테스트 계정으로 갈 수 있다', async ({ page }) => {
+  test('로그인이 틀리면 어느 쪽이 틀렸는지 말하지 않는다', async ({ page }) => {
     await page.goto('/login');
-    await page.getByTestId('login-phone').click();
-    await page.getByTestId('login-phone-number').fill('010-0000-0000');
-    await page.getByTestId('login-phone-send').click();
-    await page.getByTestId('login-error-demo').click();
-    // 오류가 가리키는 행동을 그 자리에서 할 수 있다.
+    await page.getByTestId('login-id').fill('doyun');
+    await page.getByTestId('login-password').fill('wrong-password-1234');
+    await page.getByTestId('login-submit').click();
+    // 오류는 `role="alert"`로 읽힌다(D-126). 아이디가 있는지 없는지는 말하지 않는다.
+    await expect(page.getByRole('alert')).toHaveText('아이디나 비밀번호를 확인해 주세요.');
+    await expect(page).toHaveURL(/\/login/);
+    // 오류가 가리키는 행동(회원가입)이 같은 화면에 함께 서 있다 — 단계가 하나뿐이다.
+    await expect(page.getByTestId('login-signup')).toBeVisible();
+  });
+
+  /*
+    테스트 계정 패널은 **눌렀을 때 보이는 변화**가 있어야 한다. 예전에는 토글이 화면 아래쪽에
+    있어서 펼쳐진 11행이 뷰포트 밖에서 열렸고, 라벨만 바뀌어 "아무 일도 없다"로 읽혔다.
+    같은 라벨(`테스트 계정 보기`)이 오류 아래에도 있어서 둘의 상태가 서로 어긋났다.
+  */
+  test('테스트 계정 패널은 개수를 밝히고 펼치면 목록이 보인다', async ({ page }) => {
+    await page.goto('/login');
+    const toggle = page.getByTestId('login-demo-toggle');
+    await expect(toggle).toContainText(/테스트 계정 \d+개 보기/);
+    // 같은 뜻의 컨트롤이 화면에 하나뿐이다.
+    await expect(page.getByRole('button', { name: /테스트 계정/ })).toHaveCount(1);
+    await toggle.click();
     await expect(page.getByRole('button', { name: /^박도윤 · / })).toBeVisible();
+    await expect(toggle).toContainText('테스트 계정 숨기기');
   });
 
   test('학원 원장 로그인 → 대시보드와 사이드바 메뉴', async ({ page }) => {
@@ -276,19 +292,19 @@ test.describe('M1 소개·로그인·역할 분기', () => {
     await expect(page.getByTestId('join-accept')).toHaveCount(0);
   });
 
-  test('키보드만으로 번호 단계를 끝낼 수 있다(Enter)', async ({ page }) => {
+  test('키보드만으로 로그인할 수 있다(Enter)', async ({ page }) => {
     await page.goto('/login');
-    await page.getByTestId('login-phone').click();
-    await page.getByTestId('login-phone-number').fill(PHONE_BY_ID.seojun);
-    await page.getByTestId('login-phone-number').press('Enter');
-    // Enter가 `인증번호 받기`와 같은 자리에 닿는다. 지금은 그 행동이 안내로 끝난다.
-    await expect(page.getByText(PHONE_PENDING)).toBeVisible();
+    await page.getByTestId('login-id').fill('seojun');
+    await page.getByTestId('login-password').fill(devPassword());
+    // Enter가 `로그인` 버튼과 같은 자리에 닿는다.
+    await page.getByTestId('login-password').press('Enter');
+    await expect(page).toHaveURL(/\/student/);
   });
 
   test('세션 없이 공간 선택 URL로 들어오면 로그인으로 보낸다', async ({ page }) => {
     await page.goto('/select-space');
     await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByTestId('login-phone')).toBeVisible();
+    await expect(page.getByTestId('login-submit')).toBeVisible();
   });
 
   test('다역할 계정은 로그아웃 없이 공간을 바꿀 수 있다', async ({ page }) => {
@@ -380,17 +396,25 @@ test.describe('M1 소개·로그인·역할 분기', () => {
   });
 
   /*
-    오류 문구가 가리키는 행동으로 **그 화면에서** 갈 수 있어야 한다. 예전에는
-    `회원가입`/`로그인` 링크가 앞 단계에만 있어서, 번호를 잘못 알고 온 사람이
-    문구가 시키는 대로 할 수 없었다. 오류는 `role="alert"`로도 읽힌다.
+    이미 로그인한 사람이 `/login`으로 오면 화면이 그 사실을 안다(D-166). 예전에는 `account`를
+    읽지 않아 로그인을 다시 묻고, 카카오를 누르면 **조용히 다른 계정으로** 세션이 갈렸다.
+    소개 페이지는 이미 `내 공간으로 가기` 하나로 바꾸고 있었다.
   */
-  test('가입되지 않은 번호 오류에서 바로 회원가입으로 간다', async ({ page }) => {
+  test('이미 로그인한 사람에게는 내 공간으로 가는 길을 준다', async ({ page }) => {
+    await login(page, 'doyun');
     await page.goto('/login');
-    await page.getByTestId('login-phone').click();
-    await page.getByTestId('login-phone-number').fill('010-9999-9999');
-    await page.getByTestId('login-phone-send').click();
-    // 오류는 `role="alert"`로 읽힌다. 지금 가리키는 행동은 테스트 계정이다(위 스펙이 확인한다).
-    await expect(page.getByRole('alert')).toHaveText(PHONE_PENDING);
+    await expect(page.getByText('이미 로그인했어요')).toBeVisible();
+    // 로그인을 다시 묻지 않고, 다른 계정으로 갈리는 버튼도 두지 않는다.
+    await expect(page.getByTestId('login-id')).toHaveCount(0);
+    await expect(page.getByTestId('login-kakao')).toHaveCount(0);
+    await page.getByTestId('login-mine').click();
+    await expect(page).toHaveURL(/\/student/);
+
+    // 다른 계정으로 들어가려면 지금 세션을 닫는다 — 닫으면 폼으로 돌아온다.
+    await page.goto('/login');
+    await page.getByTestId('login-switch').click();
+    await expect(page.getByTestId('login-id')).toBeVisible();
+    await expect(page.getByTestId('login-mine')).toHaveCount(0);
   });
 
   test('이미 가입된 번호 오류에서 바로 로그인으로 간다', async ({ page }) => {

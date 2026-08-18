@@ -1,11 +1,26 @@
-import type { ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppText, Brand, Divider, ThemeToggle } from '@/components';
 import { LEGAL_DOCS } from '@/features/legal/documents';
 import { colors, radius, spacing, touch } from '@/theme/tokens';
+import { useReduceMotion } from '@/theme/useReduceMotion';
 import { useResponsive } from '@/theme/useResponsive';
+
+/**
+ * 패널 밖 아래 블록(`below`)을 화면 안으로 끌어오는 길.
+ *
+ * **왜 껍데기가 들고 있는가**: 스크롤 컨테이너가 여기 있다. 아래 블록을 펼치는 쪽은 자기 높이만
+ * 알고 스크롤 위치는 모른다 — 그래서 펼침이 뷰포트 밖에서 일어났다(`DemoAccounts` 참고).
+ *
+ * 껍데기 밖에서 부르면 아무 일도 하지 않는다. 스크롤을 못 하는 것이 화면을 깨뜨릴 이유는 아니다.
+ */
+const AuthRevealContext = createContext<{ revealBelow: () => void }>({ revealBelow: () => {} });
+
+export function useAuthReveal() {
+  return useContext(AuthRevealContext);
+}
 
 /**
  * 로그인·가입 화면의 공통 껍데기.
@@ -37,35 +52,73 @@ export function AuthShell({
 }) {
   const { isMobile } = useResponsive();
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
+  const reduceMotion = useReduceMotion();
+  /*
+    아래 블록의 절대 위치는 두 값의 합이다: 컬럼이 콘텐츠 안에서 놓인 곳 + 그 안에서 블록이
+    놓인 곳. 넓은 화면에서는 컬럼이 자동 여백으로 가운데 있어서 컬럼의 `y`가 0이 아니다.
+    `onLayout`은 배치가 끝난 뒤 오므로 두 값 모두 실제 위치다.
+  */
+  const columnY = useRef(0);
+  const belowY = useRef(0);
+  const revealBelow = useCallback(() => {
+    /*
+      **한 프레임 뒤에 옮긴다.** 아래 블록이 펼쳐지면 컬럼 높이가 바뀌고, 넓은 화면에서는 컬럼이
+      자동 여백으로 가운데 정렬되므로 컬럼의 `y`도 다시 잡힌다. 그 `onLayout`이 펼쳐진 자식보다
+      늦게 올 수 있어서, 같은 프레임에 계산하면 옛 위치로 스크롤한다.
+    */
+    requestAnimationFrame(() => {
+      const y = Math.max(0, columnY.current + belowY.current - spacing.lg);
+      // 모션 줄이기를 켜면 애니메이션 없이 그 자리로 간다(D-119: 느리게가 아니라 아예 하지 않는다).
+      scrollRef.current?.scrollTo({ y, animated: !reduceMotion });
+    });
+  }, [reduceMotion]);
+  const reveal = useMemo(() => ({ revealBelow }), [revealBelow]);
 
   return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={[
-        styles.page,
-        {
-          paddingTop: insets.top + (isMobile ? spacing.xxl : spacing.xxxl),
-          paddingBottom: insets.bottom + spacing.xxl,
-        },
-      ]}
-    >
-      <View style={[styles.column, !isMobile && styles.columnCenter]}>
-        {/*
-          테마는 화면 전체에 걸리는 설정이라 본문이 아니라 상단 줄 오른쪽 끝에 둔다(D-165).
-          예전에는 약관 문구 **아래**, 화면 맨 끝에 있었다 — 로그인하러 온 사람이 화면을 끝까지
-          내렸을 때 마지막으로 만나는 것이 테마 전환이었다.
-        */}
-        <View style={styles.headRow}>
-          <Brand center testID={exitTestID} accessibilityLabel={exitLabel} onPress={onExit} />
-          <View style={styles.headTool}>
-            <ThemeToggle />
+    <AuthRevealContext.Provider value={reveal}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.page,
+          {
+            paddingTop: insets.top + (isMobile ? spacing.xxl : spacing.xxxl),
+            paddingBottom: insets.bottom + spacing.xxl,
+          },
+        ]}
+      >
+        <View
+          style={[styles.column, !isMobile && styles.columnCenter]}
+          onLayout={(e) => {
+            columnY.current = e.nativeEvent.layout.y;
+          }}
+        >
+          {/*
+            테마는 화면 전체에 걸리는 설정이라 본문이 아니라 상단 줄 오른쪽 끝에 둔다(D-165).
+            예전에는 약관 문구 **아래**, 화면 맨 끝에 있었다 — 로그인하러 온 사람이 화면을 끝까지
+            내렸을 때 마지막으로 만나는 것이 테마 전환이었다.
+          */}
+          <View style={styles.headRow}>
+            <Brand center testID={exitTestID} accessibilityLabel={exitLabel} onPress={onExit} />
+            <View style={styles.headTool}>
+              <ThemeToggle />
+            </View>
           </View>
+          <View style={[styles.panel, isMobile && styles.panelFlat]}>{children}</View>
+          {below ? (
+            <View
+              onLayout={(e) => {
+                belowY.current = e.nativeEvent.layout.y;
+              }}
+            >
+              {below}
+            </View>
+          ) : null}
+          <AuthFooter />
         </View>
-        <View style={[styles.panel, isMobile && styles.panelFlat]}>{children}</View>
-        {below}
-        <AuthFooter />
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </AuthRevealContext.Provider>
   );
 }
 

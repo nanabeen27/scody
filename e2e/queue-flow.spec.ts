@@ -218,7 +218,7 @@ test.describe('M8 담아 둔 학습', () => {
     // 프로토타입 세션은 메모리에만 있어서 직접 URL 진입은 항상 로그인으로 가드된다
     await page.goto('/student/queue');
     await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByTestId('login-phone')).toBeVisible();
+    await expect(page.getByTestId('login-submit')).toBeVisible();
   });
 
   test('학원 과제는 담을 수 없다', async ({ page }) => {
