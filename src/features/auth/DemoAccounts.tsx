@@ -1,80 +1,140 @@
-import { StyleSheet, View } from 'react-native';
-import { AppText, Button, Group, Icon, Row } from '@/components';
-import { DEV_ACCOUNTS } from '@/session/devAccounts';
-import { ROLE_LABEL } from '@/session/routing';
-import { colors, spacing } from '@/theme/tokens';
+import { useRef, useState } from "react";
+import { StyleSheet, View } from "react-native";
+import { AppText, Button, Group, Icon, LiveRegion, Row } from "@/components";
+import { useAuthReveal } from "@/features/auth/AuthShell";
+import { DEV_ACCOUNTS } from "@/session/devAccounts";
+import { ROLE_LABEL } from "@/session/routing";
+import { colors, spacing } from "@/theme/tokens";
 
 /**
- * 개발용 계정 목록. 펼쳐서 한 줄을 누르면 그 계정으로 들어간다.
+ * 개발용 테스트 계정 패널. `app/login.tsx`의 `below` 자리와 소개 페이지 푸터에서 쓴다.
  *
- * **호출부는 `DEV_LOGIN_ENABLED`로 감싸서 부른다**(D-135). 이 컴포넌트 안에서 그 스위치를 보지
- * 않는 이유는 상수 접기다 — 호출부가 `DEV_LOGIN_ENABLED ? <DemoAccounts …/> : null`로 두면
- * 꺼진 빌드에서 이 파일과 `DEV_ACCOUNTS`가 번들에서 통째로 빠진다. 안에서 검사하면 계정 목록이
- * 운영 번들에 남는다(D-165가 `staffEmail`에서 정확히 그 실수를 했다).
+ * 펼침 상태는 **기본적으로 이 컴포넌트가 갖는다**. 소개 페이지처럼 화면 쪽에서 열고 닫을 이유가
+ * 있는 자리만 `open`·`onOpenChange`를 넘겨 제어한다 — 두 자리가 같은 컨트롤을 쓰면서 상태의
+ * 주인이 달라도 라벨·`aria-expanded`·낭독 문구는 한 벌로 남는다.
  *
- * 소개 페이지와 로그인 화면이 이 블록을 각자 갖고 있었고, 한쪽이 맨 `Pressable` + 캡션으로
- * 낡아 누름 영역이 20px이 됐다(D-166). 같은 목록을 두 벌 두면 그 드리프트가 다시 생긴다.
+ * ## 호출부가 스위치를 들고 있다
  *
- * **펼침 상태는 호출부가 갖는다.** 로그인 화면의 오류 문구(`휴대폰 인증은 아직 연결되지
- * 않았어요…`)가 `테스트 계정 보기` 링크로 **이 패널을 열어 주기** 때문이다 — 상태를 안에
- * 숨기면 그 링크가 가리킬 방법이 없다.
+ * **`DEV_LOGIN_ENABLED ? <DemoAccounts … /> : null`로 감싸야 한다**(D-135). 이 파일 안에서
+ * 스위치를 보면 꺼진 빌드에서도 모듈이 그려질 수 있는 자리로 남는다 — 상수 접기가 깨지는 방향은
+ * D-165가 한 번 실측했다(수명이 다른 것을 한 모듈에 두면 한쪽이 다른 쪽을 살려 둔다).
+ *
+ * 여기 있는 것은 **구성**뿐이고 계정 목록은 `src/session/devAccounts.ts`가 정한다(꺼지면 `[]`).
+ *
+ * ## 왜 화면에서 떼어 냈나
+ *
+ * 로그인 화면이 이 패널을 인라인으로 들고 있어서, 오류 문구가 가리키는 링크와 패널 토글이 **같은
+ * 라벨 `테스트 계정 보기`로 한 화면에 둘** 있었다(실측). 링크는 `setShowDemo(true)`라 두 번째부터
+ * 눌러도 아무 일이 없었고, 패널은 그때 이미 `테스트 계정 숨기기`라고 적혀 있었다 — 두 라벨이 서로
+ * 모순됐다. 펼침 상태는 이 컴포넌트 하나만 갖는다.
  */
 export function DemoAccounts({
   testID,
-  open,
+  open: openProp,
   onOpenChange,
   onEnter,
 }: {
   testID: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   onEnter: (scodyId: string) => void;
 }) {
-  const show = open;
+  const accounts = DEV_ACCOUNTS;
+  const [openSelf, setOpenSelf] = useState(false);
+  const open = openProp ?? openSelf;
+  const { revealBelow } = useAuthReveal();
+  /**
+   * 펼친 직후 한 번만 스크롤한다. `onLayout`은 창 크기가 바뀔 때도 오는데, 그때 화면이
+   * 저절로 움직이면 읽던 자리를 잃는다.
+   */
+  const pendingReveal = useRef(false);
+
+  // 목록이 비어 있으면 펼칠 것이 없다 — `테스트 계정 0개`를 여는 버튼을 두지 않는다(D-141).
+  if (accounts.length === 0) return null;
+
   return (
     <View style={styles.box}>
       {/*
         글자에 `onPress`만 붙이면 스크린리더에는 그냥 글로 읽히고 누를 영역도 20px이다.
         프로토타입 진입에 실제로 쓰는 컨트롤이라 버튼으로 둔다.
+
+        **접힌 라벨이 개수를 말한다.** 눌러야 알 수 있던 것을 누르기 전에 알려 준다 —
+        무엇이 열리는지 모르면 펴 볼 이유도 알 수 없다(`Disclosure`의 규칙과 같다).
+        `aria-expanded`도 함께 넘긴다: 예전에는 넘기지 않아 보조기술이 펼침 상태를 몰랐다.
       */}
       <Button
         testID={testID}
         variant="ghost"
         size="sm"
         hug
+        aria-expanded={open}
         leading={
           <Icon
-            name={show ? 'chevron-down' : 'chevron-right'}
+            name={open ? "chevron-down" : "chevron-right"}
             size={15}
             color={colors.inkSecondary}
           />
         }
-        label={show ? '테스트 계정 숨기기' : '테스트 계정 보기'}
-        onPress={() => onOpenChange(!show)}
+        label={
+          open ? "테스트 계정 숨기기" : `테스트 계정 ${accounts.length}개 보기`
+        }
+        /* 앞 아이콘이 읽히는 이름에 섞이지 않게 이름을 고정한다(§8). */
+        accessibilityLabel={
+          open ? "테스트 계정 숨기기" : `테스트 계정 ${accounts.length}개 보기`
+        }
+        onPress={() => {
+          const next = !open;
+          setOpenSelf(next);
+          onOpenChange?.(next);
+          pendingReveal.current = next;
+        }}
       />
-      {show ? (
-        <>
+      {/*
+        보이지 않는 알림. 목록이 화면 아래에서 열리므로 화면을 못 보는 사용자에게는
+        라벨이 바뀐 것 말고는 단서가 없다. 자리는 늘 렌더되고 문구만 바뀐다(`LiveRegion`).
+      */}
+      <LiveRegion
+        message={
+          open ? `테스트 계정 ${accounts.length}개를 아래에 펼쳤어요.` : ""
+        }
+      />
+      {open ? (
+        <View
+          style={styles.list}
+          /*
+            **펼친 자리를 화면 안으로 끌어온다.** 이 패널은 인증 패널 밖 아래에 있어서, 토글이
+            화면 아래쪽에 있으면 펼쳐진 목록이 뷰포트 밖에서 열린다 — 실측: 라벨은 바뀌고
+            목록도 렌더되는데 화면에는 아무 변화가 없어 "눌러도 아무 일이 없다"로 읽혔다.
+            스크롤 컨테이너는 `AuthShell`이 들고 있다.
+          */
+          onLayout={() => {
+            if (!pendingReveal.current) return;
+            pendingReveal.current = false;
+            revealBelow();
+          }}
+        >
           <AppText variant="caption" tone="secondary">
             개발용 계정이에요. 실제 사용자 데이터가 아니에요.
           </AppText>
           <Group>
-            {/* 로그인 전에는 DB에서 아무것도 읽을 수 없어 목록이 클라이언트에 있다. */}
-            {DEV_ACCOUNTS.map((a) => (
+            {accounts.map((a) => (
               <Row
                 key={a.scodyId}
-                title={`${a.name} · ${a.roles.map((r) => ROLE_LABEL[r]).join('/')}`}
+                title={`${a.name} · ${a.roles.map((r) => ROLE_LABEL[r]).join("/")}`}
                 subtitle={a.note}
                 onPress={() => onEnter(a.scodyId)}
                 showChevron
               />
             ))}
           </Group>
-        </>
+        </View>
       ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  box: { gap: spacing.md, alignItems: 'flex-start' },
+  box: { gap: spacing.md, alignItems: "flex-start" },
+  /* 목록은 컬럼 폭을 그대로 쓴다 — 토글만 내용 폭이다(`box`의 `flex-start`를 되돌린다). */
+  list: { alignSelf: "stretch", gap: spacing.md },
 });

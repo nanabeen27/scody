@@ -1,11 +1,35 @@
-import type { ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AppText, Brand, Divider, ThemeToggle } from '@/components';
-import { LegalLinks } from '@/features/legal/LegalLinks';
-import { tap } from '@/theme/styles';
-import { colors, radius, spacing } from '@/theme/tokens';
-import { useResponsive } from '@/theme/useResponsive';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from "react";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AppText, Brand, Divider, ThemeToggle } from "@/components";
+import { LEGAL_DOCS } from "@/features/legal/documents";
+import { colors, radius, spacing, touch } from "@/theme/tokens";
+import { useReduceMotion } from "@/theme/useReduceMotion";
+import { useResponsive } from "@/theme/useResponsive";
+
+/**
+ * 패널 밖 아래 블록(`below`)을 화면 안으로 끌어오는 길.
+ *
+ * **왜 껍데기가 들고 있는가**: 스크롤 컨테이너가 여기 있다. 아래 블록을 펼치는 쪽은 자기 높이만
+ * 알고 스크롤 위치는 모른다 — 그래서 펼침이 뷰포트 밖에서 일어났다(`DemoAccounts` 참고).
+ *
+ * 껍데기 밖에서 부르면 아무 일도 하지 않는다. 스크롤을 못 하는 것이 화면을 깨뜨릴 이유는 아니다.
+ */
+const AuthRevealContext = createContext<{ revealBelow: () => void }>({
+  revealBelow: () => {},
+});
+
+export function useAuthReveal() {
+  return useContext(AuthRevealContext);
+}
 
 /**
  * 로그인·가입 화면의 공통 껍데기.
@@ -37,35 +61,80 @@ export function AuthShell({
 }) {
   const { isMobile } = useResponsive();
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
+  const reduceMotion = useReduceMotion();
+  /*
+    아래 블록의 절대 위치는 두 값의 합이다: 컬럼이 콘텐츠 안에서 놓인 곳 + 그 안에서 블록이
+    놓인 곳. 넓은 화면에서는 컬럼이 자동 여백으로 가운데 있어서 컬럼의 `y`가 0이 아니다.
+    `onLayout`은 배치가 끝난 뒤 오므로 두 값 모두 실제 위치다.
+  */
+  const columnY = useRef(0);
+  const belowY = useRef(0);
+  const revealBelow = useCallback(() => {
+    /*
+      **한 프레임 뒤에 옮긴다.** 아래 블록이 펼쳐지면 컬럼 높이가 바뀌고, 넓은 화면에서는 컬럼이
+      자동 여백으로 가운데 정렬되므로 컬럼의 `y`도 다시 잡힌다. 그 `onLayout`이 펼쳐진 자식보다
+      늦게 올 수 있어서, 같은 프레임에 계산하면 옛 위치로 스크롤한다.
+    */
+    requestAnimationFrame(() => {
+      const y = Math.max(0, columnY.current + belowY.current - spacing.lg);
+      // 모션 줄이기를 켜면 애니메이션 없이 그 자리로 간다(D-119: 느리게가 아니라 아예 하지 않는다).
+      scrollRef.current?.scrollTo({ y, animated: !reduceMotion });
+    });
+  }, [reduceMotion]);
+  const reveal = useMemo(() => ({ revealBelow }), [revealBelow]);
 
   return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={[
-        styles.page,
-        {
-          paddingTop: insets.top + (isMobile ? spacing.xxl : spacing.xxxl),
-          paddingBottom: insets.bottom + spacing.xxl,
-        },
-      ]}
-    >
-      <View style={[styles.column, !isMobile && styles.columnCenter]}>
-        {/*
-          테마는 화면 전체에 걸리는 설정이라 본문이 아니라 상단 줄 오른쪽 끝에 둔다(D-165).
-          예전에는 약관 문구 **아래**, 화면 맨 끝에 있었다 — 로그인하러 온 사람이 화면을 끝까지
-          내렸을 때 마지막으로 만나는 것이 테마 전환이었다.
-        */}
-        <View style={styles.headRow}>
-          <Brand center testID={exitTestID} accessibilityLabel={exitLabel} onPress={onExit} />
-          <View style={styles.headTool}>
-            <ThemeToggle />
+    <AuthRevealContext.Provider value={reveal}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.page,
+          {
+            paddingTop: insets.top + (isMobile ? spacing.xxl : spacing.xxxl),
+            paddingBottom: insets.bottom + spacing.xxl,
+          },
+        ]}
+      >
+        <View
+          style={[styles.column, !isMobile && styles.columnCenter]}
+          onLayout={(e) => {
+            columnY.current = e.nativeEvent.layout.y;
+          }}
+        >
+          {/*
+            테마는 화면 전체에 걸리는 설정이라 본문이 아니라 상단 줄 오른쪽 끝에 둔다(D-165).
+            예전에는 약관 문구 **아래**, 화면 맨 끝에 있었다 — 로그인하러 온 사람이 화면을 끝까지
+            내렸을 때 마지막으로 만나는 것이 테마 전환이었다.
+          */}
+          <View style={styles.headRow}>
+            <Brand
+              center
+              testID={exitTestID}
+              accessibilityLabel={exitLabel}
+              onPress={onExit}
+            />
+            <View style={styles.headTool}>
+              <ThemeToggle />
+            </View>
           </View>
+          <View style={[styles.panel, isMobile && styles.panelFlat]}>
+            {children}
+          </View>
+          {below ? (
+            <View
+              onLayout={(e) => {
+                belowY.current = e.nativeEvent.layout.y;
+              }}
+            >
+              {below}
+            </View>
+          ) : null}
+          <AuthFooter />
         </View>
-        <View style={[styles.panel, isMobile && styles.panelFlat]}>{children}</View>
-        {below}
-        <AuthFooter />
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </AuthRevealContext.Provider>
   );
 }
 
@@ -73,7 +142,7 @@ export function AuthShell({
 export function AuthHeading({ title, sub }: { title: string; sub?: string }) {
   return (
     <View style={styles.heading}>
-      {/* 이 화면의 제목이라 1단계다 — 인증 화면에는 이 위에 다른 제목이 없다. */}
+      {/* 이 화면의 제목이라 1단계다 — 인증 화면에는 이 위에 다른 제목이 없다(D-166). */}
       <AppText variant="title" headingLevel={1}>
         {title}
       </AppText>
@@ -86,22 +155,12 @@ export function AuthHeading({ title, sub }: { title: string; sub?: string }) {
   );
 }
 
-/**
- * 단계형 화면의 진행 표시. 몇 단계가 남았는지 먼저 알려준다.
- *
- * **역할이 있어야 이름이 읽힌다.** 예전에는 이름만 붙인 맨 `View`였는데, 역할 없는 요소의
- * `aria-label`은 보조기술이 무시한다 — 막대 두 개가 눈에만 보이고 "2단계 중 1단계"는
- * 어디에도 없었다. `ProgressBar`와 같은 방식으로 둔다.
- */
+/** 단계형 화면의 진행 표시. 몇 단계가 남았는지 먼저 알려준다. */
 export function AuthSteps({ step, total }: { step: number; total: number }) {
   return (
     <View
       style={styles.steps}
-      accessibilityRole="progressbar"
       accessibilityLabel={`${total}단계 중 ${step}단계`}
-      aria-valuenow={step}
-      aria-valuemin={1}
-      aria-valuemax={total}
     >
       {Array.from({ length: total }, (_, i) => (
         <View key={i} style={[styles.stepBar, i < step && styles.stepBarOn]} />
@@ -194,15 +253,28 @@ export function AuthError({ children }: { children: string }) {
 
 /** 문서 링크와 테마. 로그인 화면에서도 약관·처리방침을 열 수 있어야 한다. */
 function AuthFooter() {
+  const router = useRouter();
   return (
     <View style={styles.footer}>
       <Divider />
-      <LegalLinks testIDPrefix="auth-footer" />
-      {/*
-        **`tertiary`가 아니다.** 초안이라는 사실을 알리는 문장이라 반드시 읽혀야 하는데
-        `inkTertiary`는 배경과 **2.96:1**(라이트, 실측)로 AA 4.5:1에 크게 미달했다.
-        `inkSecondary`는 같은 자리에서 7:1 이상이다. 이 화면들의 안내 문구는 모두 이 톤이다.
-      */}
+      <View style={styles.footerLinks}>
+        {LEGAL_DOCS.map((d) => (
+          <Pressable
+            key={d.slug}
+            testID={`auth-footer-${d.slug}`}
+            accessibilityRole="link"
+            onPress={() => router.push(`/legal/${d.slug}` as never)}
+            style={({ pressed }) => [
+              styles.footerLink,
+              pressed && { opacity: 0.6 },
+            ]}
+          >
+            <AppText variant="caption" tone="secondary">
+              {d.label}
+            </AppText>
+          </Pressable>
+        ))}
+      </View>
       <AppText variant="caption" tone="secondary">
         이용약관과 개인정보처리방침은 검토 전 초안이에요.
       </AppText>
@@ -213,14 +285,20 @@ function AuthFooter() {
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: colors.bg },
   /* 워드마크는 가운데를 지키고 도구만 오른쪽 끝에 얹는다 — 절대 배치라 가운데 정렬이 흔들리지 않는다. */
-  headRow: { width: '100%', justifyContent: 'center' },
-  headTool: { position: 'absolute', right: 0, top: 0, bottom: 0, justifyContent: 'center' },
-  page: { flexGrow: 1, paddingHorizontal: spacing.xl, alignItems: 'center' },
-  column: { width: '100%', maxWidth: 420, gap: spacing.xl },
+  headRow: { width: "100%", justifyContent: "center" },
+  headTool: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+  },
+  page: { flexGrow: 1, paddingHorizontal: spacing.xl, alignItems: "center" },
+  column: { width: "100%", maxWidth: 420, gap: spacing.xl },
   // 넓은 화면에서는 컬럼을 위아래 가운데에 둔다. 모바일은 키보드 때문에 위에서 시작한다.
   // `justifyContent: center`가 아니라 자동 여백을 쓴다. 내용이 화면보다 길어지면
   // 가운데 정렬은 위쪽을 잘라 스크롤로도 닿을 수 없게 만든다.
-  columnCenter: { marginVertical: 'auto' },
+  columnCenter: { marginVertical: "auto" },
 
   panel: {
     backgroundColor: colors.surface,
@@ -230,22 +308,45 @@ const styles = StyleSheet.create({
     padding: spacing.xxl,
     gap: spacing.xl,
   },
-  panelFlat: { backgroundColor: 'transparent', borderWidth: 0, padding: 0 },
+  panelFlat: { backgroundColor: "transparent", borderWidth: 0, padding: 0 },
 
   heading: { gap: spacing.sm },
   section: { gap: spacing.md },
   sectionHead: { gap: 2 },
 
-  steps: { flexDirection: 'row', gap: spacing.xs },
-  stepBar: { flex: 1, height: 3, borderRadius: radius.pill, backgroundColor: colors.offset },
+  steps: { flexDirection: "row", gap: spacing.xs },
+  stepBar: {
+    flex: 1,
+    height: 3,
+    borderRadius: radius.pill,
+    backgroundColor: colors.offset,
+  },
   stepBarOn: { backgroundColor: colors.accent },
 
-  labeled: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  labeledLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
+  labeled: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  labeledLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+  },
 
-  // 누름 영역 44는 `tap.textLine`이 맡는다. 여기서는 폭만 내용에 맞춘다.
-  link: { alignSelf: 'flex-start', ...tap.textLine },
+  /*
+    인증 화면에서 가장 자주 눌리는 것이 이 링크들이다(회원가입·다른 방법으로 로그인·약관).
+    커진 만큼 음수 마진으로 되돌려 패널 안 세로 리듬은 그대로 둔다.
+  */
+  link: {
+    alignSelf: "flex-start",
+    minHeight: touch.min,
+    justifyContent: "center",
+    marginVertical: -spacing.md,
+  },
   error: { color: colors.danger },
 
-  footer: { gap: spacing.md, alignItems: 'flex-start' },
+  footer: { gap: spacing.md, alignItems: "flex-start" },
+  footerLinks: { flexDirection: "row", flexWrap: "wrap", gap: spacing.lg },
+  footerLink: {
+    minHeight: touch.min,
+    justifyContent: "center",
+    marginVertical: -spacing.md,
+  },
 });
