@@ -5,6 +5,7 @@ import {
   ActionBar,
   AppText,
   Button,
+  EmptyState,
   Group,
   IconButton,
   LearningRow,
@@ -12,7 +13,7 @@ import {
   Row,
   Screen,
 } from '@/components';
-import { useStudentItems } from '@/features/learning';
+import { useStudentItems, useQueuedItems } from '@/features/learning';
 import { useContent } from '@/features/content';
 import { useProgress } from '@/features/progress';
 import { useToast } from '@/features/toast';
@@ -41,6 +42,11 @@ export default function StudentPick() {
   const router = useRouter();
   const params = useLocalSearchParams<{ grade?: string; area?: string; topic?: string }>();
   const { personal, academy, hasPersonal } = useStudentItems();
+  /**
+   * 지금까지 담아 둔 개수. **담긴 칸 수가 아니라 보이는 개수를 쓴다**(`useQueuedItems`) —
+   * 공개가 끝난 학습은 담아 둔 목록에서 빠지므로 두 숫자가 어긋난다.
+   */
+  const queued = useQueuedItems();
   const { addToQueue, removeFromQueue, isQueued } = useProgress();
   const {
     sets,
@@ -287,13 +293,29 @@ export default function StudentPick() {
       {/*
         4단계: 학습 목록. 유형 이름은 위 경로에 이미 있으므로 섹션 제목으로 또 쓰지 않는다.
         실패했으면 `이 유형은 아직 준비 중이에요.`도 사실이 아니다 — 위 실패 줄이 그 자리를 맡는다.
+
+        **읽는 중에도 그 문장은 사실이 아니다**(D-133 · A-116). `matched`는 콘텐츠가 오기 전까지
+        비어 있어서, 이 단계 URL로 직접 들어온 학생에게 `학습을 불러오고 있어요.`와
+        `이 유형은 아직 준비 중이에요.`가 한 화면에 함께 섰다. 앞의 세 단계는 이미
+        `contentLoading`을 보고 있었고 이 단계만 빠져 있었다.
       */}
-      {grade && area && topic && !loadError ? (
-        matched.length > 0 ? (
-          <>
-            <AppText variant="caption" tone="tertiary">
-              지금 풀지 않아도 돼요. 담아 두면 홈에서 이어서 풀 수 있어요.
-            </AppText>
+      {grade && area && topic && !contentLoading && !loadError ? (
+        <>
+          {/*
+            **담은 개수를 이 화면에서 말한다.** 담기 성공은 토스트 한 줄이 전부였고 2.4초 뒤
+            사라져서, 시험 범위를 유형 여러 개에서 골라 담는 학생은 지금까지 몇 개를 담았는지
+            알 길이 없었다. 문장은 학습 탭과 같은 것을 쓴다(`learn.tsx`).
+
+            담은 것이 0개일 때 `없어요`라고 하지 않는 이유 둘: 기록 조회가 아직 끝나지 않았을 수
+            있고(D-133), 이 자리에서 필요한 말은 담아 두면 어떻게 되는지다.
+          */}
+          <AppText variant="caption" tone="tertiary">
+            {queued.items.length > 0
+              ? `담아 둔 학습 ${queued.items.length}개가 있어요. 담은 순서대로 풀 수 있어요.`
+              : '지금 풀지 않아도 돼요. 담아 두면 홈에서 이어서 풀 수 있어요.'}
+          </AppText>
+
+          {matched.length > 0 ? (
             <Group>
               {matched.map((x) => (
                 <LearningRow
@@ -320,14 +342,39 @@ export default function StudentPick() {
                 />
               ))}
             </Group>
-          </>
-        ) : (
+          ) : (
+            /* 빈 상태는 앱에 형태가 하나다(D-104). 손으로 만든 `Group`+`View`를 쓰지 않는다. */
+            <EmptyState testID="pick-empty" title="이 유형은 아직 준비 중이에요." />
+          )}
+
+          {/*
+            **여러 유형을 오가며 담는 일을 화면이 돕는다.** 소개 화면이 학생에게 약속한 일에는
+            `시험 범위`가 있고(마스터 플랜 4절), 시험 범위는 유형 하나에 담기지 않는다. 그런데
+            이 마지막 단계에서 나가는 길은 좌상단 `뒤로` 하나뿐이었고, 담아 둔 목록으로 가려면
+            학습 탭까지 돌아가야 했다.
+
+            줄을 둘만 두는 기준은 **뒤로가기가 한 번에 닿는 곳은 두지 않는다**다. 뒤로 한 번은
+            유형 목록이라(`step`이 단계마다 push한다) 그 줄은 필요 없고, 영역 목록은 두 번
+            눌러야 닿아 줄로 둔다. 갈 곳이 둘이면 버튼을 나란히 두지 않고 `Group`+`Row`로
+            한 줄에 하나씩 고르게 한다(D-047 · `DESIGN.md` §14-1).
+          */}
           <Group>
-            <View style={{ padding: spacing.lg }}>
-              <AppText tone="secondary">이 유형은 아직 준비 중이에요.</AppText>
-            </View>
+            {queued.items.length > 0 ? (
+              <Row
+                testID="pick-queue-all"
+                title="담아 둔 학습 보기"
+                showChevron
+                onPress={() => router.push('/student/queue' as never)}
+              />
+            ) : null}
+            <Row
+              testID="pick-area-again"
+              title="영역 다시 고르기"
+              showChevron
+              onPress={() => step({ grade })}
+            />
           </Group>
-        )
+        </>
       ) : null}
     </Screen>
   );
