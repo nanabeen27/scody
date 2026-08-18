@@ -9,6 +9,7 @@ import {
   AppText,
   BarRow,
   ActionBar,
+  LoadFailed,
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
 import { formatDate } from '@/features/learning';
@@ -46,6 +47,11 @@ export default function ParentDetail() {
   const child = childrenOf(account.userId).find((c) => c.userId === childId);
   const r = useChildReport(childId ?? '', month);
 
+  /*
+    **연결이 아니라 조회가 문제일 수 있다.** 이 갈래는 세션 스냅샷만 보므로(`childrenOf`)
+    조회 상태와 무관하게 판정할 수 있다 — 그래서 권한 문장은 여기에만 둔다.
+    학습 기록이 아직 오지 않은 것은 아래에서 따로 말한다.
+  */
   if (!child) {
     return (
       <Screen testID="parent-detail" backFallback="/parent/report" title="자녀를 찾을 수 없어요">
@@ -67,13 +73,56 @@ export default function ParentDetail() {
   const maxLoad = Math.max(...r.byWeekday.map((d) => d.count), 1);
   const perQuestion =
     r.totals.questions > 0 ? Math.round(r.totals.timeSec / r.totals.questions) : 0;
+  // 어느 갈래에서도 같은 제목과 같은 이탈 경로를 쓴다 — 상태에 따라 나가는 길이 달라지지 않게.
+  const back = `/parent/report?child=${child.userId}&month=${r.month}`;
+  const title = `${child.name} 님 ${r.label} 자세히`;
+
+  /*
+    **읽는 중 · 실패 · 없음을 셋으로 가른다**(§9 · D-136 · D-168 · 기준 구현 `app/student/index.tsx`).
+    이 화면은 조회 중에도 `{N}월에는 푼 학습이 없어요`라고 말했다 — 리포트에서 `자세히 보기`를
+    누르면 조회가 다시 도는 창이 있어서, 학부모는 방금 지표를 본 달을 비었다고 읽었다.
+  */
+  /** **다시 조회가 도는 중**(첫 조회가 아니다). 실패 줄의 버튼이 그 사이 라벨로 진행을 말한다. */
+  const retrying = r.loading && r.loaded;
+  /** 이 화면이 셀 것이 손에 하나도 없다(그 달 학습 · 담긴 오답 · 학원 배정 전부). */
+  const nothing = r.totals.count === 0 && r.notes.total === 0 && academySubmit.assigned === 0;
+  /** 실패 자리. 이 화면의 모든 값이 같은 두 조회에서 오므로 면은 하나다(§9). */
+  const failure = r.error ? (
+    <LoadFailed
+      testID="detail-load-failed"
+      retryTestID="detail-load-retry"
+      what="기록"
+      message={r.error}
+      retrying={retrying}
+      onRetry={() => void r.reload()}
+    />
+  ) : null;
+
+  /* 첫 조회 중에는 아무것도 세지 않는다. 문장은 학부모 홈·리포트와 같다. */
+  if (!r.loaded) {
+    return (
+      <Screen testID="parent-detail" backFallback={back} title={title}>
+        <AppText variant="caption" tone="secondary">
+          기록을 불러오고 있어요.
+        </AppText>
+      </Screen>
+    );
+  }
+
+  /* 손에 아무것도 없는데 조회가 실패했다면 `없어요`는 거짓이다 — 실패만 말한다(D-136). */
+  if (nothing && failure) {
+    return (
+      <Screen testID="parent-detail" backFallback={back} title={title}>
+        {failure}
+      </Screen>
+    );
+  }
 
   return (
-    <Screen
-      testID="parent-detail"
-      backFallback={`/parent/report?child=${child.userId}&month=${r.month}`}
-      title={`${child.name} 님 ${r.label} 자세히`}
-    >
+    <Screen testID="parent-detail" backFallback={back} title={title}>
+      {/* 실패했지만 읽어 둔 값이 있을 때. 가진 것은 여전히 사실이라 지우지 않는다(D-136). */}
+      {failure}
+
       {r.totals.count === 0 ? (
         <Group>
           <View style={{ padding: spacing.lg }}>

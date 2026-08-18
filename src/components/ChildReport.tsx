@@ -8,6 +8,7 @@ import { Row } from './Row';
 import { Button } from './Button';
 import { Icon } from './Icon';
 import { IconButton } from './IconButton';
+import { LoadFailed } from './LoadFailed';
 import { Pager } from './Pager';
 import { RichText } from './RichText';
 import { SourceTag } from './SourceTag';
@@ -95,6 +96,9 @@ function Metric({
 /**
  * 자녀 월간 리포트. **한 달이 리포트 하나이고, 학원 과제와 개인 학습을 갈라서 말한다.**
  *
+ * **아는 것만 말한다.** 리포트의 모든 값이 두 조회에서 오므로 `읽는 중 · 실패 · 없음`을 셋으로
+ * 가른다(§9 · D-136 · D-168). 조회 상태는 `useChildReport`가 계산과 함께 준다.
+ *
  * 학부모는 휴대폰으로 본다. 그래서 지표를 카드가 아니라 목록 한 줄로 두고,
  * 블록을 학부모의 판단 순서로 놓는다: ① 지금 문제가 있나 → ② 어느 달 → ③ 이 달 요약 →
  * ④ 학원 과제(반 비교 포함) → ⑤ 개인 학습 → ⑥ 틀린 걸 다시 봤나 → ⑦ 어디가 약한가 →
@@ -156,21 +160,75 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
   /** 보고 있는 달이 비었을 때 옮겨 갈 달. 없으면 null이라 길을 만들지 않는다. */
   const jumpTo = r.latest && r.latest !== r.month ? r.latest : null;
 
-  if (r.allRows.length === 0 && r.pending.length === 0) {
+  /*
+    **읽는 중 · 실패 · 없음을 셋으로 가른다**(`DESIGN.md` §9 · D-136 · D-168).
+    기준 구현은 `app/student/index.tsx`이고 상태 이름과 게이트 방식을 그대로 맞춘다.
+
+    이 화면은 세 상태를 하나로 뭉개고 있었다: 리포트가 보는 값은 전부 두 조회에서 오는데
+    (`useChildReport`) 조회 상태를 한 번도 보지 않아 `allRows`와 `pending`이 비어 있으면
+    `아직 학습 기록이 없어요`라고 말했다 — 그 조건은 ①첫 조회 중과 ②조회가 실패한 뒤
+    **영구히** 참이라, 같은 순간 학부모 홈이 `기록을 불러오고 있어요`라고 정확히 말하는
+    동안 리포트 탭은 같은 자녀에게 기록이 없다고 단정했다(D-090이 홈에서 고친 결함이다).
+  */
+  /** **다시 조회가 도는 중**(첫 조회가 아니다). 실패 줄의 버튼이 그 사이 라벨로 진행을 말한다. */
+  const retrying = r.loading && r.loaded;
+  /** 손에 든 기록이 하나도 없다. 첫 조회 중과 실패 뒤에도 참이라 이것만으로 `없어요`를 말할 수 없다. */
+  const nothing = r.allRows.length === 0 && r.pending.length === 0;
+  /**
+   * 실패 자리. **한 화면에 실패 면은 하나다**(§9) — 리포트의 모든 블록이 같은 두 조회에
+   * 매달려 있어서 자리마다 빨간 줄을 두면 한 번의 실패가 열 번으로 읽힌다.
+   */
+  const failure = r.error ? (
+    <LoadFailed
+      testID="report-load-failed"
+      retryTestID="report-load-retry"
+      what="기록"
+      message={r.error}
+      retrying={retrying}
+      onRetry={() => void r.reload()}
+    />
+  ) : null;
+
+  /*
+    첫 조회 중에는 지표도 빈 상태도 그리지 않고 한 줄만 둔다. 문장은 학부모 홈과 같다
+    (`app/parent/index.tsx`) — 두 탭이 같은 자녀에 대해 다른 말을 하지 않게.
+    게이트는 `loaded`에 건다: 재조회마다 리포트가 사라지면 그것이 D-168이 고친 결함이다.
+  */
+  if (!r.loaded) {
     return (
-      <Group>
-        <View style={{ padding: spacing.lg, gap: spacing.xs }}>
-          <AppText variant="label">아직 학습 기록이 없어요</AppText>
-          <AppText variant="caption" tone="secondary">
-            자녀가 학습을 제출하면 달마다 리포트가 하나씩 쌓여요.
-          </AppText>
-        </View>
-      </Group>
+      <AppText variant="caption" tone="secondary">
+        기록을 불러오고 있어요.
+      </AppText>
+    );
+  }
+
+  /*
+    손에 아무것도 없을 때. **못 읽은 것과 없는 것은 다르다** — 실패했으면 개수를 세지 않고
+    `없어요`도 말하지 않는다(D-136). 그 자리에는 실패 문장과 다시 시도할 행동만 둔다.
+  */
+  if (nothing) {
+    return (
+      failure ?? (
+        <Group>
+          <View style={{ padding: spacing.lg, gap: spacing.xs }}>
+            <AppText variant="label">아직 학습 기록이 없어요</AppText>
+            <AppText variant="caption" tone="secondary">
+              자녀가 학습을 제출하면 달마다 리포트가 하나씩 쌓여요.
+            </AppText>
+          </View>
+        </Group>
+      )
     );
   }
 
   return (
     <View style={{ gap: isMobile ? spacing.lg : spacing.xl }}>
+      {/*
+        실패했지만 손에 기록이 있을 때. **이미 읽어 둔 값은 지우지 않는다**(D-136) —
+        마지막으로 성공한 조회가 준 리포트는 여전히 사실이고, 실패했다는 사실만 위에 밝힌다.
+      */}
+      {failure}
+
       {/* ① 달과 무관한 '지금' 상태. 없으면 그리지 않는다. */}
       {r.pending.length > 0 ? (
         <Section title={`아직 안 낸 학원 과제 ${r.pending.length}개`}>
