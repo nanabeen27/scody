@@ -24,6 +24,27 @@ const VISITOR_TABS: { value: Visitor; label: string }[] = [
 const INTRO = 'Scody는 학생의 학습을 가장 효율적으로 만드는 학습 플랫폼입니다.';
 
 /**
+ * **지금 실제로 되는 것과 안 되는 것.** 로그인·가입 CTA를 누르기 전에 말한다.
+ *
+ * 왜: 카카오 OAuth·휴대폰 OTP·계정 만들기가 아직 서버에 연결되지 않았다(M-DB-2). 로그인
+ * (`app/login.tsx`)·가입(`app/signup.tsx`)·내부 로그인(`app/staff.tsx`) 세 화면은 각자 그 사실을
+ * 밝히는데, **로그인 전 첫 화면인 이 페이지만 밝히지 않았다.** 그래서 마지막 CTA 띠가 `가입은
+ * 잠깐이면 돼요. 카카오나 휴대폰 번호로 시작할 수 있어요.`라고 반대로 말하고 있었다 — 눌러 보고서야
+ * 아니라는 것을 알게 된다. 푸터가 말하던 것은 약관 초안·사업자정보 없음뿐이라 이 사실을 대신하지
+ * 못한다.
+ *
+ * 되는 쪽은 스코디 아이디와 비밀번호 로그인이다(`app/login.tsx`의 정식 로그인 수단). 그래서
+ * "안 된다"만 말하고 끝내지 않고 지금 열려 있는 문을 함께 말한다.
+ *
+ * 두 자리(히어로 CTA 아래 · 마지막 CTA 띠)가 같은 상수를 쓴다 — 문장을 두 벌로 두면 한쪽만 낡는다.
+ * 히어로는 이 두 문장까지만 두고, 카카오·휴대폰이 어떻게 되는지는 마지막 띠에서 말한다 — 첫 화면에서
+ * 넷을 읽게 하면 소개보다 고지가 먼저 보인다. 실제 인증이 붙는 날 이 상수와 두 자리를 함께
+ * 지운다(M-DB-2의 완료 조건).
+ */
+const SIGNUP_PENDING = '회원가입은 아직 연결되지 않았어요.';
+const LOGIN_AVAILABLE = '이미 스코디 아이디가 있으면 로그인할 수 있어요.';
+
+/**
  * 큰 제목의 줄바꿈 규칙. React Native Web은 기본이 `break-word`라
  * '만드/는 학습'처럼 한글 단어 중간이 끊긴다. 웹에서만 어절 단위로 되돌린다.
  */
@@ -158,14 +179,35 @@ export function WebLanding() {
               눌러야 하는지 한 번 더 판단해야 했다.
             */}
             {account ? null : (
-              <View style={styles.heroActions}>
-                <Button
-                  testID="hero-signup"
-                  label={view.cta}
-                  onPress={() => router.push(view.ctaHref as never)}
-                  style={styles.heroBtn}
-                />
-              </View>
+              <>
+                <View style={styles.heroActions}>
+                  <Button
+                    testID="hero-signup"
+                    label={view.cta}
+                    onPress={() => router.push(view.ctaHref as never)}
+                    style={styles.heroBtn}
+                  />
+                </View>
+                {/*
+                  **버튼 바로 아래에서 지금 되는 것을 말한다.** 이 자리가 이 화면에서 처음 누르는
+                  곳이라, 여기서 말하지 않으면 가입 화면에 가서야 알게 된다(M-DB-2). 색 띠나 경고
+                  상자로 감싸지 않는다 — 틴트 callout은 §13이 막은 모양이고, 이것은 겁줄 일이
+                  아니라 상태를 알리는 잔글씨다.
+                */}
+                <View style={styles.heroNote}>
+                  {/*
+                    `tertiary`가 아니라 `secondary`다. `inkTertiary`는 화면에서 가장 흐린 글자로
+                    대비가 3.23:1(AA 미달)이라 **판단에 쓰는 값을 두지 않는 자리**다(§8).
+                    누를지 말지를 여기서 정하므로 읽히는 톤에 둔다.
+                  */}
+                  <AppText variant="caption" tone="secondary">
+                    {SIGNUP_PENDING}
+                  </AppText>
+                  <AppText variant="caption" tone="secondary">
+                    {LOGIN_AVAILABLE}
+                  </AppText>
+                </View>
+              </>
             )}
           </View>
 
@@ -183,14 +225,23 @@ export function WebLanding() {
       {visitor === 'parent' ? <ParentSections /> : null}
       {visitor === 'teacher' ? <TeacherSections /> : null}
 
-      {/* 마지막 CTA */}
+      {/*
+        마지막 CTA. **제목이 이 띠의 역할을 말한다** — 여기는 마지막으로 누르는 자리라
+        지금 무엇이 열려 있는지 밝히고 나서 버튼을 준다(M-DB-2).
+      */}
       <Band tone="accent" pt={band.md} pb={band.md}>
         <Reveal style={styles.finalWrap}>
           <AppText variant="title" style={styles.finalTitle}>
-            오늘의 국어, 지금 시작해요
+            시작하기 전에 알려드릴 것이 있어요
           </AppText>
           <AppText variant="bodyLg" style={styles.finalSub}>
-            가입은 잠깐이면 돼요. 카카오나 휴대폰 번호로 시작할 수 있어요.
+            {SIGNUP_PENDING}
+          </AppText>
+          <AppText variant="body" style={styles.finalSub}>
+            카카오와 휴대폰 인증을 붙이는 중이에요.
+          </AppText>
+          <AppText variant="body" style={styles.finalSub}>
+            {LOGIN_AVAILABLE}
           </AppText>
           <View style={styles.finalActions}>
             <Button
@@ -256,6 +307,12 @@ interface VisitorView {
   sub: string;
   bullets: string[];
   cta: string;
+  /**
+   * 가입 화면으로 넘길 주소. **역할을 이름에 쓴 CTA는 그 역할을 쿼리로 실어 보낸다** —
+   * `학부모로 시작하기`가 `/signup`으로만 가면 가입 화면이 기본값인 `학생`을 골라 놓아서,
+   * 방금 고른 것과 다른 역할이 선택된 화면을 만난다(`app/signup.tsx`의 `role` 파라미터).
+   * 학생도 기본값에 기대지 않고 명시한다 — 기본값이 바뀌어도 이 CTA의 뜻은 그대로여야 한다.
+   */
   ctaHref: string;
   visual: () => React.ReactElement;
 }
@@ -276,7 +333,7 @@ const VISITOR_VIEW: Record<Visitor, VisitorView> = {
       '틀린 유형과 같은 문제를 다음 학습으로 추천',
     ],
     cta: '학생으로 시작하기',
-    ctaHref: '/signup',
+    ctaHref: '/signup?role=student',
     visual: () => <PhoneMock />,
   },
   parent: {
@@ -293,7 +350,7 @@ const VISITOR_VIEW: Record<Visitor, VisitorView> = {
       '연결된 자녀의 오답노트 열람',
     ],
     cta: '학부모로 시작하기',
-    ctaHref: '/signup',
+    ctaHref: '/signup?role=parent',
     visual: () => <ChildSummaryMock />,
   },
   teacher: {
@@ -1220,6 +1277,12 @@ const styles = StyleSheet.create({
   heroSub: { maxWidth: 460, marginTop: spacing.xs },
   heroActions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.lg },
   heroBtn: { height: 52, borderRadius: radius.lg, paddingHorizontal: spacing.xl },
+  /**
+   * 버튼에 딸린 두 줄. 줄끼리는 `xs`로 붙여 한 덩어리로 읽히게 한다.
+   * `marginTop`을 주지 않는다 — 부모(`heroText`)의 `gap: md`가 이미 버튼과 떼어 놓고,
+   * 여기서 더 주면 버튼과 상관없는 문단으로 읽힌다.
+   */
+  heroNote: { gap: spacing.xs, maxWidth: 460 },
 
   heroVisual: { alignItems: 'center' },
   heroVisualCol: { flex: 1 },
