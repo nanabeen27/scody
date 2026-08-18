@@ -19,7 +19,7 @@ import { spacing } from '@/theme/tokens';
 /**
  * 로그인 화면.
  *
- * ## 무엇을 묻는가 (D-166)
+ * ## 무엇을 묻는가 (D-171)
  *
  * **스코디 아이디 + 비밀번호가 정식 로그인이다.** 가입 화면이 그 둘을 받는데(`app/signup.tsx`의
  * `signup-id`·`signup-pw`) 그것을 쓰는 공개 로그인이 없었고, 대신 이 화면은 휴대폰 번호를 받아
@@ -98,7 +98,7 @@ export default function Login() {
     증상("눌러도 아무 일이 없다")을 만드는 방향이다.
   */
 
-  /** 아이디 + 비밀번호. 이 화면의 주 경로다(D-166). */
+  /** 아이디 + 비밀번호. 이 화면의 주 경로다(D-171). */
   async function submit() {
     if (busy) return;
     setBusy(true);
