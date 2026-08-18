@@ -100,13 +100,19 @@ interface BillRow {
  *
  * **저장이 실패하면 화면도 바뀌지 않고, 운영 기록에도 남지 않는다.** 낙관적으로 먼저 올려 두면
  * 화면은 바뀐 값을 말하는데 서버에는 없다.
+ *
+ * **읽기 전에는 `Stepper`를 그리지 않는다.** 조회가 도는 사이에 화살표를 누르면 누른 항목만
+ * 오르고 나머지 여섯 개가 기준값으로 되돌아간 정책 행이 쌓이며, 그 변경이 `기준값 → 기준값±step`
+ * 으로 운영 기록에 남는다(`src/features/pricing.tsx`의 `save` 주석). 눌러도 아무 일이 없는 버튼도
+ * 두지 않지만, **잘못된 일이 일어나는 버튼**은 더 두지 않는다(§8·D-036).
  */
 export default function AdminBilling() {
-  const { policy, loading, bump, reset, changed } = usePricing();
+  const { policy, loading, loaded, error: loadError, reload, bump, reset, changed } = usePricing();
   const { log } = useAudit();
   const { account } = useSession();
   const actor = account?.name ?? '운영자';
-  const [error, setError] = useState<string | null>(null);
+  /** 저장이 거절됐거나 실패한 이유. 조회 실패(`loadError`)와 다른 사실이라 따로 든다. */
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   /**
    * 매출 추정과 학원 목록은 서버에서 온다.
@@ -139,6 +145,12 @@ export default function AdminBilling() {
   const churnedBills = bills.filter((b) => b.status === '이탈');
   const churnedSeats = churnedBills.reduce((n, b) => n + b.seats, 0);
 
+  /*
+    `before`는 **화면에 있는 값**이다 — 그래서 그 값이 서버 값일 때만 이 함수에 닿아야 한다.
+    조회 전에 불리면 운영 기록에 실제로 일어나지 않은 변경이 남는다. 아래 렌더가 `loaded`일 때만
+    `Stepper`를 그리고, provider의 `save`가 같은 조건을 한 번 더 본다(화면 숨김만으로 판단하지
+    않는다 — CLAUDE.md).
+  */
   async function change(knob: Knob, direction: 1 | -1) {
     const before = policy[knob.key];
     const limits = PRICING_LIMITS[knob.key];
@@ -146,10 +158,10 @@ export default function AdminBilling() {
     if (after === before) return;
     const res = await bump(knob.key, direction);
     if (!res.ok) {
-      setError(res.error ?? '요금 정책을 저장하지 못했어요.');
+      setSaveError(res.error ?? '요금 정책을 저장하지 못했어요.');
       return;
     }
-    setError(null);
+    setSaveError(null);
     revenueQuery.reload();
     await log({
       actor,
@@ -161,10 +173,10 @@ export default function AdminBilling() {
   async function onReset() {
     const res = await reset();
     if (!res.ok) {
-      setError(res.error ?? '요금 정책을 저장하지 못했어요.');
+      setSaveError(res.error ?? '요금 정책을 저장하지 못했어요.');
       return;
     }
-    setError(null);
+    setSaveError(null);
     revenueQuery.reload();
     await log({ actor, action: '요금 정책', detail: '기본값으로 되돌림' });
   }
@@ -211,52 +223,76 @@ export default function AdminBilling() {
       <AppText variant="caption" tone="tertiary">
         바꾼 값은 서버에 남고 지난 값도 그대로 보관돼요. 실제 결제·정산에는 아직 반영되지 않아요.
       </AppText>
-      {/* 값을 읽는 동안에는 기준값이 화면에 있다 — 그것을 서버 값처럼 말하지 않는다. */}
+      {/*
+        **읽는 중 · 실패 · 정상 셋으로 가른다**(§9·D-136). 화면에 있는 값은 조회가 끝나기 전에는
+        기준값이라 그것을 서버 값처럼 말하지 않고, 그 값을 **바꾸는 컨트롤도 두지 않는다**.
+        이 화면의 모든 자리가 같은 조회에 매달려 있으므로 실패 면은 맨 위 하나다.
+      */}
       {loading ? (
         <AppText variant="caption" tone="secondary">
           요금 정책을 불러오고 있어요.
         </AppText>
       ) : null}
-      {error ? (
+      {loadError ? (
+        <View style={styles.loadFailed} testID="billing-load-failed">
+          <AppText variant="caption" style={{ color: colors.danger }}>
+            요금 정책을 불러오지 못했어요. {loadError}
+          </AppText>
+          <Button
+            testID="billing-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void reload()}
+          />
+        </View>
+      ) : null}
+      {saveError ? (
         <AppText variant="caption" style={{ color: colors.danger }}>
-          {error}
+          {saveError}
         </AppText>
       ) : null}
 
-      <Section title="단가와 비율">
-        <Group>
-          {KNOBS.map((k) => {
-            const limits = PRICING_LIMITS[k.key];
-            return (
-              <Row
-                key={k.key}
-                title={k.label}
-                subtitle={k.desc}
-                trailing={
-                  <Stepper
-                    testID={`billing-${k.key}`}
-                    label={k.label}
-                    value={format(policy[k.key], k.unit)}
-                    atMin={policy[k.key] <= limits.min}
-                    atMax={policy[k.key] >= limits.max}
-                    onStep={(direction) => void change(k, direction)}
-                  />
-                }
+      {/*
+        읽지 못한 값 위에는 `Stepper`도 `기본값으로 되돌리기`도 놓지 않는다 — 빈 섹션 껍데기를
+        남기지 않으려고 섹션 자체를 그리지 않고, 왜 없는지는 위 한 줄이 말한다.
+      */}
+      {loaded && !loadError ? (
+        <Section title="단가와 비율">
+          <Group>
+            {KNOBS.map((k) => {
+              const limits = PRICING_LIMITS[k.key];
+              return (
+                <Row
+                  key={k.key}
+                  title={k.label}
+                  subtitle={k.desc}
+                  trailing={
+                    <Stepper
+                      testID={`billing-${k.key}`}
+                      label={k.label}
+                      value={format(policy[k.key], k.unit)}
+                      atMin={policy[k.key] <= limits.min}
+                      atMax={policy[k.key] >= limits.max}
+                      onStep={(direction) => void change(k, direction)}
+                    />
+                  }
+                />
+              );
+            })}
+          </Group>
+          {changed ? (
+            <ActionBar>
+              <Button
+                testID="billing-reset"
+                variant="secondary"
+                label="기본값으로 되돌리기"
+                onPress={() => void onReset()}
               />
-            );
-          })}
-        </Group>
-        {changed ? (
-          <ActionBar>
-            <Button
-              testID="billing-reset"
-              variant="secondary"
-              label="기본값으로 되돌리기"
-              onPress={() => void onReset()}
-            />
-          </ActionBar>
-        ) : null}
-      </Section>
+            </ActionBar>
+          ) : null}
+        </Section>
+      ) : null}
 
       <Section title="매출 추정">
         {remote.error ? (
@@ -389,4 +425,6 @@ function format(value: number, unit: '원' | '%' | '명'): string {
 
 const styles = StyleSheet.create({
   legend: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm },
+  /** 실패 문장과 `다시 불러오기`를 한 덩어리로. 버튼은 `hug`이라 왼쪽에 붙인다(§8 R2·D-136). */
+  loadFailed: { gap: spacing.sm, alignItems: 'flex-start' },
 });
