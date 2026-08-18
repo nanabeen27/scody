@@ -2,20 +2,21 @@ import { useMemo, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { View, StyleSheet } from 'react-native';
 import {
+  ActionBar,
+  AppText,
+  Button,
+  Field,
+  Group,
+  Icon,
+  LoadFailed,
+  Pager,
+  RichText,
+  Row,
   Screen,
   Section,
-  Group,
-  Row,
-  Field,
-  Button,
-  AppText,
   SegmentedControl,
-  Pager,
-  Icon,
-  RichText,
-  type SegmentedOption,
-  ActionBar,
   TestDataNote,
+  type SegmentedOption,
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
 import { useAcademyStaff } from '@/features/academy';
@@ -558,19 +559,13 @@ export default function AcademyAnalytics() {
     return (
       <Screen wide testID="academy-analytics" title="성과 분석">
         <TestDataNote />
-        <View testID="analytics-load-failed" style={styles.loadFailed}>
-          <AppText variant="caption" tone="danger">
-            배정 기록을 불러오지 못했어요. {loadError}
-          </AppText>
-          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
-          <Button
-            testID="analytics-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void reloadProgress()}
-          />
-        </View>
+        <LoadFailed
+          testID="analytics-load-failed"
+          retryTestID="analytics-load-retry"
+          what="배정 기록"
+          message={loadError}
+          onRetry={() => void reloadProgress()}
+        />
       </Screen>
     );
   }
@@ -612,18 +607,14 @@ export default function AcademyAnalytics() {
         있다는 뜻이라(위 게이트) 이미 읽어 둔 값은 그대로 보여 준다 — 가진 것은 사실이다.
       */}
       {loadError ? (
-        <View testID="analytics-load-failed" style={styles.loadFailed}>
-          <AppText variant="caption" tone="danger">
-            배정 기록을 다시 불러오지 못했어요. {loadError}
-          </AppText>
-          <Button
-            testID="analytics-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void reloadProgress()}
-          />
-        </View>
+        <LoadFailed
+          testID="analytics-load-failed"
+          retryTestID="analytics-load-retry"
+          what="배정 기록"
+          message={loadError}
+          again
+          onRetry={() => void reloadProgress()}
+        />
       ) : null}
 
       <Section title="제출 현황">

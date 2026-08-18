@@ -2,21 +2,22 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import {
-  Screen,
-  Section,
-  Group,
-  Row,
+  ActionBar,
   AppText,
   BarRow,
   Button,
   Field,
+  Group,
   Icon,
-  Sparkline,
-  sparkLabel,
-  Table,
+  LoadFailed,
   RichText,
+  Row,
+  Screen,
+  Section,
+  Sparkline,
+  Table,
+  sparkLabel,
   type Column,
-  ActionBar,
 } from '@/components';
 import { useCurrentAccount } from '@/session';
 import { useAcademyStaff } from '@/features/academy';
@@ -179,19 +180,13 @@ export default function AcademyStudentDetail() {
         backFallback="/academy/classes/students"
         title={student.name}
       >
-        <View testID="academy-student-load-failed" style={styles.loadFailed}>
-          <AppText variant="caption" tone="danger">
-            학원 학습 기록을 불러오지 못했어요. {loadError}
-          </AppText>
-          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
-          <Button
-            testID="academy-student-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void Promise.all([reloadProgress(), reloadContent()])}
-          />
-        </View>
+        <LoadFailed
+          testID="academy-student-load-failed"
+          retryTestID="academy-student-load-retry"
+          what="학원 학습 기록"
+          message={loadError}
+          onRetry={() => void Promise.all([reloadProgress(), reloadContent()])}
+        />
       </Screen>
     );
   }
@@ -390,18 +385,14 @@ export default function AcademyStudentDetail() {
         여기까지 왔다는 것은 손에 든 기록이 있다는 뜻이라(위 게이트) 그 값은 그대로 보여 준다.
       */}
       {loadError ? (
-        <View testID="academy-student-load-failed" style={styles.loadFailed}>
-          <AppText variant="caption" tone="danger">
-            학원 학습 기록을 다시 불러오지 못했어요. {loadError}
-          </AppText>
-          <Button
-            testID="academy-student-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void Promise.all([reloadProgress(), reloadContent()])}
-          />
-        </View>
+        <LoadFailed
+          testID="academy-student-load-failed"
+          retryTestID="academy-student-load-retry"
+          what="학원 학습 기록"
+          message={loadError}
+          again
+          onRetry={() => void Promise.all([reloadProgress(), reloadContent()])}
+        />
       ) : null}
 
       <Section title="배정 학습 요약">

@@ -1,21 +1,22 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { View } from 'react-native';
+
 import {
   ActionBar,
-  Screen,
-  Section,
-  Group,
-  Row,
   AppText,
   Button,
   Field,
+  Group,
   Icon,
+  LoadFailed,
   Pager,
+  Row,
+  Screen,
+  Section,
   SegmentedControl,
   Table,
-  useTableSort,
   type Column,
+  useTableSort,
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
 import { useAcademyStaff } from '@/features/academy';
@@ -28,7 +29,7 @@ import {
 } from '@/features/academyStats';
 import { useToast } from '@/features/toast';
 import type { Grade } from '@/data';
-import { colors, spacing } from '@/theme/tokens';
+import { colors } from '@/theme/tokens';
 
 /**
  * 한 페이지에 보여 줄 반 수. 전량 펼치기는 122줄 × 56px ≈ 6,800px가 되어
@@ -105,7 +106,6 @@ export default function AcademyClasses() {
     if (!q) return perf;
     return perf.filter((c) => c.name.includes(q));
   }, [perf, query]);
-
 
   const studentCount = useMemo(() => new Set(classes.flatMap((c) => c.studentIds)).size, [classes]);
   /** 합계 행. 각 반의 값이 좋은지 나쁜지 판단할 기준선이다. */
@@ -254,19 +254,13 @@ export default function AcademyClasses() {
         카드로 만들지 않는다 — 실패는 알려야 하지만 화면에서 가장 무거운 것이 될 이유는 없다.
       */}
       {loadError ? (
-        <View testID="classes-load-failed" style={{ gap: spacing.sm, alignItems: 'flex-start' }}>
-          <AppText variant="caption" tone="danger">
-            반별 기록을 불러오지 못했어요. {loadError}
-          </AppText>
-          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
-          <Button
-            testID="classes-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void reloadProgress()}
-          />
-        </View>
+        <LoadFailed
+          testID="classes-load-failed"
+          retryTestID="classes-load-retry"
+          what="반별 기록"
+          message={loadError}
+          onRetry={() => void reloadProgress()}
+        />
       ) : null}
 
       {classes.length > 0 ? (

@@ -1,18 +1,18 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { View } from 'react-native';
+
 import {
-  Screen,
   AppText,
-  Button,
-  SegmentedControl,
   Field,
   Icon,
+  LoadFailed,
   Pager,
+  Screen,
+  SegmentedControl,
   Table,
-  useTableSort,
   type Column,
   type SegmentedOption,
+  useTableSort,
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
 import { useProgress } from '@/features/progress';
@@ -20,7 +20,7 @@ import { useAcademyStaff } from '@/features/academy';
 import { scopedAssignments, studentSummaries, type StudentSummary } from '@/features/academyStats';
 import { formatDate } from '@/features/learning';
 import type { Account } from '@/data';
-import { colors, spacing } from '@/theme/tokens';
+import { colors } from '@/theme/tokens';
 
 /** 한 페이지에 보여 줄 학생 수. `app/admin/users.tsx`와 같은 20명씩. */
 const PAGE = 20;
@@ -138,7 +138,6 @@ export default function AcademyStudents() {
       }));
   }, [pool, query, classQuery, classFilter, useSegments, classesByStudent, statBy]);
 
-
   const columns: Column<StudentRow>[] = [
     { key: 'name', header: '이름', cell: (r) => r.account.name, sort: COMPARE.name },
     /*
@@ -249,19 +248,13 @@ export default function AcademyStudents() {
         카드로 만들지 않는다 — 실패는 알려야 하지만 화면에서 가장 무거운 것이 될 이유는 없다.
       */}
       {loadError ? (
-        <View testID="students-load-failed" style={{ gap: spacing.sm, alignItems: 'flex-start' }}>
-          <AppText variant="caption" tone="danger">
-            학생 기록을 불러오지 못했어요. {loadError}
-          </AppText>
-          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
-          <Button
-            testID="students-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void reloadProgress()}
-          />
-        </View>
+        <LoadFailed
+          testID="students-load-failed"
+          retryTestID="students-load-retry"
+          what="학생 기록"
+          message={loadError}
+          onRetry={() => void reloadProgress()}
+        />
       ) : null}
 
       <Field

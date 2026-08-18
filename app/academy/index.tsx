@@ -3,24 +3,25 @@ import { useMemo, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import {
   ActionBar,
-  BarRow,
-  Disclosure,
-  Screen,
-  Section,
-  Group,
-  Row,
-  Button,
   AppText,
+  BarRow,
+  Button,
+  Disclosure,
+  Group,
   Icon,
+  LoadFailed,
   Pager,
   ProgressBar,
+  Row,
+  Screen,
+  Section,
   SegmentedControl,
   Sparkline,
-  sparkLabel,
   Table,
-  useTableSort,
-  type Column,
   TestDataNote,
+  sparkLabel,
+  type Column,
+  useTableSort,
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
 import { useAcademyStaff } from '@/features/academy';
@@ -400,19 +401,13 @@ export default function AcademyDashboard() {
     return (
       <Screen wide testID="academy-dashboard" title="대시보드" lead={lead}>
         <TestDataNote />
-        <View testID="academy-load-failed" style={styles.loadFailed}>
-          <AppText variant="caption" tone="danger">
-            배정 기록을 불러오지 못했어요. {loadError}
-          </AppText>
-          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
-          <Button
-            testID="academy-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void retryLoad()}
-          />
-        </View>
+        <LoadFailed
+          testID="academy-load-failed"
+          retryTestID="academy-load-retry"
+          what="배정 기록"
+          message={loadError}
+          onRetry={() => void retryLoad()}
+        />
       </Screen>
     );
   }
@@ -486,18 +481,14 @@ export default function AcademyDashboard() {
         배정이 있다는 뜻이라(위 게이트) 이미 읽어 둔 값은 그대로 보여 준다 — 가진 것은 사실이다.
       */}
       {loadError ? (
-        <View testID="academy-load-failed" style={styles.loadFailed}>
-          <AppText variant="caption" tone="danger">
-            배정 기록을 다시 불러오지 못했어요. {loadError}
-          </AppText>
-          <Button
-            testID="academy-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void retryLoad()}
-          />
-        </View>
+        <LoadFailed
+          testID="academy-load-failed"
+          retryTestID="academy-load-retry"
+          what="배정 기록"
+          message={loadError}
+          again
+          onRetry={() => void retryLoad()}
+        />
       ) : null}
 
       <SegmentedControl

@@ -1,19 +1,19 @@
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import {  } from 'react-native';
 import {
-  Button,
+  AppText,
   Disclosure,
+  Field,
   Icon,
+  LoadFailed,
+  Pager,
   Screen,
   Section,
-  Field,
   SegmentedControl,
-  Pager,
-  AppText,
   Table,
-  type SegmentedOption,
   type Column,
+  type SegmentedOption,
 } from '@/components';
 import { normalizePhone, type Account, type Role } from '@/data';
 import {
@@ -24,7 +24,7 @@ import {
 import { errorMessage } from '@/lib/supabase';
 import { gradeOf, listAccounts, type AdminAccount } from '@/repo/admin';
 import { ROLE_LABEL } from '@/session/routing';
-import { colors, spacing } from '@/theme/tokens';
+import { colors } from '@/theme/tokens';
 
 const PAGE_SIZE = 20;
 
@@ -387,19 +387,13 @@ export default function AdminUsers() {
           이 화면의 목록·개수·필터가 모두 이 한 조회에 매달려 있어 자리마다 두지 않는다.
         */}
         {failed ? (
-          <View testID="users-load-failed" style={styles.loadFailed}>
-            <AppText variant="caption" tone="danger">
-              계정을 읽지 못했어요. {failed}
-            </AppText>
-            {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
-            <Button
-              testID="users-load-retry"
-              variant="secondary"
-              hug
-              label="다시 불러오기"
-              onPress={retry}
-            />
-          </View>
+          <LoadFailed
+            testID="users-load-failed"
+            retryTestID="users-load-retry"
+            what="계정"
+            message={failed}
+            onRetry={retry}
+          />
         ) : null}
         {/*
           찾은 다음에 할 일을 표 앞에서 말한다. 예전에는 `rowLabel`만 `계정 상세 열기`라고 했다 —
@@ -471,8 +465,4 @@ export default function AdminUsers() {
   );
 }
 
-const styles = StyleSheet.create({
-  /** 실패 문장과 다시 시도. 폭은 내용만큼이다(`app/student/index.tsx`와 같은 값). */
-  loadFailed: { gap: spacing.sm, alignItems: 'flex-start' },
-});
 

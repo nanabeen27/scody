@@ -2,23 +2,24 @@ import { useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { View, Pressable, StyleSheet } from 'react-native';
 import {
-  Screen,
-  Section,
-  Group,
-  Row,
-  Button,
-  AppText,
-  EmptyState,
-  Passage,
-  RichText,
-  AskField,
   ActionBar,
+  AppText,
+  AskField,
+  Button,
+  ConfirmStep,
+  EmptyState,
+  Group,
   Icon,
   IconButton,
-  Steps,
-  SourceTag,
+  LoadFailed,
   MotionAsset,
-  ConfirmStep,
+  Passage,
+  RichText,
+  Row,
+  Screen,
+  Section,
+  SourceTag,
+  Steps,
 } from '@/components';
 import { useSession } from '@/session';
 import { useProgress, type WrongNote } from '@/features/progress';
@@ -92,18 +93,13 @@ export default function Review() {
   if (loadError) {
     return (
       <Screen testID="student-review" backFallback="/student/learn" title={title}>
-        <View style={{ gap: spacing.sm, alignItems: 'flex-start' }} testID="review-load-failed">
-          <AppText variant="caption" tone="danger">
-            오답을 불러오지 못했어요. {loadError}
-          </AppText>
-          <Button
-            testID="review-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void Promise.all([reloadProgress(), reloadContent()])}
-          />
-        </View>
+        <LoadFailed
+          testID="review-load-failed"
+          retryTestID="review-load-retry"
+          what="오답"
+          message={loadError}
+          onRetry={() => void Promise.all([reloadProgress(), reloadContent()])}
+        />
       </Screen>
     );
   }

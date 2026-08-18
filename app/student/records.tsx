@@ -1,16 +1,17 @@
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
-import { View } from 'react-native';
+
 import {
-  Screen,
-  Section,
+  AppText,
+  Button,
+  EmptyState,
   Group,
+  Icon,
+  LoadFailed,
   Row,
   ScoreCard,
-  Button,
-  Icon,
-  AppText,
-  EmptyState,
+  Screen,
+  Section,
   SegmentedControl,
   SourceTag,
   type SegmentedOption,
@@ -18,7 +19,7 @@ import {
 import { useCurrentAccount } from '@/session';
 import { formatDate, useStudentItems } from '@/features/learning';
 import { useProgress } from '@/features/progress';
-import { colors, spacing } from '@/theme/tokens';
+import { colors } from '@/theme/tokens';
 
 const RECENT = 5;
 
@@ -117,19 +118,13 @@ export default function StudentRecords() {
         행동 하나이고, 화면에 실패 면은 하나다 — 지표와 목록이 같은 조회에 매달려 있다.
       */}
       {loadError ? (
-        <View style={{ gap: spacing.sm, alignItems: 'flex-start' }} testID="records-load-failed">
-          <AppText variant="caption" tone="danger">
-            기록을 불러오지 못했어요. {loadError}
-          </AppText>
-          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
-          <Button
-            testID="records-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void reload()}
-          />
-        </View>
+        <LoadFailed
+          testID="records-load-failed"
+          retryTestID="records-load-retry"
+          what="기록"
+          message={loadError}
+          onRetry={() => void reload()}
+        />
       ) : null}
 
       {avg != null ? (

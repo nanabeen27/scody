@@ -3,23 +3,24 @@ import { useRouter } from 'expo-router';
 import { View, StyleSheet } from 'react-native';
 import {
   ActionBar,
+  AppText,
+  AskField,
+  Button,
   ConfirmStep,
   EmptyState,
-  Screen,
-  Section,
   Group,
-  Button,
-  AppText,
-  Passage,
-  RichText,
-  AskField,
   Icon,
   IconButton,
+  LoadFailed,
+  MotionAsset,
+  Passage,
+  RichText,
   Row,
+  Screen,
+  Section,
   SegmentedControl,
   SourceTag,
   type SegmentedOption,
-  MotionAsset,
 } from '@/components';
 import { useSession } from '@/session';
 import { useProgress, type WrongNote } from '@/features/progress';
@@ -490,19 +491,13 @@ export default function Notebook() {
         목록을 대신하지 않는다. 아래 빈 분기만 실패했을 때 입을 닫는다.
       */}
       {loadError ? (
-        <View testID="notebook-load-failed" style={styles.loadFailed}>
-          <AppText variant="caption" tone="danger">
-            오답을 불러오지 못했어요. {loadError}
-          </AppText>
-          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
-          <Button
-            testID="notebook-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void retryLoad()}
-          />
-        </View>
+        <LoadFailed
+          testID="notebook-load-failed"
+          retryTestID="notebook-load-retry"
+          what="오답"
+          message={loadError}
+          onRetry={() => void retryLoad()}
+        />
       ) : null}
 
       {firstLoad ? (

@@ -1,18 +1,19 @@
 import { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import {
+  ActionBar,
+  AppText,
+  Button,
+  Group,
+  LoadFailed,
+  Row,
   Screen,
   Section,
-  Group,
-  Row,
-  Button,
-  AppText,
   SourceBadge,
   SourceValue,
   Stepper,
   Table,
   type Column,
-  ActionBar,
 } from '@/components';
 import {
   usePricing,
@@ -234,18 +235,13 @@ export default function AdminBilling() {
         </AppText>
       ) : null}
       {loadError ? (
-        <View style={styles.loadFailed} testID="billing-load-failed">
-          <AppText variant="caption" style={{ color: colors.danger }}>
-            요금 정책을 불러오지 못했어요. {loadError}
-          </AppText>
-          <Button
-            testID="billing-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void reload()}
-          />
-        </View>
+        <LoadFailed
+          testID="billing-load-failed"
+          retryTestID="billing-load-retry"
+          what="요금 정책"
+          message={loadError}
+          onRetry={() => void reload()}
+        />
       ) : null}
       {saveError ? (
         <AppText variant="caption" style={{ color: colors.danger }}>
@@ -425,6 +421,4 @@ function format(value: number, unit: '원' | '%' | '명'): string {
 
 const styles = StyleSheet.create({
   legend: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm },
-  /** 실패 문장과 `다시 불러오기`를 한 덩어리로. 버튼은 `hug`이라 왼쪽에 붙인다(§8 R2·D-136). */
-  loadFailed: { gap: spacing.sm, alignItems: 'flex-start' },
 });

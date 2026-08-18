@@ -3,14 +3,15 @@ import { View, Pressable, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   ActionBar,
-  Screen,
-  Section,
-  Group,
-  Button,
   AppText,
+  Button,
+  EmptyState,
+  Group,
   Icon,
   LearningRow,
-  EmptyState,
+  LoadFailed,
+  Screen,
+  Section,
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
 import { useQueuedItems, useStudentItems } from '@/features/learning';
@@ -181,19 +182,13 @@ export default function StudentQueue() {
         이미 읽어 둔 목록은 지우지 않는다 — 가진 것은 여전히 사실이다.
       */}
       {loadError ? (
-        <View testID="queue-load-failed" style={styles.loadFailed}>
-          <AppText variant="caption" tone="danger">
-            학습을 불러오지 못했어요. {loadError}
-          </AppText>
-          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
-          <Button
-            testID="queue-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void retryLoad()}
-          />
-        </View>
+        <LoadFailed
+          testID="queue-load-failed"
+          retryTestID="queue-load-retry"
+          what="학습"
+          message={loadError}
+          onRetry={() => void retryLoad()}
+        />
       ) : null}
 
       {/* 되돌리기는 사라지면 기회도 사라진다. 토스트가 아니라 화면에 남는 안내다(D-038). */}

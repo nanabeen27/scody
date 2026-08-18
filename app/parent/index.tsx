@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { View } from 'react-native';
-import { Screen, Section, Group, Row, Button, AppText, EmptyState } from '@/components';
+import { AppText, EmptyState, Group, LoadFailed, Row, Screen, Section } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
 import { useChildReports } from '@/features/report';
 import { useProgress } from '@/features/progress';
@@ -84,19 +84,13 @@ export default function ParentHome() {
         빨간 줄을 두면 한 번의 실패가 두 번으로 읽힌다.
       */}
       {loadError ? (
-        <View testID="parent-load-failed" style={{ gap: spacing.sm }}>
-          <AppText variant="caption" tone="danger">
-            자녀 기록을 불러오지 못했어요. {loadError}
-          </AppText>
-          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
-          <Button
-            testID="parent-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void retryLoad()}
-          />
-        </View>
+        <LoadFailed
+          testID="parent-load-failed"
+          retryTestID="parent-load-retry"
+          what="자녀 기록"
+          message={loadError}
+          onRetry={() => void retryLoad()}
+        />
       ) : null}
 
       {/*

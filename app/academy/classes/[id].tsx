@@ -3,16 +3,17 @@ import { View, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActionBar,
+  AppText,
+  Button,
   ConfirmStep,
+  Field,
+  Group,
+  Icon,
+  LoadFailed,
+  Pager,
+  Row,
   Screen,
   Section,
-  Group,
-  Row,
-  Button,
-  Field,
-  AppText,
-  Icon,
-  Pager,
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
 import { useProgress } from '@/features/progress';
@@ -270,19 +271,13 @@ export default function ClassDetail() {
         조회에 매달려 있어서 **화면에 하나만** 둔다(§9).
       */}
       {loadError ? (
-        <View testID="class-load-failed" style={styles.loadFailed}>
-          <AppText variant="caption" tone="danger">
-            배정 기록을 불러오지 못했어요. {loadError}
-          </AppText>
-          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
-          <Button
-            testID="class-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={() => void reloadProgress()}
-          />
-        </View>
+        <LoadFailed
+          testID="class-load-failed"
+          retryTestID="class-load-retry"
+          what="배정 기록"
+          message={loadError}
+          onRetry={() => void reloadProgress()}
+        />
       ) : null}
 
       <Group>

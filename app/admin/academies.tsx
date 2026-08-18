@@ -2,20 +2,20 @@ import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import {
-  Button,
-  Screen,
-  Section,
+  AppText,
+  Field,
   Group,
   Icon,
-  Row,
-  Field,
+  LoadFailed,
   Pager,
-  useTableSort,
-  AppText,
+  Row,
+  Screen,
+  Section,
   SourceBadge,
   SourceValue,
   Table,
   type Column,
+  useTableSort,
 } from '@/components';
 import { usePricing, academyMonthly, won } from '@/features/pricing';
 import {
@@ -272,19 +272,13 @@ export default function AdminAcademies() {
         행동 하나이고, 기준 구현은 `app/student/index.tsx`의 `home-load-failed`다.
       */}
       {failed ? (
-        <View testID="academies-load-failed" style={styles.loadFailed}>
-          <AppText variant="caption" tone="danger">
-            {failedWhat}을 읽지 못했어요. {failed}
-          </AppText>
-          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
-          <Button
-            testID="academies-load-retry"
-            variant="secondary"
-            hug
-            label="다시 불러오기"
-            onPress={retryLoad}
-          />
-        </View>
+        <LoadFailed
+          testID="academies-load-failed"
+          retryTestID="academies-load-retry"
+          what={failedWhat}
+          message={failed}
+          onRetry={retryLoad}
+        />
       ) : null}
 
       <Section title="전체 요약">

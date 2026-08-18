@@ -31,6 +31,12 @@ export function LoadFailed({
   message,
   /** 다시 조회가 도는 중. `loading && loaded`가 그 상태다(첫 조회가 아니라 재조회). */
   retrying,
+  /**
+   * **이미 읽어 둔 값이 화면에 있는데 재조회가 실패한 경우.** 문장이 `다시`를 붙인다 —
+   * 그 화면은 지금 값을 보여 주고 있으므로 `불러오지 못했어요`만 쓰면 아무것도 못 읽은
+   * 것처럼 읽힌다. 목록을 지우지 않는다는 §9의 규칙과 같은 자리다.
+   */
+  again,
   onRetry,
 }: {
   testID: string;
@@ -38,12 +44,13 @@ export function LoadFailed({
   what: string;
   message: string;
   retrying?: boolean;
+  again?: boolean;
   onRetry: () => void;
 }) {
   return (
     <View testID={testID} style={styles.box}>
       <AppText variant="caption" tone="danger">
-        {what}을 불러오지 못했어요. {message}
+        {what}을 {again ? '다시 ' : ''}불러오지 못했어요. {message}
       </AppText>
       {/* 다시 시도는 그 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
       <Button
