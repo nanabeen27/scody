@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
+import { View } from 'react-native';
 import {
   ActionBar,
   Screen,
@@ -27,7 +28,7 @@ import {
 } from '@/features/academyStats';
 import { useToast } from '@/features/toast';
 import type { Grade } from '@/data';
-import { colors } from '@/theme/tokens';
+import { colors, spacing } from '@/theme/tokens';
 
 /**
  * 한 페이지에 보여 줄 반 수. 전량 펼치기는 122줄 × 56px ≈ 6,800px가 되어
@@ -54,7 +55,12 @@ export default function AcademyClasses() {
   const { accountOf } = useSession();
   const isDirector = account.academyRole === 'director';
   const { classesFor, teachers, addClass, isActiveTeacher } = useAcademyStaff();
-  const { assignments } = useProgress();
+  const {
+    assignments,
+    loaded: progressLoaded,
+    error: progressError,
+    reload: reloadProgress,
+  } = useProgress();
   const { show } = useToast();
   const classes = useMemo(() => classesFor(account), [classesFor, account]);
   const [query, setQuery] = useState('');
@@ -77,6 +83,22 @@ export default function AcademyClasses() {
   // 값은 `classPerformance`가 만든다 — 화면이 다시 계산하면 대시보드·성과 분석과 어긋난다(D-061).
   const scoped = useMemo(() => scopedAssignments(classes, assignments), [classes, assignments]);
   const perf = useMemo(() => classPerformance(classes, scoped), [classes, scoped]);
+
+  /*
+    **읽는 중 · 실패 · 없음을 셋으로 가른다**(D-136 · `DESIGN.md` §9).
+
+    반 이름·담당·학생 수는 세션에서 오지만 `배정`·`제출률`·`평균 정답률`과 합계 행은 배정 기록에서
+    온다. 첫 조회가 끝나기 전에는 그 값이 전부 `0건`·`배정 없음`이라, 배정이 있는 반에 대해 표가
+    "한 번도 안 냈다"고 말했다. 조회가 실패해도 같은 표가 남는다 — `loading`이 내려가기 때문이다.
+
+    게이트는 `loading`이 아니라 **`loaded`**다(D-163) — 반을 만들거나 담당을 바꾸면 `reload()`가
+    돌아 `loading`이 다시 참이 되는데, 그때 목록이 사라지면 방금 만든 반을 확인할 수 없다.
+  */
+  const ready = progressLoaded;
+  /** 실패 문장. 서버가 준 것을 그대로 쓴다(`errorMessage`). */
+  const loadError = progressError;
+  /** 손에 든 배정이 있으면 값은 사실이다 — 실패해도 이미 읽어 둔 것은 지우지 않는다(D-136). */
+  const canCount = ready && (!loadError || scoped.length > 0);
 
   const filtered = useMemo(() => {
     const q = query.trim();
@@ -122,32 +144,43 @@ export default function AcademyClasses() {
       cell: (r) => `${r.students.toLocaleString('en-US')}명`,
       sort: COMPARE.students,
     },
-    {
-      key: 'assigned',
-      header: '배정',
-      width: 72,
-      align: 'right',
-      priority: 3,
-      cell: (r) => `${r.assigned.toLocaleString('en-US')}건`,
-      sort: COMPARE.assigned,
-    },
-    {
-      key: 'rate',
-      header: '제출률',
-      width: 76,
-      align: 'right',
-      cell: (r) => (r.rate != null ? `${r.rate}%` : '배정 없음'),
-      sort: COMPARE.rate,
-    },
-    {
-      key: 'accuracy',
-      header: '평균 정답률',
-      width: 92,
-      align: 'right',
-      priority: 2,
-      cell: (r) => (r.avgAccuracy != null ? `${r.avgAccuracy}%` : '—'),
-      sort: COMPARE.accuracy,
-    },
+    /*
+      **배정 기록에서 오는 세 열은 그 기록을 읽은 뒤에만 만든다**(§9 · D-136). 아직 못 읽은 값을
+      `0건`·`배정 없음`으로 적으면 배정이 있는 반을 "한 번도 안 냈다"고 말하고, 칸만 비워 두면
+      그 빈 칸이 같은 뜻으로 읽힌다 — 그래서 열 자체를 두지 않는다(D-076이 `변화`·`추이`에서 쓴
+      규칙과 같다). 반 이름·담당·학생 수는 세션이 준 사실이라 남고, **행을 눌러 반 상세로 가는
+      길도 남는다** — 조회가 실패했다고 이 화면의 유일한 이동 경로까지 사라지면 안 된다.
+    */
+    ...(canCount
+      ? ([
+          {
+            key: 'assigned',
+            header: '배정',
+            width: 72,
+            align: 'right',
+            priority: 3,
+            cell: (r) => `${r.assigned.toLocaleString('en-US')}건`,
+            sort: COMPARE.assigned,
+          },
+          {
+            key: 'rate',
+            header: '제출률',
+            width: 76,
+            align: 'right',
+            cell: (r) => (r.rate != null ? `${r.rate}%` : '배정 없음'),
+            sort: COMPARE.rate,
+          },
+          {
+            key: 'accuracy',
+            header: '평균 정답률',
+            width: 92,
+            align: 'right',
+            priority: 2,
+            cell: (r) => (r.avgAccuracy != null ? `${r.avgAccuracy}%` : '—'),
+            sort: COMPARE.accuracy,
+          },
+        ] as Column<ClassPerf>[])
+      : []),
     /*
       **이 표가 눌린다는 사실을 화면이 말한다.** `Row`는 `showChevron`으로 말하는데 표에는
       아무 표시가 없었다. 대시보드의 반별 현황 표와 같은 열이다(`app/academy/index.tsx`).
@@ -205,11 +238,36 @@ export default function AcademyClasses() {
 
   return (
     <Screen wide testID="academy-classes" title="반·학생" scrollResetKey={page}>
-      {/* 반 120개·학생 3,000명은 규모 확인용 개발 로스터다(마스터 플랜 5절).
-          실제 재원생으로 읽히지 않게 `app/admin/users.tsx`와 같은 문장을 먼저 둔다. */}
+      {/*
+        실제 재원생으로 읽히지 않게 `app/admin/users.tsx`와 **같은 문장**을 먼저 둔다.
+        예전에는 `로스터 계정은…`이라고 적었는데 그 합성 로스터(반 120개·학생 3,000명)는
+        이미 전부 버렸다(마스터 플랜 5절) — 지금 로그인할 수 없는 계정은 반 평균·순위를 계산할
+        `반 비교용 계정` 12명이다. 화면이 없는 규모를 근거로 자기를 해명하고 있었다.
+      */}
       <AppText variant="caption" tone="tertiary">
-        프로토타입 테스트 계정입니다. 로스터 계정은 비밀번호가 없어 로그인할 수 없어요.
+        개발·테스트 계정입니다. 반 비교용 계정은 비밀번호가 없어 로그인할 수 없어요.
       </AppText>
+
+      {/*
+        **한 화면에 실패 면은 하나다**(§9). 아래 표의 값 다섯 열과 합계 행이 모두 이 조회에
+        매달려 있어서, 자리마다 빨간 줄을 두면 한 번의 실패가 여섯 번으로 읽힌다.
+        카드로 만들지 않는다 — 실패는 알려야 하지만 화면에서 가장 무거운 것이 될 이유는 없다.
+      */}
+      {loadError ? (
+        <View testID="classes-load-failed" style={{ gap: spacing.sm, alignItems: 'flex-start' }}>
+          <AppText variant="caption" tone="danger">
+            반별 기록을 불러오지 못했어요. {loadError}
+          </AppText>
+          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
+          <Button
+            testID="classes-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void reloadProgress()}
+          />
+        </View>
+      ) : null}
 
       {classes.length > 0 ? (
         <AppText variant="caption" tone="secondary">
@@ -373,9 +431,17 @@ export default function AcademyClasses() {
               placeholder="예: 고2"
             />
           ) : null}
+          {/*
+            **표 위 캡션은 지금 보이는 표를 설명한다.** 값 열이 없는 동안 `제출률이 낮은 반부터`는
+            거짓이다 — 그 정렬은 방금 못 읽은 값으로 세우는 것이라, 실제 순서는 반을 만든 순서다.
+            실패 이유는 화면 위 한 줄이 이미 말했으므로 여기서 반복하지 않는다(§9).
+          */}
           <AppText variant="caption" tone="secondary">
-            제출률이 낮은 반부터 보여 줘요. 열 이름을 누르면 반 전체를 다시 줄 세워요. 행을 누르면
-            반 상세로 가요.
+            {canCount
+              ? '제출률이 낮은 반부터 보여 줘요. 열 이름을 누르면 반 전체를 다시 줄 세워요. 행을 누르면 반 상세로 가요.'
+              : ready
+                ? '행을 누르면 반 상세로 가요.'
+                : '반별 기록을 불러오고 있어요. 행을 누르면 반 상세로 가요.'}
           </AppText>
           <Table
             testID="academy-class-list"
@@ -384,31 +450,37 @@ export default function AcademyClasses() {
             {...sorted.props}
             rowKey={(r) => r.classId}
             onRowPress={(r) => router.push(`/academy/classes/${r.classId}` as never)}
+            /* 스크린리더 문장도 셀과 같은 말을 한다 — 화면에 없는 값을 읽어 주지 않는다(§20). */
             rowLabel={(r) =>
               [
                 r.name,
                 teacherOf.get(r.classId) ?? '미배정',
                 `학생 ${r.students}명`,
-                `배정 ${r.assigned}건`,
-                r.rate != null ? `제출률 ${r.rate}%` : '배정 없음',
-                r.avgAccuracy != null ? `평균 정답률 ${r.avgAccuracy}%` : null,
+                canCount ? `배정 ${r.assigned}건` : null,
+                canCount ? (r.rate != null ? `제출률 ${r.rate}%` : '배정 없음') : null,
+                canCount && r.avgAccuracy != null ? `평균 정답률 ${r.avgAccuracy}%` : null,
               ]
                 .filter(Boolean)
                 .join(', ')
             }
-            footer={{
-              /*
-                합계 행의 이름은 **값이 덮는 범위**다. 값은 `classesFor(account)`가 준 반에서만
-                나오므로 선생님에게는 담당 반 4개의 합계다 — `학원 전체`라고 적으면 담당 반
-                88명을 학원 전체 3,002명으로 읽는다. 선생님에게 담당 밖 집계를 여는 것은
-                3절 권한 문제라 **값은 그대로 두고 이름만 사실에 맞춘다.**
-              */
-              name: isDirector ? '학원 전체' : '담당 반 합계',
-              students: `${studentCount.toLocaleString('en-US')}명`,
-              assigned: `${totals.assigned.toLocaleString('en-US')}건`,
-              rate: totals.rate != null ? `${totals.rate}%` : '—',
-              accuracy: totals.accuracy != null ? `${totals.accuracy}%` : '—',
-            }}
+            /* 합계는 값 열이 있을 때만. 열이 없는 표에 합계만 남기면 어디를 더한 값인지 알 수 없다. */
+            footer={
+              canCount
+                ? {
+                    /*
+                      합계 행의 이름은 **값이 덮는 범위**다. 값은 `classesFor(account)`가 준 반에서만
+                      나오므로 선생님에게는 담당 반의 합계다 — `학원 전체`라고 적으면 담당 반
+                      학생 수를 학원 전체로 읽는다. 선생님에게 담당 밖 집계를 여는 것은
+                      3절 권한 문제라 **값은 그대로 두고 이름만 사실에 맞춘다.**
+                    */
+                    name: isDirector ? '학원 전체' : '담당 반 합계',
+                    students: `${studentCount.toLocaleString('en-US')}명`,
+                    assigned: `${totals.assigned.toLocaleString('en-US')}건`,
+                    rate: totals.rate != null ? `${totals.rate}%` : '—',
+                    accuracy: totals.accuracy != null ? `${totals.accuracy}%` : '—',
+                  }
+                : { name: isDirector ? '학원 전체' : '담당 반 합계', students: `${studentCount.toLocaleString('en-US')}명` }
+            }
             empty={{ title: '찾는 반이 없어요', subtitle: '반 이름을 다시 확인해 주세요' }}
           />
           {filtered.length > PAGE ? (

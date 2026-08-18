@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
+import { View } from 'react-native';
 import {
   Screen,
   AppText,
+  Button,
   SegmentedControl,
   Field,
   Icon,
@@ -18,7 +20,7 @@ import { useAcademyStaff } from '@/features/academy';
 import { scopedAssignments, studentSummaries, type StudentSummary } from '@/features/academyStats';
 import { formatDate } from '@/features/learning';
 import type { Account } from '@/data';
-import { colors } from '@/theme/tokens';
+import { colors, spacing } from '@/theme/tokens';
 
 /** 한 페이지에 보여 줄 학생 수. `app/admin/users.tsx`와 같은 20명씩. */
 const PAGE = 20;
@@ -50,7 +52,12 @@ export default function AcademyStudents() {
   const { academyStudents } = useSession();
   const isDirector = account.academyRole === 'director';
   const { classesFor } = useAcademyStaff();
-  const { assignments } = useProgress();
+  const {
+    assignments,
+    loaded: progressLoaded,
+    error: progressError,
+    reload: reloadProgress,
+  } = useProgress();
   const [query, setQuery] = useState('');
   const [classFilter, setClassFilter] = useState('all');
   const [classQuery, setClassQuery] = useState('');
@@ -71,11 +78,27 @@ export default function AcademyStudents() {
     return map;
   }, [classes]);
 
+  /** 내가 볼 수 있는 반의 배정. 아래 요약과 조회 상태 판단이 같은 값을 본다. */
+  const scoped = useMemo(() => scopedAssignments(classes, assignments), [classes, assignments]);
+
   /** 학생별 요약. 내가 볼 수 있는 반의 배정만 센다. 한 번만 훑는다. */
-  const statBy = useMemo(
-    () => studentSummaries(scopedAssignments(classes, assignments)),
-    [assignments, classes],
-  );
+  const statBy = useMemo(() => studentSummaries(scoped), [scoped]);
+
+  /*
+    **읽는 중 · 실패 · 없음을 셋으로 가른다**(D-136 · `DESIGN.md` §9).
+
+    이름·반은 세션에서 오지만 `배정`·`제출률`·`평균 정답률`·`안 낸 과제`·`최근 제출`은 배정 기록에서
+    온다. 첫 조회가 끝나기 전에는 `statBy`가 비어 `EMPTY`가 들어가므로, 안 낸 과제가 쌓인 학생도
+    `배정 0건 · 배정 없음 · 안 낸 과제 없음 · 기록 없음`으로 보였다 — 이 화면의 기본 정렬(안 낸
+    과제 많은 순)까지 그 값 위에 서 있어서 순서 자체가 거짓이었다. 실패해도 같은 표가 남는다.
+
+    게이트는 `loading`이 아니라 **`loaded`**다(D-163).
+  */
+  const ready = progressLoaded;
+  /** 실패 문장. 서버가 준 것을 그대로 쓴다(`errorMessage`). */
+  const loadError = progressError;
+  /** 손에 든 배정이 있으면 값은 사실이다 — 실패해도 이미 읽어 둔 것은 지우지 않는다(D-136). */
+  const canCount = ready && (!loadError || scoped.length > 0);
 
   /**
    * 검색 대상. 원장은 우리 학원 학생 계정 전체, 선생님은 담당 반 학생만이다.
@@ -128,52 +151,62 @@ export default function AcademyStudents() {
       header: '반',
       cell: (r) => (r.classes.length ? r.classes.map((c) => c.name).join(' · ') : '아직 반이 없어요'),
     },
-    {
-      key: 'assigned',
-      header: '배정',
-      width: 68,
-      align: 'right',
-      priority: 3,
-      cell: (r) => `${r.stat.assigned.toLocaleString('en-US')}건`,
-      sort: COMPARE.assigned,
-    },
-    {
-      key: 'rate',
-      header: '제출률',
-      width: 76,
-      align: 'right',
-      priority: 2,
-      cell: (r) => (r.stat.rate != null ? `${r.stat.rate}%` : '배정 없음'),
-      sort: COMPARE.rate,
-    },
-    {
-      key: 'accuracy',
-      header: '평균 정답률',
-      width: 92,
-      align: 'right',
-      priority: 3,
-      cell: (r) => (r.stat.accuracy != null ? `${r.stat.accuracy}%` : '—'),
-      sort: COMPARE.accuracy,
-    },
-    {
-      key: 'pending',
-      header: '안 낸 과제',
-      width: 88,
-      align: 'right',
-      // 기본 정렬 기준이라 390에서도 남긴다. `이름 + 반 + 안 낸 과제 + 이동`은 312px로
-      // 모바일 컬럼(358px) 안에 들어간다(실측) — 정렬 기준이 안 보이면 캡션이 거짓이 된다.
-      cell: (r) => (r.stat.pending > 0 ? `${r.stat.pending}건` : '없음'),
-      sort: COMPARE.pending,
-    },
-    {
-      key: 'last',
-      header: '최근 제출',
-      width: 92,
-      align: 'right',
-      priority: 3,
-      cell: (r) => (r.stat.lastSubmittedAt ? formatDate(r.stat.lastSubmittedAt) : '기록 없음'),
-      sort: COMPARE.last,
-    },
+    /*
+      **배정 기록에서 오는 다섯 열은 그 기록을 읽은 뒤에만 만든다**(§9 · D-136). 아직 못 읽은 값을
+      `배정 0건 · 배정 없음 · 안 낸 과제 없음 · 기록 없음`으로 적으면, 안 낸 과제가 쌓인 학생을
+      화면이 "다 냈다"고 말한다. 이름·반은 세션이 준 사실이라 남고 **행을 눌러 학생 상세로 가는
+      길도 남는다** — 이 화면의 목적("이름만 아는 학생이 어느 반인지")은 그 둘로 성립한다.
+    */
+    ...(canCount
+      ? ([
+          {
+            key: 'assigned',
+            header: '배정',
+            width: 68,
+            align: 'right',
+            priority: 3,
+            cell: (r) => `${r.stat.assigned.toLocaleString('en-US')}건`,
+            sort: COMPARE.assigned,
+          },
+          {
+            key: 'rate',
+            header: '제출률',
+            width: 76,
+            align: 'right',
+            priority: 2,
+            cell: (r) => (r.stat.rate != null ? `${r.stat.rate}%` : '배정 없음'),
+            sort: COMPARE.rate,
+          },
+          {
+            key: 'accuracy',
+            header: '평균 정답률',
+            width: 92,
+            align: 'right',
+            priority: 3,
+            cell: (r) => (r.stat.accuracy != null ? `${r.stat.accuracy}%` : '—'),
+            sort: COMPARE.accuracy,
+          },
+          {
+            key: 'pending',
+            header: '안 낸 과제',
+            width: 88,
+            align: 'right',
+            // 기본 정렬 기준이라 390에서도 남긴다. `이름 + 반 + 안 낸 과제 + 이동`은 312px로
+            // 모바일 컬럼(358px) 안에 들어간다(실측) — 정렬 기준이 안 보이면 캡션이 거짓이 된다.
+            cell: (r) => (r.stat.pending > 0 ? `${r.stat.pending}건` : '없음'),
+            sort: COMPARE.pending,
+          },
+          {
+            key: 'last',
+            header: '최근 제출',
+            width: 92,
+            align: 'right',
+            priority: 3,
+            cell: (r) => (r.stat.lastSubmittedAt ? formatDate(r.stat.lastSubmittedAt) : '기록 없음'),
+            sort: COMPARE.last,
+          },
+        ] as Column<StudentRow>[])
+      : []),
     /* 눌리는 표라는 표시. 반 목록·대시보드 반별 현황과 같은 열이다. */
     {
       key: 'go',
@@ -199,13 +232,37 @@ export default function AcademyStudents() {
       title="학생"
       scrollResetKey={page}
     >
-      {/* 로스터 3,000명은 규모 확인용 개발 데이터다(마스터 플랜 5절). */}
+      {/*
+        `app/admin/users.tsx`와 **같은 문장**을 쓴다. 예전에는 `로스터 계정은…`이라고 적었는데
+        그 합성 로스터(학생 3,000명)는 이미 전부 버렸다(마스터 플랜 5절) — 지금 로그인할 수 없는
+        계정은 반 평균·순위를 계산할 `반 비교용 계정` 12명이다.
+      */}
       <AppText variant="caption" tone="tertiary">
-        프로토타입 테스트 계정입니다. 로스터 계정은 비밀번호가 없어 로그인할 수 없어요.
+        개발·테스트 계정입니다. 반 비교용 계정은 비밀번호가 없어 로그인할 수 없어요.
       </AppText>
       <AppText variant="caption" tone="secondary">
         {isDirector ? '우리 학원 학생' : '담당 반 학생'} {pool.length.toLocaleString('en-US')}명
       </AppText>
+
+      {/*
+        **한 화면에 실패 면은 하나다**(§9). 표의 값 다섯 열이 모두 이 조회에 매달려 있다.
+        카드로 만들지 않는다 — 실패는 알려야 하지만 화면에서 가장 무거운 것이 될 이유는 없다.
+      */}
+      {loadError ? (
+        <View testID="students-load-failed" style={{ gap: spacing.sm, alignItems: 'flex-start' }}>
+          <AppText variant="caption" tone="danger">
+            학생 기록을 불러오지 못했어요. {loadError}
+          </AppText>
+          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
+          <Button
+            testID="students-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void reloadProgress()}
+          />
+        </View>
+      ) : null}
 
       <Field
         label="이름·아이디로 찾기"
@@ -241,9 +298,17 @@ export default function AcademyStudents() {
         />
       )}
 
+      {/*
+        **표 위 캡션은 지금 보이는 표를 설명한다.** 값 열이 없는 동안 `안 낸 과제가 많은 학생부터`는
+        거짓이다 — 그 순서는 방금 못 읽은 값으로 세우는 것이라 실제로는 이름 순이다.
+        실패 이유는 화면 위 한 줄이 이미 말했으므로 여기서 반복하지 않는다(§9).
+      */}
       <AppText variant="caption" tone="secondary">
-        안 낸 과제가 많은 학생부터예요. 열 이름을 누르면 학생 전체를 다시 줄 세워요. 행을 누르면 그
-        학생의 학원 학습 기록을 봐요.
+        {canCount
+          ? '안 낸 과제가 많은 학생부터예요. 열 이름을 누르면 학생 전체를 다시 줄 세워요. 행을 누르면 그 학생의 학원 학습 기록을 봐요.'
+          : ready
+            ? '이름 순으로 보여 줘요. 행을 누르면 그 학생의 학원 학습 기록을 봐요.'
+            : '학생 기록을 불러오고 있어요. 행을 누르면 그 학생의 학원 학습 기록을 봐요.'}
       </AppText>
 
       <Table
@@ -253,14 +318,17 @@ export default function AcademyStudents() {
         {...sorted.props}
         rowKey={(r) => r.account.userId}
         onRowPress={(r) => router.push(`/academy/classes/student/${r.account.userId}` as never)}
+        /* 스크린리더 문장도 셀과 같은 말을 한다 — 화면에 없는 값을 읽어 주지 않는다(§20). */
         rowLabel={(r) =>
           [
             r.account.name,
             r.classes.length ? r.classes.map((c) => c.name).join(' · ') : '아직 반이 없어요',
-            `배정 ${r.stat.assigned}건`,
-            r.stat.rate != null ? `제출률 ${r.stat.rate}%` : '배정 없음',
-            r.stat.pending > 0 ? `안 낸 과제 ${r.stat.pending}건` : '안 낸 과제 없음',
-          ].join(', ')
+            canCount ? `배정 ${r.stat.assigned}건` : null,
+            canCount ? (r.stat.rate != null ? `제출률 ${r.stat.rate}%` : '배정 없음') : null,
+            canCount ? (r.stat.pending > 0 ? `안 낸 과제 ${r.stat.pending}건` : '안 낸 과제 없음') : null,
+          ]
+            .filter(Boolean)
+            .join(', ')
         }
         empty={{ title: '찾는 학생이 없어요', subtitle: '이름이나 아이디를 다시 확인해 주세요' }}
       />

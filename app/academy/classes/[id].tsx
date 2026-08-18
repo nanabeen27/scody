@@ -51,7 +51,13 @@ export default function ClassDetail() {
   const account = useCurrentAccount();
   const { academyStudents } = useSession();
   const isDirector = account.academyRole === 'director';
-  const { assignments, academyNotesOf } = useProgress();
+  const {
+    assignments,
+    academyNotesOf,
+    loaded: progressLoaded,
+    error: progressError,
+    reload: reloadProgress,
+  } = useProgress();
   const {
     teachers,
     classById,
@@ -90,6 +96,23 @@ export default function ClassDetail() {
         .sort((x, y) => (x.dueDate ?? NO_DUE).localeCompare(y.dueDate ?? NO_DUE)),
     [assignments, classId],
   );
+
+  /*
+    **읽는 중 · 실패 · 없음을 셋으로 가른다**(D-136 · `DESIGN.md` §9).
+
+    담당 선생님·학생 명단은 세션에서 오고(레이아웃이 이미 기다려 준다) 배정 학습·제출 요약·안 낸
+    과제 건수·오답노트 수는 배정 기록에서 온다. 첫 조회가 끝나기 전에는 그것이 비어 있어서
+    `아직 배정한 학습이 없어요`와 `배정 학습 없음`·`안 낸 과제 없음`을 사실처럼 그렸다.
+
+    **화면 전체를 막지는 않는다**(§9). 원장이 담당을 정하고 학생을 넣고 반 이름을 바꾸는 일은 배정
+    기록과 무관하므로, 개수를 말하는 자리만 기다린다. 게이트는 `loaded`다(D-163) — 학생을 빼거나
+    담당을 바꾸면 `reload()`가 도는데, 그때 화면이 초기화되면 방금 한 일을 확인할 수 없다.
+  */
+  const ready = progressLoaded;
+  /** 실패 문장. 서버가 준 것을 그대로 쓴다(`errorMessage`). */
+  const loadError = progressError;
+  /** 손에 든 배정이 있으면 값은 사실이다 — 실패해도 이미 읽어 둔 것은 지우지 않는다(D-136). */
+  const canCount = ready && (!loadError || classAssignments.length > 0);
 
   /** 학생별 안 낸 과제 건수. 정렬 기준이자 행의 값이다(`pendingStat`이 세는 단위를 정한다). */
   const pendingBy = useMemo(() => {
@@ -241,6 +264,27 @@ export default function ClassDetail() {
         </AppText>
       ) : null}
 
+      {/*
+        **조회 실패는 쓰기 실패와 다른 줄이다.** 위 `error`는 방금 누른 행동이 거부됐다는 말이고,
+        이것은 화면의 값을 못 읽었다는 말이다. 아래 배정 목록·제출 요약·안 낸 과제 수가 모두 이
+        조회에 매달려 있어서 **화면에 하나만** 둔다(§9).
+      */}
+      {loadError ? (
+        <View testID="class-load-failed" style={styles.loadFailed}>
+          <AppText variant="caption" tone="danger">
+            배정 기록을 불러오지 못했어요. {loadError}
+          </AppText>
+          {/* 다시 시도는 이 화면의 주 행동이 아니다 — `hug`인 보조 버튼이다(§8). */}
+          <Button
+            testID="class-load-retry"
+            variant="secondary"
+            hug
+            label="다시 불러오기"
+            onPress={() => void reloadProgress()}
+          />
+        </View>
+      ) : null}
+
       <Group>
         <Row
           testID="class-teacher"
@@ -331,7 +375,15 @@ export default function ClassDetail() {
           />
         }
       >
-        {classAssignments.length === 0 ? (
+        {/*
+          아직 못 읽은 목록을 `없어요`로 말하지 않는다(§9). 실패했을 때는 화면 위 한 줄이 이미
+          이유를 말했으므로 여기에 같은 말을 두지 않는다 — 실패 면은 화면에 하나다.
+        */}
+        {!ready ? (
+          <Group>
+            <Row title="배정 학습을 불러오고 있어요" />
+          </Group>
+        ) : !canCount ? null : classAssignments.length === 0 ? (
           <Group>
             <Row title="아직 배정한 학습이 없어요" subtitle="학습을 배정하면 제출 현황이 여기에 보여요" />
           </Group>
@@ -399,8 +451,14 @@ export default function ClassDetail() {
           </View>
         ) : null}
 
+        {/*
+          정렬 기준을 사실대로 말한다. 배정 기록을 못 읽은 동안 `sortedStudents`는 `pendingBy`가
+          비어 이름 순으로 서므로, 그때 `안 낸 과제가 많은 학생부터`는 거짓이다.
+        */}
         <AppText variant="caption" tone="secondary">
-          안 낸 과제가 많은 학생부터예요. 행을 누르면 우리 반 제출 결과를 볼 수 있어요.
+          {canCount
+            ? '안 낸 과제가 많은 학생부터예요. 행을 누르면 우리 반 제출 결과를 볼 수 있어요.'
+            : '이름 순으로 보여 줘요. 행을 누르면 우리 반 제출 결과를 볼 수 있어요.'}
         </AppText>
 
         {students.length > SEARCH_FROM ? (
@@ -435,18 +493,34 @@ export default function ClassDetail() {
                   <Row
                     testID={`class-student-${st.userId}`}
                     title={st.name}
-                    subtitle={summaryFor(st.userId)}
+                    /*
+                      아직 못 읽은 값을 `배정 학습 없음`·`안 낸 과제 없음`으로 단정하지 않는다 —
+                      없는 것과 모르는 것은 다르다(`app/academy/content/index.tsx`의 `배정 N회`와
+                      같은 규칙). 이름은 세션이 준 사실이라 그대로 남는다.
+                    */
+                    subtitle={canCount ? summaryFor(st.userId) : undefined}
                     accessibilityLabel={open ? `${st.name} 접기` : `${st.name} 제출 결과 보기`}
                     onPress={() => setOpenStudent(open ? null : st.userId)}
                     trailing={
-                      <AppText variant="label">
-                        {pending > 0 ? `안 낸 과제 ${pending}건` : '안 낸 과제 없음'}
-                      </AppText>
+                      canCount ? (
+                        <AppText variant="label">
+                          {pending > 0 ? `안 낸 과제 ${pending}건` : '안 낸 과제 없음'}
+                        </AppText>
+                      ) : undefined
                     }
                   />
                   {open ? (
                     <View style={inset.panel}>
-                      {classAssignments.length === 0 ? (
+                      {/*
+                        펼친 자리에도 같은 규칙이다 — 못 읽은 동안에는 제출 결과와 오답노트 수를
+                        말하지 않는다. 실패했을 때는 화면 위 실패 줄이 이유를 말했으므로 이 자리에는
+                        아무 값도 두지 않고, 아래 `개인 학습 기록은…`과 행동만 남긴다.
+                      */}
+                      {!ready ? (
+                        <AppText variant="caption" tone="secondary">
+                          제출 결과를 불러오고 있어요.
+                        </AppText>
+                      ) : !canCount ? null : classAssignments.length === 0 ? (
                         <AppText variant="caption" tone="secondary">
                           이 반에 배정한 학습이 아직 없어요.
                         </AppText>
@@ -470,12 +544,14 @@ export default function ClassDetail() {
                           );
                         })
                       )}
-                      <View style={styles.line}>
-                        <AppText variant="caption" tone="secondary" style={styles.grow}>
-                          배정 학습 오답노트
-                        </AppText>
-                        <AppText variant="label">{academyNotesOf(st.userId).length}개</AppText>
-                      </View>
+                      {canCount ? (
+                        <View style={styles.line}>
+                          <AppText variant="caption" tone="secondary" style={styles.grow}>
+                            배정 학습 오답노트
+                          </AppText>
+                          <AppText variant="label">{academyNotesOf(st.userId).length}개</AppText>
+                        </View>
+                      ) : null}
                       <AppText variant="caption" tone="tertiary">
                         개인 학습 기록은 학원에 공개되지 않아요.
                       </AppText>
@@ -686,6 +762,8 @@ export default function ClassDetail() {
 
 const styles = StyleSheet.create({
   trailPair: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  /* 조회 실패 한 줄 + 다시 시도. 카드로 만들지 않는다(학생 홈과 같은 모양, §9). */
+  loadFailed: { gap: spacing.sm, alignItems: 'flex-start' },
   grow: { flex: 1 },
   line: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   // 뺀 직후 안내. `app/student/queue.tsx`의 되돌리기와 같은 모양으로 둔다.

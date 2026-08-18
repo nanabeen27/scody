@@ -431,6 +431,11 @@ export default function AcademyAssign() {
             원장·선생님은 보통 다음 반으로 이어 간다. `제출 현황 보기`는 방금 낸 과제라 지금
             열면 아직 아무도 내지 않은 `제출 0/N`뿐이어서, 오늘이 아니라 내일 쓰는 길이다.
 
+            **그 길은 좁혀서 보낸다**(`?task=`, §20 · D-075와 같은 형태). 예전에는
+            `/academy/analytics`로 그냥 보내서, 방금 낸 과제를 배정 수백 건 중에서 이름으로 다시
+            검색해야 했다 — 대시보드의 알림은 이미 `?due=`로 좁혀 보내고 받는 화면이 좁힌 이유와
+            `전체 보기`를 함께 두는데, 그 장치가 여기만 없었다.
+
             화살표(`arrow-right`)는 붙이지 않는다 — 배정은 이미 끝났고 여기서 고르는 것은
             다음에 어디로 갈지다(§8). 목록 행이라 이동 표시는 chevron이다.
           */}
@@ -445,9 +450,11 @@ export default function AcademyAssign() {
             <Row
               testID="assign-goto-analytics"
               title="제출 현황 보기"
-              subtitle="학생이 내면 성과 분석에 쌓여요"
+              subtitle="방금 배정한 학습만 좁혀서 보여 줘요"
               showChevron
-              onPress={() => router.navigate('/academy/analytics' as never)}
+              onPress={() =>
+                router.navigate(`/academy/analytics?task=${assigned.id}` as never)
+              }
             />
           </Group>
         </Section>
