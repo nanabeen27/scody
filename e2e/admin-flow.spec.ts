@@ -418,6 +418,15 @@ test.describe('총괄관리자 대리 보기', () => {
 
     await page.getByRole('link', { name: '학습' }).click();
     await page.getByTestId('learn-notebook').click();
+    /*
+      목록은 다섯 개까지 보여 주고 나머지는 `오답 N개 더 보기`로 펼친다(§8의 상한). 정예린은
+      시드 오답이 여덟 개이고 정리하지 않은 것이 먼저 오므로 이 문항은 접힌 쪽에 있다.
+      **조회가 끝날 때까지 기다린 뒤 누른다** — `isVisible()`로 물으면 아직 없는 동안 false가
+      돌아와 펼치지 않고 지나간다.
+    */
+    const more = page.getByTestId('notebook-more');
+    await expect(more).toBeVisible();
+    await more.click();
     const star = page.getByTestId(`note-star-${sid('ct_lit_1_q7')}`);
     await expect(star).toHaveAttribute('aria-label', '별표 달기');
     await star.click();
@@ -593,6 +602,15 @@ test.describe('총괄관리자 대리 보기', () => {
     // 방금 로그인한 사람의 쓰기가 살아 있다.
     await page.getByRole('link', { name: '학습' }).click();
     await page.getByTestId('learn-notebook').click();
+    /*
+      목록은 다섯 개까지 보여 주고 나머지는 `오답 N개 더 보기`로 펼친다(§8의 상한). 정예린은
+      시드 오답이 여덟 개이고 정리하지 않은 것이 먼저 오므로 이 문항은 접힌 쪽에 있다.
+      **조회가 끝날 때까지 기다린 뒤 누른다** — `isVisible()`로 물으면 아직 없는 동안 false가
+      돌아와 펼치지 않고 지나간다.
+    */
+    const more = page.getByTestId('notebook-more');
+    await expect(more).toBeVisible();
+    await more.click();
     const star = page.getByTestId(`note-star-${sid('ct_lit_1_q7')}`);
     await expect(star).toHaveAttribute('aria-label', '별표 달기');
     await star.click();

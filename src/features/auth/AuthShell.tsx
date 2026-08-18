@@ -5,7 +5,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppText, Brand, Divider, ThemeToggle } from '@/components';
 import { LEGAL_DOCS } from '@/features/legal/documents';
 import { colors, radius, spacing, touch } from '@/theme/tokens';
-import { useReduceMotion } from '@/theme/useReduceMotion';
 import { useResponsive } from '@/theme/useResponsive';
 
 /**
@@ -53,7 +52,6 @@ export function AuthShell({
   const { isMobile } = useResponsive();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
-  const reduceMotion = useReduceMotion();
   /*
     아래 블록의 절대 위치는 두 값의 합이다: 컬럼이 콘텐츠 안에서 놓인 곳 + 그 안에서 블록이
     놓인 곳. 넓은 화면에서는 컬럼이 자동 여백으로 가운데 있어서 컬럼의 `y`가 0이 아니다.
@@ -69,10 +67,17 @@ export function AuthShell({
     */
     requestAnimationFrame(() => {
       const y = Math.max(0, columnY.current + belowY.current - spacing.lg);
-      // 모션 줄이기를 켜면 애니메이션 없이 그 자리로 간다(D-119: 느리게가 아니라 아예 하지 않는다).
-      scrollRef.current?.scrollTo({ y, animated: !reduceMotion });
+      /*
+        **애니메이션 없이 그 자리로 간다.** 부드럽게 옮기면 목록이 도착하는 동안 계속 움직이는데,
+        펼친 바로 다음에 하는 일이 그 목록의 한 줄을 누르는 것이다 — 대상이 손가락 아래에서
+        미끄러진다. 실측(1280×800, 펼침 직후 클릭): 애니메이션이 있으면 12초 동안 `element is not
+        stable`로 눌리지 않고, 끄면 33ms에 눌린다. 모션 줄이기와 무관하게 끈다(D-119가 정한
+        "느리게가 아니라 아예 하지 않는다"를 여기서는 모두에게 적용한다 — 이 애니메이션은
+        취향이 아니라 조작을 막는다).
+      */
+      scrollRef.current?.scrollTo({ y, animated: false });
     });
-  }, [reduceMotion]);
+  }, []);
   const reveal = useMemo(() => ({ revealBelow }), [revealBelow]);
 
   return (
