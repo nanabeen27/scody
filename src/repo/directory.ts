@@ -381,32 +381,68 @@ export async function removeStudentFromClass(
   return error ? fail(error) : ok();
 }
 
+/** 초대 대상 역할. 서버의 `invite_role` enum과 같은 값이다(0001). */
+export type InviteeRole = 'student' | 'parent' | 'teacher';
+
+export interface CreateInviteInput {
+  academyId: string;
+  invitee: InviteeRole;
+  /**
+   * 학부모 초대의 대상 학생(`userId`).
+   *
+   * **학부모 초대에만 넣는다.** 학원이 자녀 관계를 확인하는 자리가 여기다(확정 정책 3절) —
+   * 수락하면 이 학생과 연결이 생긴다. 다른 역할에 넣으면 서버가 거부하고, 학부모 초대에
+   * 빼면 역시 거부한다(`rpc_create_invite`, 0036).
+   */
+  targetStudentId?: string;
+}
+
 /**
- * 선생님을 초대한다.
+ * 학원 초대를 만든다.
  *
  * **프로토타입의 `addTeacher`를 대체한다.** 그 함수는 이름과 아이디만으로 로그인할 수 없는
  * 가짜 계정을 메모리에 만들었는데, 실제 인증에서는 `auth.users` 없이 프로필을 만들 수 없다.
  * 마스터 플랜 3절도 "원장이 선생님을 **초대**하면 소속과 역할을 승인한다"고 정한다.
  *
+ * **역할이 리터럴이 아니라 인자다.** 예전에는 이 함수가 `p_invitee_role: 'teacher'`를 박아 두어,
+ * 3절이 정한 학생·학부모 초대를 만들 길이 앱 전체에 없었다 — 그런데 초대 목록은 그 두 종류를
+ * 표시할 준비만 해 두었고(`INVITE_LABEL`), 학부모 화면들은 없는 자녀 연결을 가리켰다.
+ *
  * 토큰은 사람이 읽고 전달할 수 있는 형태로 만든다.
  */
-export async function inviteTeacher(academyId: string): Promise<WriteResult & { token?: string }> {
+export async function createInvite(
+  input: CreateInviteInput,
+): Promise<WriteResult & { token?: string }> {
   /*
     **토큰은 서버가 만든다**(`rpc_create_invite`, 0027). 예전에는 이 자리에서
     `Math.random().toString(36).slice(2, 8)`로 만들었다 — base36 6자(≈2.2×10⁹)에 암호용이
     아닌 난수였고, `expires_at`·`inviter_id`를 쓰지 않아 **기간 없는 초대**가 남았다.
 
-    그 토큰은 `rpc_accept_invite`의 유일한 자격 증명이고(소속과 `academy` 역할이 함께 붙는다),
-    `rpc_invite_info`는 초대 링크가 로그인 전에 열려야 해서 일부러 anon이 부를 수 있다.
-    추측을 확인할 창구가 열려 있으므로 엔트로피는 서버에 있어야 한다.
+    그 토큰은 `rpc_accept_invite`의 유일한 자격 증명이고(소속과 `academy` 역할이, 학부모
+    초대에서는 자녀 연결이 함께 붙는다), `rpc_invite_info`는 초대 링크가 로그인 전에 열려야
+    해서 일부러 anon이 부를 수 있다. 추측을 확인할 창구가 열려 있으므로 엔트로피는 서버에 있어야
+    한다.
+
+    권한도 서버가 판단한다 — 원장은 자기 학원만, 대상 학생은 **우리 학원 재적 학생**만이다
+    (`rpc_create_invite`의 소속 검사). 화면의 검사는 말할 문장을 만들기 위한 것이다.
   */
   const { data, error } = await supabase().rpc('rpc_create_invite', {
-    p_academy_id: academyId,
-    p_invitee_role: 'teacher',
+    p_academy_id: input.academyId,
+    p_invitee_role: input.invitee,
+    // 대상 학생은 학부모 초대에만 보낸다. 다른 역할에 실어 보내면 서버가 거부한다(0036).
+    ...(input.invitee === 'parent' ? { p_target_student: input.targetStudentId } : {}),
   });
   if (error) return fail(error);
   if (!data) return { ok: false, error: '초대 링크를 만들지 못했어요.' };
   return { ok: true, token: data };
+}
+
+/**
+ * 선생님을 초대한다. `useAcademyStaff().addTeacher`가 이 이름으로 부른다 —
+ * 역할을 인자로 받게 바꾼 뒤에도 기존 호출부가 그대로 동작하게 남긴다.
+ */
+export async function inviteTeacher(academyId: string): Promise<WriteResult & { token?: string }> {
+  return createInvite({ academyId, invitee: 'teacher' });
 }
 
 /** 초대 상태. 아직 전달해서 쓸 수 있는 초대만 `pending`이다. */
@@ -415,9 +451,16 @@ export type InviteStatus = 'pending' | 'accepted' | 'expired';
 export interface AcademyInvite {
   token: string;
   /** 초대 대상 역할. */
-  invitee: 'student' | 'parent' | 'teacher';
+  invitee: InviteeRole;
   status: InviteStatus;
   createdAt: string;
+  /**
+   * 학부모 초대의 대상 학생(`userId`). 학부모 초대에만 있다.
+   *
+   * 이 컬럼이 생기기 전에 만든 학부모 초대(개발 seed의 초대가 그렇다)는 비어 있다 — 그 초대는
+   * 서버가 예전처럼 수락을 거부한다(`rpc_accept_invite`). 화면은 두 경우를 구분해 말한다.
+   */
+  targetStudentId?: string;
 }
 
 /**
@@ -432,7 +475,7 @@ export interface AcademyInvite {
 export async function loadInvites(academyId: string): Promise<AcademyInvite[]> {
   const { data, error } = await supabase()
     .from('invites')
-    .select('token, invitee_role, expires_at, accepted_at, created_at')
+    .select('token, invitee_role, target_student_id, expires_at, accepted_at, created_at')
     .eq('academy_id', academyId)
     .order('created_at', { ascending: false });
   if (error) throw new Error(errorMessage(error));
@@ -446,6 +489,7 @@ export async function loadInvites(academyId: string): Promise<AcademyInvite[]> {
         ? 'expired'
         : 'pending',
     createdAt: r.created_at,
+    targetStudentId: r.target_student_id ?? undefined,
   }));
   /*
     아직 전달할 수 있는 초대가 위로 온다 — 원장이 이 화면에 오는 이유가 그것이다.
@@ -518,11 +562,13 @@ export async function inviteInfo(token: string): Promise<InviteLookup> {
 }
 
 /**
- * 초대를 수락한다. 성공하면 `academy_members`에 소속이 생기고 역할이 붙는다
+ * 초대를 수락한다. 학생·선생님 초대는 `academy_members`에 소속이 생기고 역할이 붙는다
  * (`rpc_accept_invite`). 이미 있는 계정에 **소속만** 추가한다 — 이용권은 건드리지 않는다.
  *
- * 학부모 초대는 서버가 거부한다(자녀 확인이 필요하다). 그 문장도 사용자에게 보여 줄 말이라
- * `errorMessage`가 그대로 넘긴다.
+ * 학부모 초대는 소속이 아니라 **자녀 연결**이다. 대상 학생이 적힌 초대(0036 이후에 만든 것)는
+ * 그 학생과의 연결이 생기고, 대상 학생이 없는 옛 초대는 서버가 예전처럼 거부한다
+ * (`학부모 초대는 자녀 확인이 필요해요.`). 그 문장도 사용자에게 보여 줄 말이라 `errorMessage`가
+ * 그대로 넘긴다.
  *
  * 소속이 화면에 나타나려면 세션 스냅샷을 다시 읽어야 한다(`useSession().reload`).
  */

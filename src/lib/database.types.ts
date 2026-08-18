@@ -710,6 +710,7 @@ export type Database = {
           expires_at: string
           invitee_role: Database["public"]["Enums"]["invite_role"]
           inviter_id: string | null
+          target_student_id: string | null
           token: string
         }
         Insert: {
@@ -720,6 +721,7 @@ export type Database = {
           expires_at?: string
           invitee_role: Database["public"]["Enums"]["invite_role"]
           inviter_id?: string | null
+          target_student_id?: string | null
           token: string
         }
         Update: {
@@ -730,6 +732,7 @@ export type Database = {
           expires_at?: string
           invitee_role?: Database["public"]["Enums"]["invite_role"]
           inviter_id?: string | null
+          target_student_id?: string | null
           token?: string
         }
         Relationships: [
@@ -750,6 +753,13 @@ export type Database = {
           {
             foreignKeyName: "invites_inviter_id_fkey"
             columns: ["inviter_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invites_target_student_id_fkey"
+            columns: ["target_student_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -1633,6 +1643,7 @@ export type Database = {
         Args: {
           p_academy_id: string
           p_invitee_role?: Database["public"]["Enums"]["invite_role"]
+          p_target_student?: string
           p_valid_days?: number
         }
         Returns: string
