@@ -2,7 +2,7 @@ import { test, expect } from './_fixtures';
 import { sid } from './_ids';
 import { type Page } from '@playwright/test';
 import { loginHere } from './_auth';
-import { choices } from './_solve';
+import { choices, openTodayDeck } from './_solve';
 
 async function login(page: Page, scodyId: string) {
   await page.goto('/login');
@@ -635,8 +635,7 @@ test.describe('대리 보기 — 카드 복습', () => {
       **`page.goto`를 쓰지 않는다.** 하드 로드는 앱을 새로 띄우고 대리 보기 세션은 그때 사라진다 —
       운영자는 학생이 아니므로 라우트 가드가 `/login`으로 보낸다. 화면 안 링크로 이동한다.
     */
-    await page.getByRole('link', { name: '학습' }).click();
-    await page.getByTestId('learn-review-today').click();
+    await openTodayDeck(page);
     await expect(page.getByTestId('review-readonly')).toContainText(
       '대리 보기에서는 복습을 기록할 수 없어요.',
     );

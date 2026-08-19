@@ -22,12 +22,7 @@ export type { NoteEvidence, NoteState };
  * 모두 거부되는 것을 실제 JWT로 확인한다).
  */
 
-/**
- * 한 번에 읽는 복습 기록 수.
- *
- * PostgREST가 응답을 자르는 지점(`max-rows`, 기본 1000)보다 낮게 잡아 **잘림이 조용히 일어나지
- * 않게** 한다. 한 학생이 하루 상한 5개를 매일 채워도 100일이 500행이다.
- */
+/** 한 번에 읽는 복습 기록 수. 잘림 지점보다 낮게 잡는다 — 근거는 `loadNoteReviews`에. */
 const REVIEW_PAGE = 900;
 
 export interface NoteReview {
@@ -35,7 +30,6 @@ export interface NoteReview {
   noteId: string;
   /** `YYYY-MM-DD`. 이 값이 "서로 다른 세션"의 정의다(하루에 한 행). */
   reviewedOn: string;
-  pickedIndex?: number;
   isCorrect: boolean;
   evidence?: NoteEvidence;
   recap?: string;
@@ -47,7 +41,6 @@ interface ReviewRow {
   id: string;
   note_id: string;
   reviewed_on: string;
-  picked_index: number | null;
   is_correct: boolean;
   evidence: NoteEvidence | null;
   recap: string | null;
@@ -58,7 +51,6 @@ function toReview(row: ReviewRow): NoteReview {
     id: row.id,
     noteId: row.note_id,
     reviewedOn: row.reviewed_on.slice(0, 10),
-    pickedIndex: row.picked_index ?? undefined,
     isCorrect: row.is_correct,
     evidence: row.evidence ?? undefined,
     recap: row.recap ?? undefined,
@@ -66,34 +58,29 @@ function toReview(row: ReviewRow): NoteReview {
 }
 
 /**
- * 노트별 복습 기록. 오래된 것부터.
+ * 노트별 복습 기록. 노트마다 오래된 것부터.
  *
- * 범위는 RLS가 정한다 — 본인 · 연결된 학부모 · 운영자. 선생님에게는 0행이 나간다(정책에
- * 교직원 갈래가 없다).
- */
-/**
- * 노트별 복습 기록.
+ * 범위는 RLS가 정한다 — 본인 · 연결된 학부모 · 운영자. 교직원에게는 0행이 나간다(정책에 그
+ * 갈래가 없다).
  *
  * **최신부터 읽고 상한을 둔다.** PostgREST의 `max-rows`(기본 1000)가 응답을 조용히 자르는데,
  * 오름차순으로 읽으면 **잘리는 쪽이 오늘 것**이다 — 그러면 화면이 "오늘 본 것"을 못 찾아 이미
  * 복습한 카드를 다시 덱에 올리고, 누르면 서버가 `오늘은 이미 복습했어요.`로 거부한다.
- * 화면에 필요한 것은 최근 기록이므로 내림차순이 옳고, 정렬은 아래에서 되돌린다.
+ * 화면에 필요한 것은 최근 기록이므로 내림차순이 옳고, 아래에서 노트별로 되돌린다.
  */
 export async function loadNoteReviews(): Promise<Record<string, NoteReview[]>> {
   const { data, error } = await supabase()
     .from('note_reviews')
-    .select('id, note_id, reviewed_on, picked_index, is_correct, evidence, recap')
+    .select('id, note_id, reviewed_on, is_correct, evidence, recap')
     .order('reviewed_on', { ascending: false })
     .limit(REVIEW_PAGE);
   if (error) throw new Error(errorMessage(error));
   const out: Record<string, NoteReview[]> = {};
   for (const row of (data ?? []) as ReviewRow[]) {
-    out[row.note_id] = [...(out[row.note_id] ?? []), toReview(row)];
+    (out[row.note_id] ??= []).push(toReview(row));
   }
   // 노트별로는 오래된 것부터 — 화면이 회차를 세고 마지막 한 줄을 찾는다.
-  for (const id of Object.keys(out)) {
-    out[id] = out[id].slice().reverse();
-  }
+  for (const id of Object.keys(out)) out[id].reverse();
   return out;
 }
 
@@ -119,12 +106,8 @@ export interface LoggedReview {
 /**
  * 다시 풀어 본 사실을 남기고 결과를 받는다.
  *
- * **정오를 클라이언트가 정하지 않는다.** 인자에 `isCorrect`가 없는 것이 그 계약이다 — 고른
- * 자리만 보내고 서버가 `questions.answer_index`와 대조한다. 앞선 판본은 `p_is_correct`를 받아
- * 그대로 스케줄에 썼고, 그래서 학생이 문항을 열지도 않고 서로 다른 3일에 `true`를 보내
- * 졸업시킬 수 있었다 — `mastered`를 걷어낸 이유가 그대로 되살아났다(0040).
- *
- * **다음 차례도 클라이언트가 제안하지 않는다.** 인자에 날짜가 없다.
+ * **정오도 다음 차례도 클라이언트가 정하지 않는다** — 인자에 `isCorrect`와 날짜가 없는 것이 그
+ * 계약이다. 왜 그래야 하는지는 이 파일 머리와 `0040`의 헤더에 있다.
  */
 export async function logNoteReview(input: {
   noteId: string;

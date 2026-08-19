@@ -38,6 +38,7 @@ import { SEED_CONTENT } from '../src/data/content';
 import { ATTEMPTS_SEED, WRONG_NOTES_SEED } from '../src/data/attempts';
 import { ACADEMY_CLASSES, ASSIGNMENTS_SEED } from '../src/data/fixtures';
 import { ROSTER_STUDENTS } from '../src/data/roster';
+import { daysBetweenISO, todayISO } from '../src/features/clock';
 import type { Account, ContentSet, Grade, Role } from '../src/data/types';
 // `.env`를 `process.env`로 올린다(비밀번호를 여기서 읽는다). 규칙은 `scripts/env.ts`에.
 import './env';
@@ -104,12 +105,30 @@ function arr(values: readonly string[]): string {
   return `array[${values.map(q).join(', ')}]`;
 }
 
-/** 원본 고정 날짜 → seed 실행일 기준 상대 날짜 SQL. */
-/** 오늘부터 며칠 뒤/전인가. 복습 스케줄은 `ANCHOR`가 아니라 실제 오늘이 기준이다. */
+/**
+ * 오늘부터 며칠 뒤/전인가. 복습 스케줄은 `ANCHOR`가 아니라 **실제 오늘**이 기준이다.
+ *
+ * 날짜 산술은 앱과 같은 함수를 쓴다(`src/features/clock.ts`). 앞 판본도 결과는 같았다(두 값을
+ * 모두 UTC 자정으로 맞춰 뺐다) — 고친 이유는 정확성이 아니라 **같은 계산의 사본을 줄이는 것**이고,
+ * `clock.ts`의 주석이 이미 그 사본 수를 세고 있다.
+ *
+ * **남은 어긋남은 기준 시각이다.** 아래 `dateFromToday`가 내보내는 `current_date`는 DB 세션
+ * 시간대(UTC)이고 여기 간격은 `todayISO()`(스크립트 머신의 로컬 달력)에서 나온다. 스케줄 객체는
+ * 전부 `public.today_kst()`를 쓰므로(0013·0040), KST 00:00~09:00에 seed를 돌리면 `due_on`이
+ * 앱이 말하는 `오늘`과 하루 어긋난다. 내보내는 자리가 한 곳이 됐으니 고칠 때 한 줄이다.
+ */
 function daysFromToday(iso: string): number {
-  const now = new Date();
-  const todayUTC = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.round((Date.parse(`${iso}T00:00:00Z`) - todayUTC) / 86_400_000);
+  return daysBetweenISO(todayISO(), iso);
+}
+
+/**
+ * 오늘부터의 간격을 `date` 리터럴 SQL로. `(current_date + 3)::date` 꼴이다.
+ *
+ * 부호를 나누는 세 줄이 노트·복습 로그·이벤트 세 곳에 복제돼 있었다.
+ */
+function dateFromToday(iso: string): string {
+  const days = daysFromToday(iso);
+  return `(current_date ${days >= 0 ? '+' : '-'} ${Math.abs(days)})::date`;
 }
 
 function day(iso: string): string {
@@ -997,11 +1016,7 @@ w(
         값이라(`WRONG_NOTES_SEED`) 두 기준이 섞이면 며칠씩 어긋난다. 오늘로부터의 간격을
         직접 센다.
       */
-      const dueDays = note.dueOn ? daysFromToday(note.dueOn) : 0;
-      const dueSql =
-        note.state === 'stuck'
-          ? 'null'
-          : `(current_date ${dueDays >= 0 ? '+' : '-'} ${Math.abs(dueDays)})::date`;
+      const dueSql = note.state === 'stuck' ? 'null' : dateFromToday(note.dueOn ?? todayISO());
       return `  (${q(uuidFor(`wn_${studentId}_${note.id}`))}, ${q(uuidFor(studentId))}, ${q(uuidFor(note.qId))}, ${q(uuidFor(note.contentId))}, ${q(note.source)}, ${assignment}, ${picked}, ${qn(note.dig)}, ${note.starred ? 'true' : 'false'}, ${note.mastered ? 'true' : 'false'}, (${day(note.createdAt)})::timestamptz, ${q(note.state)}, ${dueSql}, ${note.streak}, ${note.missStreak})`;
     })
     .join(',\n'),
@@ -1036,9 +1051,7 @@ if (reviewRows.length > 0) {
         const answer = found ? found.q.answerIndex : 0;
         // 정오는 고른 답과 정답의 관계다 — 서버가 그렇게 판정한다(0040).
         const picked = r.correct ? answer : (answer + 1) % (found?.q.choices.length ?? 4);
-        return `  (${q(uuidFor(`wn_${studentId}_${note.id}`))}, ${q(uuidFor(studentId))}, (current_date ${
-          daysFromToday(r.on) >= 0 ? '+' : '-'
-        } ${Math.abs(daysFromToday(r.on))})::date, ${picked}, ${r.correct ? 'true' : 'false'}, ${
+        return `  (${q(uuidFor(`wn_${studentId}_${note.id}`))}, ${q(uuidFor(studentId))}, ${dateFromToday(r.on)}, ${picked}, ${r.correct ? 'true' : 'false'}, ${
           r.evidence ? q(r.evidence) : 'null'
         }, ${qn(r.recap)})`;
       })
@@ -1076,9 +1089,7 @@ w(
       new Set(
         reviewRows.map(
           ({ studentId, r }) =>
-            `  (${q(uuidFor(studentId))}, (current_date ${
-              daysFromToday(r.on) >= 0 ? '+' : '-'
-            } ${Math.abs(daysFromToday(r.on))})::date, 'review_done', null)`,
+            `  (${q(uuidFor(studentId))}, ${dateFromToday(r.on)}, 'review_done', null)`,
         ),
       ),
     ),

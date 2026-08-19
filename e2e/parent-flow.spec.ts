@@ -641,6 +641,42 @@ test.describe('M3 학부모 흐름', () => {
     await expect(page.getByTestId('month-next')).toBeEnabled();
   });
 
+  /*
+    **고른 것이 주소에 남는다.** 달은 `ChildReport`가, 자녀는 `app/parent/report.tsx`가 남긴다
+    (둘 다 히스토리를 늘리지 않는 `setParams`다). 남지 않으면 `자세히 보기`에서 뒤로 나올 때
+    달 없는 앞 주소로 돌아가 리포트가 이번 달로 되돌아가고, 새로고침은 늘 첫 자녀를 연다.
+  */
+  test('고른 달과 자녀가 주소에 남아 새로고침해도 같은 리포트를 연다', async ({ page }) => {
+    await loginParent(page);
+    await page.getByText('정예린').click();
+    await expect(page).toHaveURL(/child=/);
+
+    const opened = await page.getByTestId('month-label').textContent();
+    await page.getByTestId('month-prev').click();
+    const picked = await page.getByTestId('month-label').textContent();
+    expect(picked).not.toBe(opened);
+    await expect(page).toHaveURL(/month=/);
+
+    await page.reload();
+    await expect(page.getByTestId('month-label')).toHaveText(picked!);
+    await expect(page.getByText('정예린 님 리포트')).toBeVisible();
+  });
+
+  /*
+    **모르는 자녀를 조용히 다른 자녀로 바꿔 보여 주지 않는다.** 주소에 적힌 자녀와 화면이 말하는
+    자녀가 다르면 학부모는 그 사실을 알 방법이 없다. 문장은 `/parent/detail`과 같다.
+  */
+  test('내 자녀가 아닌 리포트 주소로 들어오면 다른 자녀를 대신 열지 않는다', async ({ page }) => {
+    await loginParent(page);
+    await page.goto('/parent/report?child=u_not_my_child');
+    await expect(page.getByText('자녀를 찾을 수 없어요')).toBeVisible();
+    await expect(page.getByText('연결된 자녀만 볼 수 있어요.')).toBeVisible();
+
+    // 막다른 길로 두지 않는다 — 내 자녀 리포트로 돌아가는 행동이 화면에 있다.
+    await page.getByTestId('report-my-children').click();
+    await expect(page.getByText(/님 리포트$/)).toBeVisible();
+  });
+
   test('오답노트를 얼마나 했는지 달마다 보여준다', async ({ page }) => {
     await loginParent(page);
     await page.getByText('이하은').click();

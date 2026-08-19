@@ -153,6 +153,27 @@ interface ProgressValue {
     pickedIndex?: number;
     /** 이미 담아 두었던 문항을 되살렸는지. 화면이 무엇을 말할지 갈린다(D-033). */
   }) => Promise<WriteResult & { restored?: boolean }>;
+  /**
+   * 여러 오답을 한 번에 담는다. **재조회는 마지막에 한 번이다.**
+   *
+   * `addWrongNote`를 루프에서 부르면 항목마다 `mutate`가 전체 재조회를 돌린다 — 오답 7개면
+   * RPC 7회 + 조회 8×7 = **요청 63개, 순차 14단계**이고 그중 56개는 직전과 같은 값을 다시
+   * 읽는다. 결과 화면의 `틀린 문항 모두 담기`가 그 자리다.
+   *
+   * **개수는 선택 필드다.** `write`가 예외를 잡은 갈래는 `{ ok: false, error }`만 돌려주므로
+   * (`supabase()`는 설정이 없으면 던진다) 개수가 없는 결과가 실재한다. 필수로 적고 `as`로
+   * 덮으면 호출부의 `failed > 0`이 `undefined > 0`이 되어 **실패가 성공 토스트로 나간다** —
+   * 이 파일이 막으려는 바로 그 어긋남이다. 형태는 위 `restored?`와 같다.
+   */
+  addWrongNotes: (
+    inputs: readonly {
+      questionId: string;
+      contentId: string;
+      source: 'personal' | 'academy';
+      assignmentId?: string;
+      pickedIndex?: number;
+    }[],
+  ) => Promise<WriteResult & { added?: number; failed?: number }>;
   removeWrongNote: (id: string) => Promise<WriteResult>;
   /** 지운 오답을 되돌린다(D-033). 메모·별표도 함께 살아난다. */
   restoreWrongNote: (note: WrongNote, index: number) => Promise<WriteResult>;
@@ -383,7 +404,23 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         parentRepo.loadWeekSummaries(),
         parentRepo.loadPraises(),
         isAcademy ? repo.loadAcademyNotes() : Promise.resolve({}),
-        notesRepo.loadNoteReviews(),
+        /*
+          **읽는 화면이 있는 역할만 받는다.** 정책은 `can_read_student(student_id) or
+          is_admin()`이라 본인·연결된 학부모·운영자에게 행이 나가고 교직원에게는 0행이 나간다.
+          소비처는 학생 화면 셋뿐이다(`learn`·`notebook`·`review`).
+
+          **운영자를 여기서 끊는 것이 요점이다.** RLS가 `is_admin()`으로 열려 있어 대리 보기가
+          아닌 평범한 로그인에도 남의 `recap` 본문이 최대 `REVIEW_PAGE`행까지 세션에 올라오고
+          (`readOnly`가 아니라 `visibleReviews`의 가리기도 지나가지 않는다) 읽는 화면은 없다.
+          그래서 `academy`를 지목하지 않고 **소비처가 있는 역할**로 조건을 적는다 — 운영자는
+          `student`·`parent` 어느 쪽도 아니라 이 갈래로 걸러진다.
+
+          `recap` 노출의 최종 경계는 여전히 DB 정책이다. 이 게이트는 클라이언트가 쓰지 않는 값을
+          받지 않는다는 뜻이고, 정책을 대신하지 않는다.
+        */
+        !target.roles.includes('student') && !target.roles.includes('parent')
+          ? Promise.resolve({})
+          : notesRepo.loadNoteReviews(),
       ]);
       if (!alive()) return await awaitSuccessor(id);
       setAttemptsByUser(attemptRows);
@@ -659,6 +696,29 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     [mutate],
   );
 
+  const addWrongNotes = useCallback<ProgressValue['addWrongNotes']>(
+    (inputs) =>
+      write(async () => {
+        if (denied) return { ...DENIED, added: 0, failed: inputs.length };
+        /*
+          RPC는 병렬로 보내도 안전하다 — 유니크 키가
+          `(student_id, question_id, source, coalesce(assignment_id, content_set_id))`이고
+          호출부가 아직 담지 않은 **서로 다른 문항**만 넘기므로 같은 키에서 경쟁하지 않는다.
+
+          **`allSettled`다.** `all`은 첫 거절에서 곧바로 거절하는데 남은 호출은 계속 돌아 서버에
+          커밋된다 — 그러면 몇 개가 담겼는지 세지 못한 채 실패로 끝난다. 루프 판본이 항목마다
+          결과를 세서 부분 성공을 말할 수 있었던 것을 여기서도 유지한다.
+        */
+        const results = await Promise.allSettled(inputs.map((i) => repo.addNote(i)));
+        const added = results.filter((r) => r.status === 'fulfilled' && r.value.ok).length;
+        const failed = results.length - added;
+        // 재조회는 한 번. 항목마다 돌리면 같은 값을 N−1번 다시 읽는다.
+        if (added > 0) await reload();
+        return { ok: failed === 0, added, failed };
+      }),
+    [denied, reload, write],
+  );
+
   const removeWrongNote = useCallback<ProgressValue['removeWrongNote']>(
     (id) =>
       mutateLocal(
@@ -743,7 +803,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
               id: `local_${input.noteId}_${on}`,
               noteId: input.noteId,
               reviewedOn: on,
-              pickedIndex: input.pickedIndex,
               isCorrect: next?.isCorrect ?? false,
               evidence: input.evidence,
               recap: input.recap,
@@ -994,6 +1053,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       requestRetryFor,
       wrongNotes,
       addWrongNote,
+      addWrongNotes,
       removeWrongNote,
       restoreWrongNote,
       setDig,
@@ -1038,6 +1098,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       requestRetryFor,
       wrongNotes,
       addWrongNote,
+      addWrongNotes,
       removeWrongNote,
       restoreWrongNote,
       setDig,

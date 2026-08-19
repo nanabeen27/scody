@@ -101,16 +101,18 @@ export default function StudentLearn() {
    * 범위 덱은 오늘 이미 본 것과 쉬는 것을 뺀다(서버가 그 노트의 복습을 받지 않는다). 그러지
    * 않으면 `오답 60개`를 누른 학생이 `모두 55개`를 받고 왜 다른지 알 길이 없다.
    */
+  /** 이 렌더의 기준일. 네 계산이 같은 날을 봐야 한다(오답노트와 같은 형태). */
+  const today = todayISO();
   const allDeck = useMemo(
-    () => scopedDeck(wrongNotes, noteReviews, {}, todayISO()),
-    [wrongNotes, noteReviews],
+    () => scopedDeck(wrongNotes, noteReviews, {}, today),
+    [wrongNotes, noteReviews, today],
   );
   const starredDeck = useMemo(
-    () => scopedDeck(wrongNotes, noteReviews, { onlyStarred: true }, todayISO()),
-    [wrongNotes, noteReviews],
+    () => scopedDeck(wrongNotes, noteReviews, { onlyStarred: true }, today),
+    [wrongNotes, noteReviews, today],
   );
   /** 화면이 말하는 오늘 개수. 상한이 적용된 값이다(밀린 것을 앞세우지 않는다). */
-  const today0 = useMemo(() => todayCount(wrongNotes, todayISO()), [wrongNotes]);
+  const today0 = useMemo(() => todayCount(wrongNotes, today), [wrongNotes, today]);
   /**
    * 가장 이른 차례까지 며칠.
    *
@@ -118,7 +120,7 @@ export default function StudentLearn() {
    * 재시험은 근거가 없다). 이 값을 모르면 화면이 방금 다섯 개를 담은 학생에게 `차례가 된 오답이
    * 없어요`라고 말해서 기능이 죽은 것처럼 읽힌다.
    */
-  const soonest = useMemo(() => soonestDueDays(wrongNotes, todayISO()), [wrongNotes]);
+  const soonest = useMemo(() => soonestDueDays(wrongNotes, today), [wrongNotes, today]);
   /** 영역별 오답 수. 약한 영역부터 고를 수 있게 많은 순으로. */
   const byArea = useMemo(() => {
     const acc: Record<string, number> = {};
@@ -296,7 +298,7 @@ export default function StudentLearn() {
           */}
           <AppText variant="caption" tone="secondary">
             {/*
-              **밀린 개수를 앞세우지 않는다.** 여기서 원값(`counts.today`)을 말하면 서른 개가
+              **밀린 개수를 앞세우지 않는다.** 여기서 원값(`dueCount`)을 말하면 서른 개가
               밀린 학생이 `30개예요`를 읽고 바로 아래 줄에서 `5개`를 읽는다 — 한 블록이 두 숫자를
               말한다. 개수를 세는 곳은 `todayCount` 하나다.
 

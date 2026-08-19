@@ -1,4 +1,4 @@
-import type { NoteEvidence } from '@/data/types';
+import type { NoteEvidence, NoteState } from '@/data/types';
 import type { WrongNote } from '@/repo/learning';
 import type { NoteReview } from '@/repo/notes';
 import { daysBetweenISO, todayISO } from './clock';
@@ -7,7 +7,8 @@ import { daysBetweenISO, todayISO } from './clock';
  * 오답 복습의 순수 규칙 — 오늘 볼 것 고르기 · 우선순위 · 요약.
  *
  * **스케줄을 정하는 곳이 아니다.** 다음에 볼 날은 서버만 정한다
- * (`supabase/migrations/0038_note_review_rpc.sql`). 여기 있는 것은 이미 정해진 `dueOn`을 보고
+ * (`supabase/migrations/0040_note_review_hardening.sql` — `0038`의 판본을 교체했다). 여기 있는
+ * 것은 이미 정해진 `dueOn`을 보고
  * **오늘 무엇을 몇 개 보여 줄지** 고르는 규칙이다. 그 둘을 섞으면 화면이 자기 일정을 앞당길 수
  * 있고, 그러면 스케줄이 서버 규칙이 아니라 클라이언트 값이 된다.
  *
@@ -55,13 +56,17 @@ export const DAILY_CAP = 5;
  */
 export const GRADUATE_STREAK = 3;
 
-/** 오늘 볼 카드 한 장. 노트에 "왜 지금 이것인가"를 붙인 형태다. */
+/**
+ * 오늘 볼 카드 한 장.
+ *
+ * `overdueDays`·`keeping`은 **정렬 비교자만 읽는다**(`dueCards`). 화면은 노트와 `noteReviews`에서
+ * 필요한 것을 직접 세므로 호출자에게 노출할 이유가 없지만, 정렬 근거를 값으로 남겨 두면 그
+ * 규칙을 테스트가 단정할 수 있다.
+ */
 export interface ReviewCard {
   note: WrongNote;
   /** 며칠 밀렸는가. 0이면 오늘이 그날이다. */
   overdueDays: number;
-  /** 이 노트를 지금까지 몇 번 다시 풀어 봤는가. */
-  reviewCount: number;
   /** 이번이 유지 복습인가(이미 졸업한 문항). */
   keeping: boolean;
 }
@@ -85,7 +90,6 @@ function isDue(note: WrongNote, today: string): boolean {
  */
 export function dueCards(
   notes: readonly WrongNote[],
-  reviews: Record<string, readonly NoteReview[]>,
   today: string = todayISO(),
   cap: number = DAILY_CAP,
 ): ReviewCard[] {
@@ -94,7 +98,6 @@ export function dueCards(
     .map<ReviewCard>((note) => ({
       note,
       overdueDays: note.dueOn ? daysBetweenISO(note.dueOn, today) : 0,
-      reviewCount: reviews[note.id]?.length ?? 0,
       keeping: note.state === 'graduated',
     }));
   cards.sort((a, b) => {
@@ -141,7 +144,7 @@ export function notReviewedToday(
   reviews: Record<string, readonly NoteReview[]>,
   today: string = todayISO(),
 ): ReviewCard[] {
-  return cards.filter((c) => !(reviews[c.note.id] ?? []).some((r) => r.reviewedOn === today));
+  return cards.filter((c) => !todayResult(c.note.id, reviews, today));
 }
 
 /**
@@ -156,7 +159,7 @@ export function todayDeck(
   today: string = todayISO(),
   cap: number = DAILY_CAP,
 ): ReviewCard[] {
-  const due = dueCards(notes, reviews, today, Number.MAX_SAFE_INTEGER);
+  const due = dueCards(notes, today, Number.MAX_SAFE_INTEGER);
   return notReviewedToday(due, reviews, today).slice(0, Math.max(0, cap));
 }
 
@@ -202,17 +205,27 @@ export function todayResult(
 }
 
 /**
- * 노트 목록의 상태 요약. 화면이 개수를 세는 유일한 곳이다.
+ * 노트 상태별 개수. **`dueToday`는 상한 적용 전 원값이다.**
  *
- * `stuck`을 `멈춤`이라고 부르지 않는다 — 화면 문구는 그 상태를 학생 탓으로 말하지 않는다.
+ * 화면이 학생에게 말하는 개수는 `todayCount`(상한 적용)다. 예전에는 이 필드가 `today`였고
+ * `todayCount`도 `오늘`이라 이름이 같아서, 화면이 어느 쪽을 골라야 하는지 알 수 없었다 —
+ * 실제로 오답노트 두 자리가 원값에 `Math.min`을 손으로 곱했다(`todayCount`가 없애려던 식이다).
  */
 export interface NoteStateCounts {
-  today: number;
+  dueToday: number;
   later: number;
   graduated: number;
   stuck: number;
 }
 
+/**
+ * 노트 목록의 상태 요약. **한 번 훑어 네 칸을 함께 센다.**
+ *
+ * 학생에게 말하는 `오늘` 개수는 여기서 읽지 않는다 — 상한을 적용한 `todayCount`가 그 자리다.
+ * 이 함수의 소비처는 오답노트의 칸 목록이다(`쉬는 중` 칸을 둘지, 칸마다 몇 개인지).
+ *
+ * `stuck`을 `멈춤`이라고 부르지 않는다 — 화면 문구는 그 상태를 학생 탓으로 말하지 않는다.
+ */
 export function stateCounts(
   notes: readonly WrongNote[],
   today: string = todayISO(),
@@ -227,7 +240,7 @@ export function stateCounts(
     else if (n.state === 'graduated') graduated += 1;
     else later += 1;
   }
-  return { today: dueToday, later, graduated, stuck };
+  return { dueToday, later, graduated, stuck };
 }
 
 /**
@@ -260,7 +273,8 @@ export function soonestDueDays(
  * 그리고 단계 숫자(`3단계`)나 강등을 말하지 않는다 — 감점으로 읽히면 복습 동기를 깎는다.
  */
 export function nextReviewLabel(
-  note: Pick<WrongNote, 'state' | 'dueOn'>,
+  /** 노트(`dueOn?: string`)와 서버 응답(`dueOn: string | null`)을 둘 다 받는다. */
+  note: { state: NoteState; dueOn?: string | null },
   today: string = todayISO(),
 ): string {
   if (note.state === 'stuck') return '지금은 복습 목록에서 쉬고 있어요';
@@ -274,10 +288,22 @@ export function nextReviewLabel(
 }
 
 /** 숙달까지 남은 정답 횟수. 졸업했으면 0이다. */
-export function passesLeft(note: Pick<WrongNote, 'state' | 'streak'>): number {
+export function passesLeft(note: { state: NoteState; streak: number }): number {
   if (note.state === 'graduated') return 0;
   return Math.max(0, GRADUATE_STREAK - note.streak);
 }
+
+/**
+ * 학원 과제 오답의 메모 공개 고지(D-054 · D-110).
+ *
+ * **결과 화면·오답노트·카드 복습 세 곳이 같은 문장을 말한다.** 세 화면의 주석이 모두 "한 글자도
+ * 다르지 않게 쓴다"고 적었는데 리터럴 복제로는 컴파일러가 그 약속을 지켜 주지 않는다 — 공개
+ * 범위를 말하는 문장이라 한 자리만 바뀌면 나머지 두 화면이 다른 범위를 약속한다.
+ *
+ * 컴포넌트로 만들지 않는다: 조건과 톤은 같아도 배치 맥락이 달라(결과는 목록 위, 복습은 피드백
+ * 아래, 오답노트는 카드 안) 감싸는 요소가 화면마다 다르다.
+ */
+export const ACADEMY_MEMO_NOTICE = '학원 과제에서 담은 오답의 메모는 선생님이 볼 수 있어요.';
 
 /**
  * 근거 3택의 화면 문구. 값과 문구를 한곳에 둔다.
@@ -290,14 +316,14 @@ export function passesLeft(note: Pick<WrongNote, 'state' | 'streak'>): number {
  * 값 공간(`NoteEvidence`)은 그대로 둔다 — 스키마를 건드리지 않고 문구만 가른다. `passage`는
  * "근거를 확인하고 골랐다", `choices`는 "선지를 보고 골랐다"라는 뜻으로 두 갈래에서 같다.
  */
-export const EVIDENCE_LABELS: Record<NoteEvidence, string> = {
+const EVIDENCE_LABELS: Record<NoteEvidence, string> = {
   passage: '지문에서 근거를 찾았어요',
   choices: '선지만 보고 판단했어요',
   unsure: '잘 모르겠어요',
 };
 
 /** 지문이 없는 문항(문법·어휘)의 근거 3택 문구. */
-export const EVIDENCE_LABELS_NO_PASSAGE: Record<NoteEvidence, string> = {
+const EVIDENCE_LABELS_NO_PASSAGE: Record<NoteEvidence, string> = {
   passage: '규칙을 알고 골랐어요',
   choices: '선지를 보고 골랐어요',
   unsure: '잘 모르겠어요',
@@ -311,6 +337,13 @@ export function evidenceQuestion(hasPassage: boolean): string {
 export function evidenceLabels(hasPassage: boolean): Record<NoteEvidence, string> {
   return hasPassage ? EVIDENCE_LABELS : EVIDENCE_LABELS_NO_PASSAGE;
 }
+
+/**
+ * 근거 3택을 묻는 순서. **라벨과 같은 자리에서 정한다.**
+ *
+ * 화면이 따로 나열하면 값 공간이 두 곳에 있고 순서만 어긋나도 타입 검사가 잡지 못한다.
+ */
+export const EVIDENCE_ORDER = Object.keys(EVIDENCE_LABELS) as readonly NoteEvidence[];
 
 /**
  * 지금 이 문항에 무엇을 권할지.
@@ -359,4 +392,37 @@ export function shuffleOrder(seed: string, count: number): number[] {
 /** 카드 하나의 선지 순서 씨앗. 화면과 테스트가 같은 규칙을 쓰게 한곳에 둔다. */
 export function choiceSeed(noteId: string, today: string = todayISO()): string {
   return `${noteId}:${today}`;
+}
+
+/**
+ * 완료 요약의 마지막 한 줄.
+ *
+ * 조기 반환이라 조건 하나를 더할 자리가 명확하고, 문구 우선순위가 렌더 트리에 묻히지 않는다.
+ *
+ * **첫 조건이 규칙이다** — 틀린 카드가 전부 내일 오지 않는다면 `내일 다시 만나요`는 거짓이다.
+ * 내일 오지 않는 갈래는 둘이고 서버가 정한다(0040):
+ *
+ * 1. **쉬는 것**: 서로 다른 날 세 번 연속 틀리면 큐에서 내린다(`due_on`이 없다).
+ * 2. **차례가 아닌 복습**: 별표·영역·전체 덱은 차례를 보지 않고 열리므로, 그 회차는 기록만
+ *    남고 `due_on`을 움직이지 않는다(`scheduled: false`) — 그 카드의 다음 차례는 그대로다.
+ *
+ * 그래서 `notTomorrow`는 상태가 아니라 **다음 차례가 내일인지**로 센다. ②를 빼먹으면 같은 흐름의
+ * 두 화면이 같은 카드의 일정을 반대로 말한다 — 카드 화면은 `차례가 아닌 복습이라 다음 차례는
+ * 그대로예요`라고 말하고 완료 요약은 `내일 다시 만나요`라고 말했다.
+ */
+export function closingLine({
+  missed,
+  notTomorrow,
+  done,
+  remaining,
+}: {
+  missed: number;
+  /** 틀린 것 중 **다음 차례가 내일이 아닌** 개수(쉬는 것 · 차례가 아니었던 복습). */
+  notTomorrow: number;
+  done: number;
+  remaining: number;
+}): string {
+  if (missed > notTomorrow) return '헷갈린 문항은 내일 다시 만나요.';
+  if (done === 0) return '건너뛴 문항은 다음 차례에 다시 나와요.';
+  return remaining > 0 ? '오늘 몫을 마쳤어요.' : '차례가 된 오답을 모두 봤어요.';
 }

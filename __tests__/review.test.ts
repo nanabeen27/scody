@@ -1,7 +1,9 @@
 import { addDaysISO } from '../src/features/clock';
 import {
   choiceSeed,
+  closingLine,
   DAILY_CAP,
+  EVIDENCE_ORDER,
   evidenceLabels,
   evidenceQuestion,
   dueCards,
@@ -53,12 +55,12 @@ describe('오늘 볼 카드', () => {
       note('a', { dueOn: TODAY }),
       note('b', { dueOn: addDaysISO(TODAY, 3) }),
     ];
-    expect(dueCards(notes, {}, TODAY).map((c) => c.note.id)).toEqual(['a']);
+    expect(dueCards(notes, TODAY).map((c) => c.note.id)).toEqual(['a']);
   });
 
   it('멈춘 노트는 다시 볼 날이 없어 큐에 오지 않는다', () => {
     const notes = [note('a', { state: 'stuck', dueOn: undefined, missStreak: 3 })];
-    expect(dueCards(notes, {}, TODAY)).toHaveLength(0);
+    expect(dueCards(notes, TODAY)).toHaveLength(0);
     expect(dueCount(notes, TODAY)).toBe(0);
   });
 
@@ -68,7 +70,7 @@ describe('오늘 볼 카드', () => {
       note(`n${i}`, { dueOn: addDaysISO(TODAY, -i - 1) }),
     );
     expect(dueCount(notes, TODAY)).toBe(30);
-    expect(dueCards(notes, {}, TODAY)).toHaveLength(DAILY_CAP);
+    expect(dueCards(notes, TODAY)).toHaveLength(DAILY_CAP);
   });
 
   it('다시 틀린 것을 먼저 보여 준다', () => {
@@ -76,7 +78,7 @@ describe('오늘 볼 카드', () => {
       note('오래밀림', { dueOn: addDaysISO(TODAY, -20) }),
       note('다시틀림', { dueOn: TODAY, missStreak: 1 }),
     ];
-    expect(dueCards(notes, {}, TODAY, 2).map((c) => c.note.id)).toEqual([
+    expect(dueCards(notes, TODAY, 2).map((c) => c.note.id)).toEqual([
       '다시틀림',
       '오래밀림',
     ]);
@@ -87,7 +89,7 @@ describe('오늘 볼 카드', () => {
       note('졸업', { state: 'graduated', dueOn: addDaysISO(TODAY, -5), streak: 3 }),
       note('복습중', { state: 'queued', dueOn: TODAY }),
     ];
-    const ids = dueCards(notes, {}, TODAY, 2).map((c) => c.note.id);
+    const ids = dueCards(notes, TODAY, 2).map((c) => c.note.id);
     expect(ids).toEqual(['복습중', '졸업']);
   });
 
@@ -96,35 +98,33 @@ describe('오늘 볼 카드', () => {
       note('나중', { createdAt: '2026-07-10' }),
       note('먼저', { createdAt: '2026-07-01' }),
     ];
-    const once = dueCards(notes, {}, TODAY).map((c) => c.note.id);
-    const twice = dueCards([...notes].reverse(), {}, TODAY).map((c) => c.note.id);
+    const once = dueCards(notes, TODAY).map((c) => c.note.id);
+    const twice = dueCards([...notes].reverse(), TODAY).map((c) => c.note.id);
     expect(once).toEqual(['먼저', '나중']);
     expect(twice).toEqual(once);
   });
 
   it('졸업한 카드는 유지 복습으로 표시된다', () => {
-    const cards = dueCards([note('a', { state: 'graduated', streak: 3 })], {}, TODAY);
+    const cards = dueCards([note('a', { state: 'graduated', streak: 3 })], TODAY);
     expect(cards[0].keeping).toBe(true);
   });
 
-  it('밀린 일수와 지금까지 복습 횟수를 함께 준다', () => {
-    const n = note('a', { dueOn: addDaysISO(TODAY, -4) });
-    const cards = dueCards([n], { a: [review('a', '2026-08-01'), review('a', '2026-08-10')] }, TODAY);
+  it('며칠 밀렸는지 함께 준다', () => {
+    const cards = dueCards([note('a', { dueOn: addDaysISO(TODAY, -4) })], TODAY);
     expect(cards[0].overdueDays).toBe(4);
-    expect(cards[0].reviewCount).toBe(2);
   });
 });
 
 describe('중간에 나가도 진행이 남는다 (A-114)', () => {
   it('오늘 이미 복습한 카드는 다시 나오지 않는다', () => {
     const notes = [note('a'), note('b'), note('c')];
-    const cards = dueCards(notes, {}, TODAY);
+    const cards = dueCards(notes, TODAY);
     const reviews = { a: [review('a', TODAY)], b: [review('b', TODAY)] };
     expect(notReviewedToday(cards, reviews, TODAY).map((c) => c.note.id)).toEqual(['c']);
   });
 
   it('어제 복습한 것은 오늘 다시 나온다', () => {
-    const cards = dueCards([note('a')], {}, TODAY);
+    const cards = dueCards([note('a')], TODAY);
     const reviews = { a: [review('a', addDaysISO(TODAY, -1))] };
     expect(notReviewedToday(cards, reviews, TODAY)).toHaveLength(1);
   });
@@ -145,14 +145,14 @@ describe('상태 요약', () => {
       note('졸업나중', { state: 'graduated', dueOn: addDaysISO(TODAY, 20), streak: 3 }),
       note('멈춤', { state: 'stuck', dueOn: undefined, missStreak: 3 }),
     ];
-    expect(stateCounts(notes, TODAY)).toEqual({ today: 2, later: 1, graduated: 1, stuck: 1 });
+    expect(stateCounts(notes, TODAY)).toEqual({ dueToday: 2, later: 1, graduated: 1, stuck: 1 });
   });
 
   it('졸업했지만 오늘이 그날이면 오늘로 센다 — 큐에 나오는 것과 어긋나지 않게', () => {
     const notes = [note('a', { state: 'graduated', dueOn: TODAY, streak: 3 })];
-    expect(stateCounts(notes, TODAY).today).toBe(1);
+    expect(stateCounts(notes, TODAY).dueToday).toBe(1);
     expect(stateCounts(notes, TODAY).graduated).toBe(0);
-    expect(dueCards(notes, {}, TODAY)).toHaveLength(1);
+    expect(dueCards(notes, TODAY)).toHaveLength(1);
   });
 });
 
@@ -335,5 +335,48 @@ describe('근거 3택 문구', () => {
 
   it('값 공간은 갈리지 않는다 — 스키마를 건드리지 않는다', () => {
     expect(Object.keys(evidenceLabels(true))).toEqual(Object.keys(evidenceLabels(false)));
+  });
+});
+
+describe('완료 요약의 마지막 한 줄', () => {
+  it('내일 오지 않는 문항에는 내일이라고 말하지 않는다', () => {
+    /*
+      내일 오지 않는 갈래는 둘이고 서버가 정한다(0040). ①서로 다른 날 세 번 연속 틀리면 큐에서
+      내린다(`due_on = null`). ②별표·영역·전체 덱은 차례를 보지 않고 열리므로 그 회차는 기록만
+      남고 `due_on`을 움직이지 않는다(`scheduled: false`). 헷갈린 것이 전부 그런 카드면
+      `내일 다시 만나요`가 거짓이 된다 — 화면은 `notTomorrow`로 그 둘을 함께 센다.
+    */
+    expect(closingLine({ missed: 3, notTomorrow: 3, done: 3, remaining: 0 })).not.toContain('내일');
+    expect(closingLine({ missed: 3, notTomorrow: 1, done: 3, remaining: 0 })).toBe(
+      '헷갈린 문항은 내일 다시 만나요.',
+    );
+  });
+
+  it('전부 건너뛰면 다시 풀었다고 말하지 않는다', () => {
+    expect(closingLine({ missed: 0, notTomorrow: 0, done: 0, remaining: 2 })).toBe(
+      '건너뛴 문항은 다음 차례에 다시 나와요.',
+    );
+  });
+
+  it('남은 것이 있으면 모두 봤다고 단정하지 않는다', () => {
+    // 예전에는 `차례가 된 오답을 모두 봤어요` 아래에 `남은 오답 더 보기`가 함께 서서 두 문장이
+    // 서로를 부정했다.
+    expect(closingLine({ missed: 0, notTomorrow: 0, done: 5, remaining: 5 })).toBe(
+      '오늘 몫을 마쳤어요.',
+    );
+    expect(closingLine({ missed: 0, notTomorrow: 0, done: 5, remaining: 0 })).toBe(
+      '차례가 된 오답을 모두 봤어요.',
+    );
+  });
+});
+
+describe('근거 3택 순서', () => {
+  it('지문 · 선지 · 잘 모르겠어요 순서로 묻는다', () => {
+    /*
+      순서가 라벨 맵의 키 순서에서 나오므로(`Object.keys`) 맵을 보기 좋게 재배열하면 화면의
+      3택 순서가 조용히 바뀐다 — `as` 캐스트라 타입 검사도 잡지 못한다. `잘 모르겠어요`가
+      마지막인 것은 의도다(0040이 `unsure`를 숙달 판정에서 빼는 값으로 쓴다).
+    */
+    expect(EVIDENCE_ORDER).toEqual(['passage', 'choices', 'unsure']);
   });
 });

@@ -102,3 +102,32 @@ export async function reviewCard(
   await page.getByTestId('review-check').click();
   await page.getByTestId('review-feedback').waitFor();
 }
+
+/**
+ * 학습 탭 → **오늘의 복습 덱**.
+ *
+ * 이 두 줄이 스펙 아홉 자리에 복제돼 있었다. `page.goto('/student/review')`로 줄이지 않는다 —
+ * 새로 고치는 진입이라 대리 로그인 세션이 끊긴다(`admin-flow.spec.ts`의 `impersonate`).
+ */
+export async function openTodayDeck(page: Page) {
+  await page.getByRole('link', { name: '학습' }).click();
+  await page.getByTestId('learn-review-today').click();
+}
+
+/**
+ * 학습 탭 → **오답노트**, 목록을 끝까지 펼친다.
+ *
+ * 목록은 5개에서 접히므로(`notebook-more`) 특정 노트를 찾는 단정은 펼침이 먼저다.
+ * 접기 자체가 없는 계정에서도 그냥 통과하도록 개수를 보고 누른다.
+ *
+ * **개수를 보기 전에 조회가 끝나기를 기다린다.** `count()`는 기다리지 않으므로 조회 중에 물으면
+ * 아직 없는 버튼을 0으로 읽고 펼치지 않은 채 지나간다 — 그러면 접힌 쪽에 있는 노트를 찾는
+ * 호출부가 그 노트가 없다며 실패한다.
+ */
+export async function openNotebookAll(page: Page) {
+  await page.getByRole('link', { name: '학습' }).click();
+  await page.getByTestId('learn-notebook').click();
+  await expect(page.getByText('오답을 불러오고 있어요.')).toHaveCount(0);
+  const more = page.getByTestId('notebook-more');
+  if ((await more.count()) > 0) await more.click();
+}

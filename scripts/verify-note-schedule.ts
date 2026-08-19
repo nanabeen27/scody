@@ -17,60 +17,30 @@
  *
  * **`npm test`에 넣지 않는다.** 네트워크와 원격 DB 자격 증명이 필요하다.
  */
-import { readFileSync } from 'node:fs';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { Client } from 'pg';
-import './env';
+import { type Client } from 'pg';
+import { check, eq, ownerClient, requireEnv, results, signIn } from './_verify';
+import { GRADUATE_STREAK } from '../src/features/review';
 
-const URL_ = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-const KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
-const PASSWORD = process.env.EXPO_PUBLIC_DEV_LOGIN_PASSWORD ?? '';
+requireEnv();
 
-if (!URL_ || !KEY) throw new Error('.env에 EXPO_PUBLIC_SUPABASE_URL·ANON_KEY가 필요해요.');
-if (!PASSWORD) throw new Error('.env에 EXPO_PUBLIC_DEV_LOGIN_PASSWORD가 필요해요.');
-
-let pass = 0;
-let fail = 0;
-
-function ok(label: string, cond: boolean, detail?: string) {
-  if (cond) {
-    pass += 1;
-    console.log(`  ✓ ${label}`);
-  } else {
-    fail += 1;
-    console.log(`  ✗ ${label}${detail ? ` — ${detail}` : ''}`);
+/**
+ * 가드를 잠깐 열고 스케줄을 직접 쓴다. **소유자 연결에서만 되는 일이라 이 스크립트가 필요하다.**
+ *
+ * `try/finally`가 핵심이다 — 예전에는 여닫는 3줄이 아홉 자리에 복제돼 있었고, 중간 쿼리가 던지면
+ * 플래그가 이 연결에 켜진 채 남았다.
+ *
+ * **가드 검사가 거짓으로 통과하는 것은 아니다** — 아래 `state 직접 UPDATE 거부` 같은 단정은 전부
+ * `student`(PostgREST)로 보내고 그쪽은 다른 연결이라 이 세션 GUC가 닿지 않는다. 새는 범위는 이
+ * 스크립트가 뒤이어 보내는 **소유자 쓰기**이고, 그러면 `backdate`가 손대지 않기로 한 `stuck`의
+ * `due_on`까지 함께 움직여 뒤따르는 시작점이 조용히 달라진다.
+ */
+async function asOwner(db: Client, sql: string, params: unknown[] = []): Promise<void> {
+  await db.query(`select set_config('scody.note_schedule', 'on', false)`);
+  try {
+    await db.query(sql, params);
+  } finally {
+    await db.query(`select set_config('scody.note_schedule', '', false)`);
   }
-}
-
-function eq(label: string, actual: unknown, expected: unknown) {
-  ok(label, actual === expected, `기대 ${JSON.stringify(expected)}, 실제 ${JSON.stringify(actual)}`);
-}
-
-async function signIn(scodyId: string): Promise<SupabaseClient> {
-  const client = createClient(URL_, KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { error } = await client.auth.signInWithPassword({
-    email: `${scodyId}@scody.test`,
-    password: PASSWORD,
-  });
-  if (error) throw new Error(`${scodyId} 로그인 실패: ${error.message}`);
-  return client;
-}
-
-function ownerClient(): Client {
-  const url = readFileSync('supabase/.temp/pooler-url', 'utf8').trim();
-  const password = process.env.SUPABASE_DB_PASSWORD;
-  if (!password) throw new Error('.env에 SUPABASE_DB_PASSWORD가 필요해요.');
-  const u = new URL(url);
-  return new Client({
-    host: u.hostname,
-    port: Number(u.port || 5432),
-    user: decodeURIComponent(u.username),
-    password,
-    database: u.pathname.replace(/^\//, '') || 'postgres',
-    ssl: { rejectUnauthorized: false },
-  });
 }
 
 /**
@@ -92,14 +62,13 @@ async function backdate(db: Client, noteId: string) {
        where note_id = $1`,
     [noteId],
   );
-  await db.query(`select set_config('scody.note_schedule', 'on', false)`);
-  await db.query(
+  await asOwner(
+    db,
     `update public.wrong_notes
        set due_on = public.today_kst()
        where id = $1 and due_on is not null`,
     [noteId],
   );
-  await db.query(`select set_config('scody.note_schedule', '', false)`);
 }
 
 /**
@@ -173,15 +142,14 @@ async function main() {
       `before`로 되돌리므로 seed 상태는 보존된다.
     */
     console.log('[시작점 맞추기]');
-    await db.query(`select set_config('scody.note_schedule', 'on', false)`);
-    await db.query(
+    await asOwner(
+      db,
       `update public.wrong_notes
          set state = 'queued', due_on = public.today_kst(), streak = 0, miss_streak = 0,
              dismissed_at = null
          where id = $1`,
       [noteId],
     );
-    await db.query(`select set_config('scody.note_schedule', '', false)`);
     await db.query(`delete from public.note_reviews where note_id = $1`, [noteId]);
     /** 다른 학생의 노트. 소유 검사 단정에 쓴다. */
     const other = await db.query<{ id: string }>(
@@ -193,7 +161,7 @@ async function main() {
     eq('due_on이 오늘', await daysFromToday(db, start.due_on), 0);
     eq('streak 0', start.streak, 0);
     eq('miss_streak 0', start.miss_streak, 0);
-    ok('오늘 남은 복습 기록이 없다',
+    check('오늘 남은 복습 기록이 없다',
       (await db.query(`select 1 from public.note_reviews where note_id = $1`, [noteId])).rowCount === 0);
 
     // ── 2. 정답 사다리: 7 → 21 → 졸업(30) ──────────────────────────────────
@@ -203,31 +171,34 @@ async function main() {
       p_note_id: noteId, p_picked_index: answer, p_evidence: 'passage',
       p_recap: '지문 3단락이 근거였어요',
     });
-    ok('1회 정답 RPC 성공', !r1.error, r1.error?.message);
+    check('1회 정답 RPC 성공', !r1.error, r1.error?.message);
     let s = await sched(db, noteId);
     eq('streak 1', s.streak, 1);
     eq('1회 정답 → 7일 뒤', await daysFromToday(db, s.due_on), 7);
     eq('state queued', s.state, 'queued');
 
-    ok('같은 날 두 번째 복습은 거부된다',
+    check('같은 날 두 번째 복습은 거부된다',
       (await student.rpc('rpc_log_note_review', { p_note_id: noteId, p_picked_index: answer })).error !== null);
 
     await backdate(db, noteId);
     const r2 = await student.rpc('rpc_log_note_review', {
       p_note_id: noteId, p_picked_index: answer, p_evidence: 'choices',
     });
-    ok('2회 정답 RPC 성공', !r2.error, r2.error?.message);
+    check('2회 정답 RPC 성공', !r2.error, r2.error?.message);
     s = await sched(db, noteId);
     eq('streak 2', s.streak, 2);
     eq('2회 정답 → 21일 뒤', await daysFromToday(db, s.due_on), 21);
 
     await backdate(db, noteId);
     const r3 = await student.rpc('rpc_log_note_review', { p_note_id: noteId, p_picked_index: answer });
-    ok('3회 정답 RPC 성공', !r3.error, r3.error?.message);
+    check('3회 정답 RPC 성공', !r3.error, r3.error?.message);
     s = await sched(db, noteId);
-    eq('3회 연속 정답 → graduated', s.state, 'graduated');
+    // 졸업 기준은 TS(`GRADUATE_STREAK`)와 SQL(0040)에 각각 적혀 있다. 상수로 단언해 둬야
+    // 한쪽만 바뀌면 여기서 걸린다.
+    eq(`연속 정답 ${GRADUATE_STREAK}회`, s.streak, GRADUATE_STREAK);
+    eq(`${GRADUATE_STREAK}회 연속 정답 → graduated`, s.state, 'graduated');
     eq('졸업 → 30일 뒤', await daysFromToday(db, s.due_on), 30);
-    ok('졸업해도 due_on이 있다(큐에서 빠지지 않는다)', s.due_on !== null);
+    check('졸업해도 due_on이 있다(큐에서 빠지지 않는다)', s.due_on !== null);
 
     // ── 3. 졸업 뒤 오답 한 번은 stuck이 아니다 ──────────────────────────────
     console.log('\n[졸업 뒤 오답]');
@@ -256,29 +227,29 @@ async function main() {
     // ── 5. 큐 복귀 ──────────────────────────────────────────────────────────
     console.log('\n[큐 복귀]');
     const rq = await student.rpc('rpc_requeue_note', { p_note_id: noteId });
-    ok('stuck에서 rpc_requeue_note 성공', !rq.error, rq.error?.message);
+    check('stuck에서 rpc_requeue_note 성공', !rq.error, rq.error?.message);
     s = await sched(db, noteId);
     eq('queued로 돌아온다', s.state, 'queued');
     eq('내일로 잡힌다', await daysFromToday(db, s.due_on), 1);
     eq('miss_streak 초기화', s.miss_streak, 0);
-    ok('stuck이 아닐 때 rpc_requeue_note는 거부된다',
+    check('stuck이 아닐 때 rpc_requeue_note는 거부된다',
       (await student.rpc('rpc_requeue_note', { p_note_id: noteId })).error !== null);
 
     // ── 6. 스케줄을 클라이언트가 못 쓴다 ────────────────────────────────────
     console.log('\n[가드]');
-    ok('state 직접 UPDATE 거부',
+    check('state 직접 UPDATE 거부',
       (await student.from('wrong_notes').update({ state: 'graduated' }).eq('id', noteId)).error !== null);
-    ok('due_on 직접 UPDATE 거부',
+    check('due_on 직접 UPDATE 거부',
       (await student.from('wrong_notes').update({ due_on: '2099-01-01' }).eq('id', noteId)).error !== null);
-    ok('streak 직접 UPDATE 거부',
+    check('streak 직접 UPDATE 거부',
       (await student.from('wrong_notes').update({ streak: 3 }).eq('id', noteId)).error !== null);
-    ok('메모(dig) UPDATE는 통과한다',
+    check('메모(dig) UPDATE는 통과한다',
       (await student.from('wrong_notes').update({ dig: null }).eq('id', noteId)).error === null);
 
-    ok('note_reviews 직접 INSERT 거부',
+    check('note_reviews 직접 INSERT 거부',
       (await student.from('note_reviews')
         .insert({ note_id: noteId, student_id: uid, is_correct: true }).select()).error !== null);
-    ok('wrong_notes 물리 DELETE 거부',
+    check('wrong_notes 물리 DELETE 거부',
       (await student.from('wrong_notes').delete().eq('id', noteId)).error !== null);
 
     // ── 7. 남의 노트 ────────────────────────────────────────────────────────
@@ -287,7 +258,7 @@ async function main() {
       const r = await student.rpc('rpc_log_note_review', {
         p_note_id: other.rows[0].id, p_picked_index: 0,
       });
-      ok('남의 노트에 복습을 남길 수 없다', r.error !== null, r.error?.message);
+      check('남의 노트에 복습을 남길 수 없다', r.error !== null, r.error?.message);
     } else {
       console.log('  - 다른 학생의 노트가 없어 건너뜀');
     }
@@ -295,7 +266,7 @@ async function main() {
     // ── 8. 지운 노트 ────────────────────────────────────────────────────────
     console.log('\n[지운 노트]');
     await student.from('wrong_notes').update({ dismissed_at: new Date().toISOString() }).eq('id', noteId);
-    ok('지운 노트에는 복습을 남길 수 없다',
+    check('지운 노트에는 복습을 남길 수 없다',
       (await student.rpc('rpc_log_note_review', { p_note_id: noteId, p_picked_index: answer })).error !== null);
     const readd = await db.query<{ state: string; streak: number }>(
       `select state, streak from public.wrong_notes where id = $1`, [noteId]);
@@ -307,13 +278,13 @@ async function main() {
         `select content_set_id from public.wrong_notes where id = $1`, [noteId])).rows[0].content_set_id,
       p_source: 'personal',
     });
-    ok('다시 담기가 유니크 위반 없이 되살린다', !addErr, addErr?.message);
-    ok('되살린 것이 같은 행이다', (addBack as { id?: string } | null)?.id === noteId);
+    check('다시 담기가 유니크 위반 없이 되살린다', !addErr, addErr?.message);
+    check('되살린 것이 같은 행이다', (addBack as { id?: string } | null)?.id === noteId);
     const after = await sched(db, noteId);
     eq('되살려도 state가 그대로다', after.state, keptState.state);
     eq('되살려도 streak이 그대로다', after.streak, keptState.streak);
     const alive = await db.query(`select 1 from public.wrong_notes where id = $1 and dismissed_at is null`, [noteId]);
-    ok('dismissed_at이 비워졌다', alive.rowCount === 1);
+    check('dismissed_at이 비워졌다', alive.rowCount === 1);
 
     // ── 8-1. 정오를 서버가 판정한다 ─────────────────────────────────────────
     /*
@@ -322,31 +293,30 @@ async function main() {
       54개 단정이 전부 통과하면서 그것을 잡지 못한 이유는 **정오를 단정하지 않았기** 때문이다.
     */
     console.log('\n[서버 채점]');
-    await db.query(`select set_config('scody.note_schedule', 'on', false)`);
-    await db.query(
+    await asOwner(
+      db,
       `update public.wrong_notes
          set state = 'queued', due_on = public.today_kst(), streak = 0, miss_streak = 0
          where id = $1`,
       [noteId],
     );
-    await db.query(`select set_config('scody.note_schedule', '', false)`);
     await db.query(`delete from public.note_reviews where note_id = $1`, [noteId]);
 
     const { answer: ans2, wrong: wrong2 } = await answerOf(db, noteId);
     const graded = await student.rpc('rpc_log_note_review', {
       p_note_id: noteId, p_picked_index: wrong2,
     });
-    ok('오답을 보내면 서버가 오답으로 판정한다',
+    check('오답을 보내면 서버가 오답으로 판정한다',
       (graded.data as { isCorrect?: boolean } | null)?.isCorrect === false, graded.error?.message);
     eq('오답이므로 다음은 내일', await daysFromToday(db, (await sched(db, noteId)).due_on), 1);
-    ok('정오를 인자로 넘길 수 없다(옛 시그니처가 사라졌다)',
+    check('정오를 인자로 넘길 수 없다(옛 시그니처가 사라졌다)',
       (await student.rpc('rpc_log_note_review',
         { p_note_id: noteId, p_is_correct: true } as never)).error !== null);
-    ok('선지 범위를 벗어난 답은 거부된다',
+    check('선지 범위를 벗어난 답은 거부된다',
       (await student.rpc('rpc_log_note_review', { p_note_id: noteId, p_picked_index: 99 })).error !== null);
-    ok('음수 답은 거부된다',
+    check('음수 답은 거부된다',
       (await student.rpc('rpc_log_note_review', { p_note_id: noteId, p_picked_index: -1 })).error !== null);
-    ok('고른 답이 없으면 거부된다',
+    check('고른 답이 없으면 거부된다',
       (await student.rpc('rpc_log_note_review', { p_note_id: noteId })).error !== null);
 
     // ── 8-2. 차례가 아닌 복습은 일정을 앞당기지 못한다 ──────────────────────
@@ -356,15 +326,16 @@ async function main() {
     */
     console.log('\n[차례가 아닌 복습]');
     await backdate(db, noteId);
-    await db.query(`select set_config('scody.note_schedule', 'on', false)`);
-    await db.query(
-      `update public.wrong_notes set due_on = public.today_kst() + 10 where id = $1`, [noteId]);
-    await db.query(`select set_config('scody.note_schedule', '', false)`);
+    await asOwner(
+      db,
+      `update public.wrong_notes set due_on = public.today_kst() + 10 where id = $1`,
+      [noteId],
+    );
     const notDue = await student.rpc('rpc_log_note_review', {
       p_note_id: noteId, p_picked_index: ans2, p_evidence: 'passage',
     });
-    ok('차례가 아니어도 기록은 남는다', !notDue.error, notDue.error?.message);
-    ok('스케줄을 움직이지 않았다고 알려 준다',
+    check('차례가 아니어도 기록은 남는다', !notDue.error, notDue.error?.message);
+    check('스케줄을 움직이지 않았다고 알려 준다',
       (notDue.data as { scheduled?: boolean } | null)?.scheduled === false);
     eq('다음 차례가 그대로다', await daysFromToday(db, (await sched(db, noteId)).due_on), 10);
     eq('연속 정답도 오르지 않았다', (await sched(db, noteId)).streak, 0);
@@ -372,50 +343,52 @@ async function main() {
     // ── 8-3. 찍어서 맞힌 것은 연속으로 세지 않는다 ──────────────────────────
     console.log('\n[찍어서 맞힘]');
     await backdate(db, noteId);
-    await db.query(`select set_config('scody.note_schedule', 'on', false)`);
-    await db.query(
-      `update public.wrong_notes set due_on = public.today_kst() where id = $1`, [noteId]);
-    await db.query(`select set_config('scody.note_schedule', '', false)`);
+    await asOwner(
+      db,
+      `update public.wrong_notes set due_on = public.today_kst() where id = $1`,
+      [noteId],
+    );
     const guessed = await student.rpc('rpc_log_note_review', {
       p_note_id: noteId, p_picked_index: ans2, p_evidence: 'unsure',
     });
-    ok('`잘 모르겠어요`로 맞혀도 기록은 남는다', !guessed.error, guessed.error?.message);
+    check('`잘 모르겠어요`로 맞혀도 기록은 남는다', !guessed.error, guessed.error?.message);
     eq('연속 정답이 오르지 않는다', (await sched(db, noteId)).streak, 0);
     eq('내일 다시 본다', await daysFromToday(db, (await sched(db, noteId)).due_on), 1);
 
     // ── 8-4. 멈춘 문항은 복습을 받지 않는다 ─────────────────────────────────
     console.log('\n[멈춘 문항]');
-    await db.query(`select set_config('scody.note_schedule', 'on', false)`);
-    await db.query(
+    await asOwner(
+      db,
       `update public.wrong_notes set state = 'stuck', due_on = null, miss_streak = 3 where id = $1`,
-      [noteId]);
-    await db.query(`select set_config('scody.note_schedule', '', false)`);
+      [noteId],
+    );
     await backdate(db, noteId);
-    ok('멈춘 문항에는 복습을 남길 수 없다',
+    check('멈춘 문항에는 복습을 남길 수 없다',
       (await student.rpc('rpc_log_note_review', { p_note_id: noteId, p_picked_index: ans2 })).error !== null);
-    ok('멈춘 문항은 미룰 수도 없다',
+    check('멈춘 문항은 미룰 수도 없다',
       ((await student.rpc('rpc_defer_note', { p_note_id: noteId })).data as
         { deferred?: boolean } | null)?.deferred === false);
 
     // ── 8-5. 건너뛰기가 하루 미룬다 ─────────────────────────────────────────
     console.log('\n[건너뛰기]');
     await student.rpc('rpc_requeue_note', { p_note_id: noteId });
-    await db.query(`select set_config('scody.note_schedule', 'on', false)`);
-    await db.query(
-      `update public.wrong_notes set due_on = public.today_kst() - 4 where id = $1`, [noteId]);
-    await db.query(`select set_config('scody.note_schedule', '', false)`);
+    await asOwner(
+      db,
+      `update public.wrong_notes set due_on = public.today_kst() - 4 where id = $1`,
+      [noteId],
+    );
     const deferred = await student.rpc('rpc_defer_note', { p_note_id: noteId });
-    ok('차례가 온 문항을 미룬다',
+    check('차례가 온 문항을 미룬다',
       (deferred.data as { deferred?: boolean } | null)?.deferred === true, deferred.error?.message);
     eq('내일로 잡힌다', await daysFromToday(db, (await sched(db, noteId)).due_on), 1);
-    ok('미루기는 복습 기록을 남기지 않는다',
+    check('미루기는 복습 기록을 남기지 않는다',
       (await db.query(
         `select 1 from public.note_reviews where note_id = $1 and reviewed_on = public.today_kst()`,
         [noteId])).rowCount === 0);
-    ok('차례가 아닌 문항은 미뤄지지 않는다',
+    check('차례가 아닌 문항은 미뤄지지 않는다',
       ((await student.rpc('rpc_defer_note', { p_note_id: noteId })).data as
         { deferred?: boolean } | null)?.deferred === false);
-    ok('남의 노트는 미룰 수 없다',
+    check('남의 노트는 미룰 수 없다',
       other.rowCount
         ? (await student.rpc('rpc_defer_note', { p_note_id: other.rows[0].id })).error !== null
         : true);
@@ -423,16 +396,17 @@ async function main() {
     // ── 8-6. 한 줄 정리 ─────────────────────────────────────────────────────
     /* 0039에 대한 단정이 하나도 없었다. */
     console.log('\n[한 줄 정리]');
-    await db.query(`select set_config('scody.note_schedule', 'on', false)`);
-    await db.query(
-      `update public.wrong_notes set due_on = public.today_kst() where id = $1`, [noteId]);
-    await db.query(`select set_config('scody.note_schedule', '', false)`);
-    ok('오늘 복습 기록이 없으면 한 줄을 쓸 수 없다',
+    await asOwner(
+      db,
+      `update public.wrong_notes set due_on = public.today_kst() where id = $1`,
+      [noteId],
+    );
+    check('오늘 복습 기록이 없으면 한 줄을 쓸 수 없다',
       (await student.rpc('rpc_set_note_review_recap',
         { p_note_id: noteId, p_recap: '없는 기록' })).error !== null);
     await student.rpc('rpc_log_note_review', { p_note_id: noteId, p_picked_index: ans2 });
     const beforeRecap = await sched(db, noteId);
-    ok('오늘 기록에 한 줄을 채운다',
+    check('오늘 기록에 한 줄을 채운다',
       !(await student.rpc('rpc_set_note_review_recap',
         { p_note_id: noteId, p_recap: '선지 3번이 지문과 어긋난다' })).error);
     eq('저장된 값이 그것이다',
@@ -441,10 +415,10 @@ async function main() {
            where note_id = $1 and reviewed_on = public.today_kst()`, [noteId])).rows[0].recap,
       '선지 3번이 지문과 어긋난다');
     const afterRecap = await sched(db, noteId);
-    ok('한 줄은 스케줄을 바꾸지 않는다',
+    check('한 줄은 스케줄을 바꾸지 않는다',
       afterRecap.state === beforeRecap.state && afterRecap.due_on === beforeRecap.due_on
         && afterRecap.streak === beforeRecap.streak);
-    ok('남의 노트에는 한 줄을 쓸 수 없다',
+    check('남의 노트에는 한 줄을 쓸 수 없다',
       other.rowCount
         ? (await student.rpc('rpc_set_note_review_recap',
             { p_note_id: other.rows[0].id, p_recap: 'x' })).error !== null
@@ -456,20 +430,20 @@ async function main() {
       우리 학원 배정 uuid + 임의 문항으로 PATCH해 담당 선생님 화면에 주입할 수 있었다.
     */
     console.log('\n[정체성 컬럼]');
-    ok('source 직접 UPDATE 거부',
+    check('source 직접 UPDATE 거부',
       (await student.from('wrong_notes').update({ source: 'academy' }).eq('id', noteId)).error !== null);
-    ok('question_id 직접 UPDATE 거부',
+    check('question_id 직접 UPDATE 거부',
       (await student.from('wrong_notes')
         .update({ question_id: '00000000-0000-0000-0000-000000000001' })
         .eq('id', noteId)).error !== null);
-    ok('assignment_id 직접 UPDATE 거부',
+    check('assignment_id 직접 UPDATE 거부',
       (await student.from('wrong_notes')
         .update({ assignment_id: '00000000-0000-0000-0000-000000000001' })
         .eq('id', noteId)).error !== null);
     /* 같은 값을 쓰면 `is distinct from`이 거짓이라 가드가 통과한다 — 다른 값으로 시험한다. */
-    ok('miss_streak 직접 UPDATE 거부',
+    check('miss_streak 직접 UPDATE 거부',
       (await student.from('wrong_notes').update({ miss_streak: 2 }).eq('id', noteId)).error !== null);
-    ok('wrong_notes 직접 INSERT 거부(담기는 RPC만)',
+    check('wrong_notes 직접 INSERT 거부(담기는 RPC만)',
       (await student.from('wrong_notes').insert({
         student_id: uid,
         question_id: (await db.query<{ question_id: string }>(
@@ -487,35 +461,35 @@ async function main() {
     );
     const names = cols.rows.map((r) => r.column_name);
     for (const forbidden of ['state', 'due_on', 'streak', 'miss_streak', 'dismissed_at', 'starred', 'mastered', 'picked_index']) {
-      ok(`학원 뷰에 ${forbidden}가 없다`, !names.includes(forbidden));
+      check(`학원 뷰에 ${forbidden}가 없다`, !names.includes(forbidden));
     }
     const teacher = await signIn('hanbit.teacher');
     const tr = await teacher.from('note_reviews').select('id');
-    ok('선생님은 note_reviews에서 0행을 받는다', (tr.data?.length ?? -1) === 0, tr.error?.message);
+    check('선생님은 note_reviews에서 0행을 받는다', (tr.data?.length ?? -1) === 0, tr.error?.message);
   } finally {
     // ── 정리: 만든 로그를 지우고 스케줄을 시작 상태로 되돌린다 ──────────────
     console.log('\n[정리]');
     await db.query(`delete from public.note_reviews where note_id = $1`, [noteId]);
-    await db.query(`select set_config('scody.note_schedule', 'on', false)`);
-    await db.query(
+    await asOwner(
+      db,
       `update public.wrong_notes
          set state = $2, due_on = $3::date, streak = $4, miss_streak = $5, dismissed_at = null
          where id = $1`,
       [noteId, before.state, before.due_on, before.streak, before.miss_streak],
     );
-    await db.query(`select set_config('scody.note_schedule', '', false)`);
     const restored = await sched(db, noteId);
-    ok('스케줄이 시작 상태로 돌아왔다',
+    check('스케줄이 시작 상태로 돌아왔다',
       restored.state === before.state && restored.streak === before.streak
       && restored.miss_streak === before.miss_streak,
       JSON.stringify(restored));
     const logs = await db.query(`select 1 from public.note_reviews where note_id = $1`, [noteId]);
-    ok('남긴 복습 로그가 없다', logs.rowCount === 0);
+    check('남긴 복습 로그가 없다', logs.rowCount === 0);
     await db.end();
   }
 
-  console.log(`\n통과 ${pass} · 실패 ${fail}`);
-  if (fail > 0) process.exit(1);
+  const { passed, failed } = results();
+  console.log(`\n통과 ${passed} · 실패 ${failed}`);
+  if (failed > 0) process.exit(1);
 }
 
 void main().catch((e) => {

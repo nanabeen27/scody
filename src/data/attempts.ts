@@ -134,7 +134,8 @@ interface NoteSeed {
   starred?: boolean;
   /**
    * 복습 스케줄. 개발·테스트 fixture에서만 손으로 정한다 — **실제로는 서버만 쓴다**
-   * (`supabase/migrations/0037_note_reviews.sql`의 가드 트리거).
+   * (`supabase/migrations/0040_note_review_hardening.sql`의 가드 트리거 — 0037에서 도입하고
+   * 0040이 정체성 컬럼까지 넓혔다).
    *
    * 생략하면 `queued · 오늘 · 0 · 0`이다. 화면을 보려면 세 상태가 다 있어야 해서
    * (`오늘 볼 것` · `졸업` · `멈춤`) 시드에 섞어 둔다.

@@ -1,28 +1,32 @@
-import { useState } from 'react';
-import { useRouter } from 'expo-router';
-import { View, Pressable, StyleSheet } from 'react-native';
-import { AppText } from './AppText';
-import { Section } from './Section';
-import { Group } from './Group';
-import { Row } from './Row';
-import { Button } from './Button';
-import { Icon } from './Icon';
-import { IconButton } from './IconButton';
-import { LoadFailed } from './LoadFailed';
-import { Pager } from './Pager';
-import { RichText } from './RichText';
-import { SourceTag } from './SourceTag';
-import { ProgressBar } from './ProgressBar';
-import { MotionAsset } from './MotionAsset';
-import { BarRow } from './BarRow';
-import type { Account } from '@/data';
-import { useSession } from '@/session';
-import { useProgress, PRAISE_LABEL, type PraiseKind } from '@/features/progress';
-import { useToast } from '@/features/toast';
-import { todayISO } from '@/features/clock';
-import { formatDate } from '@/features/learning';
-import { askScodyAIResult, hasOpenRouterKey } from '@/features/openrouter';
-import { SCODY_PARENT_WEEK_SYSTEM } from '@/features/prompts';
+import { useState } from "react";
+import { useRouter } from "expo-router";
+import { View, Pressable, StyleSheet } from "react-native";
+import { AppText } from "./AppText";
+import { Section } from "./Section";
+import { Group } from "./Group";
+import { Row } from "./Row";
+import { Button } from "./Button";
+import { Icon } from "./Icon";
+import { IconButton } from "./IconButton";
+import { LoadFailed } from "./LoadFailed";
+import { Pager } from "./Pager";
+import { RichText } from "./RichText";
+import { SourceTag } from "./SourceTag";
+import { ProgressBar } from "./ProgressBar";
+import { MotionAsset } from "./MotionAsset";
+import { BarRow } from "./BarRow";
+import type { Account } from "@/data";
+import { useSession } from "@/session";
+import {
+  useProgress,
+  PRAISE_LABEL,
+  type PraiseKind,
+} from "@/features/progress";
+import { useToast } from "@/features/toast";
+import { todayISO } from "@/features/clock";
+import { formatDate, formatDuration } from "@/features/learning";
+import { askScodyAIResult, hasOpenRouterKey } from "@/features/openrouter";
+import { SCODY_PARENT_WEEK_SYSTEM } from "@/features/prompts";
 import {
   useChildReport,
   monthOf,
@@ -36,33 +40,32 @@ import {
   RANK_MIN_SUBMITTERS,
   WEAK_THRESHOLD,
   type MonthStat,
-} from '@/features/report';
-import { useResponsive } from '@/theme/useResponsive';
-import { colors, radius, spacing, touch } from '@/theme/tokens';
-
-function fmtTime(sec: number): string {
-  if (sec >= 3600) return `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분`;
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return m > 0 ? `${m}분 ${s}초` : `${s}초`;
-}
+} from "@/features/report";
+import { useResponsive } from "@/theme/useResponsive";
+import { colors, radius, spacing, touch } from "@/theme/tokens";
 
 /**
  * 주격 조사. 영역 이름이 데이터에서 오므로 `독서이`처럼 어색해지지 않게 받침을 본다.
  * 한글 음절은 (코드 - 0xAC00) % 28 이 0이면 받침이 없다.
  */
-function subjectParticle(word: string): '이' | '가' {
+function subjectParticle(word: string): "이" | "가" {
   const last = word.trim().slice(-1).charCodeAt(0);
-  if (Number.isNaN(last) || last < 0xac00 || last > 0xd7a3) return '가';
-  return (last - 0xac00) % 28 === 0 ? '가' : '이';
+  if (Number.isNaN(last) || last < 0xac00 || last > 0xd7a3) return "가";
+  return (last - 0xac00) % 28 === 0 ? "가" : "이";
 }
 
 /** 지난달과의 차이 한 줄. 비교할 지난달이 없으면 아무 말도 하지 않는다. */
-function delta(now: number, before: number | undefined, unit: string): string | undefined {
+function delta(
+  now: number,
+  before: number | undefined,
+  unit: string,
+): string | undefined {
   if (before == null) return undefined;
   const d = now - before;
-  if (d === 0) return '지난달과 같아요';
-  return d > 0 ? `지난달보다 ${d}${unit} 많아요` : `지난달보다 ${-d}${unit} 적어요`;
+  if (d === 0) return "지난달과 같아요";
+  return d > 0
+    ? `지난달보다 ${d}${unit} 많아요`
+    : `지난달보다 ${-d}${unit} 적어요`;
 }
 
 /** 목록 미리보기. 나머지는 더 보기로 펼친다(DESIGN.md §8). */
@@ -104,12 +107,23 @@ function Metric({
  * ④ 학원 과제(반 비교 포함) → ⑤ 개인 학습 → ⑥ 틀린 걸 다시 봤나 → ⑦ 어디가 약한가 →
  * ⑧ 근거 → ⑨ 달마다 어떻게 변했나.
  */
-export function ChildReport({ child, month: fromQuery }: { child: Account; month?: string }) {
+export function ChildReport({
+  child,
+  month: fromQuery,
+}: {
+  child: Account;
+  month?: string;
+}) {
   const router = useRouter();
   const { requestRetryFor, retryOf } = useProgress();
   const { show } = useToast();
   const { readOnly } = useSession();
-  // 들어올 때 달이 지정되면 그 달로 연다(자세히 보기에서 돌아올 때 달이 살아난다).
+  /*
+    들어올 때 달이 지정되면 그 달로 연다. **고른 달은 URL에도 남긴다.**
+    학부모 라우트는 `<Slot />` 하나라 `자세히 보기`로 넘어가는 순간 이 화면이 언마운트된다 —
+    URL에 남기지 않으면 상세에서 뒤로 나올 때 달 없는 앞 주소로 돌아가 리포트가 이번 달로
+    되돌아갔다(방금 6월을 보고 있었는데 8월이 열린다). 새로고침·주소 공유도 같은 달을 연다.
+  */
   const [month, setMonth] = useState<string | undefined>(fromQuery);
   const r = useChildReport(child.userId, month);
   const [showAll, setShowAll] = useState(false);
@@ -117,17 +131,24 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
     오답노트 페이지. 달이나 자녀가 바뀌면 처음으로 돌아가야 하는데, effect에서 setState를 하면
     렌더가 연쇄된다. 그래서 상태에 키를 함께 담아 **파생**으로 계산한다.
   */
-  const [noteNav, setNoteNav] = useState({ key: '', page: 0 });
+  const [noteNav, setNoteNav] = useState({ key: "", page: 0 });
   const requested = retryOf(child.userId);
   const today = todayISO();
   const { isMobile } = useResponsive();
 
   const openDetail = (itemId: string) =>
-    router.push(`/parent/attempt?child=${child.userId}&item=${itemId}` as never);
+    router.push(
+      `/parent/attempt?child=${child.userId}&item=${itemId}` as never,
+    );
 
   /** 달을 바꾼다. 바꾼 사실을 한 줄로 알린다 — 화면 아래쪽에서 바꾸면 위쪽 변화가 안 보인다. */
   function pickMonth(m: string) {
     setMonth(m);
+    /*
+      **주소를 바꿀 뿐 히스토리를 늘리지 않는다**(`setParams`는 `history.replaceState`로 내려간다).
+      달을 다섯 번 넘긴 뒤 뒤로가기를 다섯 번 눌러야 홈으로 나가는 일이 없어야 한다.
+    */
+    router.setParams({ month: m });
     show(`${monthLabel(m, today)} 리포트로 바꿨어요`);
   }
 
@@ -143,10 +164,10 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
     // 대리 보기에서는 쓰기가 거부된다(D-071). 일어나지 않은 일을 알리지 않는다.
     if (readOnly) return;
     if (!res.ok) {
-      show(res.error ?? '요청하지 못했어요', 'removed');
+      show(res.error ?? "요청하지 못했어요", "removed");
       return;
     }
-    show('다시 풀기를 요청했어요');
+    show("다시 풀기를 요청했어요");
   }
 
   const { totals, prev, notes, bySource, academyCompare, academySubmit } = r;
@@ -155,10 +176,39 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
   const noteKey = `${child.userId}-${r.month}`;
   const notePage = noteNav.key === noteKey ? noteNav.page : 0;
   const setNotePage = (page: number) => setNoteNav({ key: noteKey, page });
-  const note = r.monthNotes[Math.min(notePage, Math.max(0, r.monthNotes.length - 1))];
+  const note =
+    r.monthNotes[Math.min(notePage, Math.max(0, r.monthNotes.length - 1))];
   const hasAcademy = academySubmit.assigned > 0 || bySource.academy.count > 0;
   /** 보고 있는 달이 비었을 때 옮겨 갈 달. 없으면 null이라 길을 만들지 않는다. */
   const jumpTo = r.latest && r.latest !== r.month ? r.latest : null;
+  /*
+    상세로 가는 길을 둘지. **그 달에 푼 학습이 없어도 상세가 말할 것이 있으면 길을 둔다** —
+    상세의 `학원 과제 현황`은 배정만 보고 그리고(`academySubmit.assigned`) 오답노트 블록은
+    그 달에 담은 오답을 센다. 예전에는 이 버튼이 `푼 학습이 있는` 갈래 안에만 있어서,
+    과제를 받아 두고 아직 풀지 않은 자녀의 리포트에는 상세로 가는 길이 화면에 없었다.
+  */
+  const canOpenDetail =
+    totals.count > 0 || academySubmit.assigned > 0 || notes.added > 0;
+  /**
+   * 상세로 가는 버튼. 자리에 따라 크기만 다르다 —
+   * 섹션 제목 옆은 R2(`sm`)이고, 빈 달 화면에서는 그 화면의 행동이라 터치 하한(44)을 지킨다.
+   */
+  const detailLink = (size: "sm" | "md") => (
+    <Button
+      testID="report-detail"
+      variant="secondary"
+      size={size}
+      tone="accent"
+      hug
+      label="자세히 보기"
+      trailing={<Icon name="arrow-right" size={15} color={colors.accent} />}
+      onPress={() =>
+        router.push(
+          `/parent/detail?child=${child.userId}&month=${r.month}` as never,
+        )
+      }
+    />
+  );
 
   /*
     **읽는 중 · 실패 · 없음을 셋으로 가른다**(`DESIGN.md` §9 · D-136 · D-168).
@@ -177,17 +227,23 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
   /**
    * 실패 자리. **한 화면에 실패 면은 하나다**(§9) — 리포트의 모든 블록이 같은 두 조회에
    * 매달려 있어서 자리마다 빨간 줄을 두면 한 번의 실패가 열 번으로 읽힌다.
+   *
+   * `again`은 **이미 읽어 둔 리포트가 화면에 있을 때만** 준다(§9) — 그 화면은 지금 값을
+   * 보여 주고 있으므로 `불러오지 못했어요`만 쓰면 아무것도 못 읽은 것처럼 읽힌다.
+   * 손에 아무것도 없는 갈래는 실제로 처음부터 못 읽은 것이라 `다시`를 붙이지 않는다.
    */
-  const failure = r.error ? (
-    <LoadFailed
-      testID="report-load-failed"
-      retryTestID="report-load-retry"
-      what="기록"
-      message={r.error}
-      retrying={retrying}
-      onRetry={() => void r.reload()}
-    />
-  ) : null;
+  const failure = (again: boolean) =>
+    r.error ? (
+      <LoadFailed
+        testID="report-load-failed"
+        retryTestID="report-load-retry"
+        what="기록"
+        message={r.error}
+        retrying={retrying}
+        again={again}
+        onRetry={() => void r.reload()}
+      />
+    ) : null;
 
   /*
     첫 조회 중에는 지표도 빈 상태도 그리지 않고 한 줄만 둔다. 문장은 학부모 홈과 같다
@@ -208,7 +264,7 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
   */
   if (nothing) {
     return (
-      failure ?? (
+      failure(false) ?? (
         <Group>
           <View style={{ padding: spacing.lg, gap: spacing.xs }}>
             <AppText variant="label">아직 학습 기록이 없어요</AppText>
@@ -227,7 +283,7 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
         실패했지만 손에 기록이 있을 때. **이미 읽어 둔 값은 지우지 않는다**(D-136) —
         마지막으로 성공한 조회가 준 리포트는 여전히 사실이고, 실패했다는 사실만 위에 밝힌다.
       */}
-      {failure}
+      {failure(true)}
 
       {/* ① 달과 무관한 '지금' 상태. 없으면 그리지 않는다. */}
       {r.pending.length > 0 ? (
@@ -238,7 +294,7 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
                 key={p.id}
                 testID={`report-pending-${p.id}`}
                 title={p.title}
-                subtitle={p.due?.text ?? '마감일 없음'}
+                subtitle={p.due?.text ?? "마감일 없음"}
                 leading={<SourceTag source="academy" />}
               />
             ))}
@@ -281,69 +337,61 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
               화살표만 두면 학부모가 "기록이 사라졌나" 하고 읽는다. 기록이 남아 있는 달과
               거기로 가는 길을 한 번 누르기로 준다.
             */}
-            {jumpTo ? (
-              <>
-                <AppText variant="caption" tone="tertiary">
-                  {monthLabel(jumpTo, today)}까지의 기록은 그대로 있어요.
-                </AppText>
-                <Button
-                  testID="report-latest-month"
-                  variant="secondary"
-                  size="sm"
-                  tone="accent"
-                  hug
-                  label={`${monthLabel(jumpTo, today)} 리포트 보기`}
-                  onPress={() => pickMonth(jumpTo)}
-                />
-              </>
-            ) : (
-              <AppText variant="caption" tone="tertiary">
-                다른 달을 골라 지난 기록을 볼 수 있어요.
-              </AppText>
-            )}
+            <AppText variant="caption" tone="tertiary">
+              {jumpTo
+                ? `${monthLabel(jumpTo, today)}까지의 기록은 그대로 있어요.`
+                : "다른 달을 골라 지난 기록을 볼 수 있어요."}
+            </AppText>
+            {/*
+              여기서 갈 수 있는 곳을 한 줄에 모은다. 둘 다 이 화면의 행동이라 터치 하한(44)을
+              지킨다 — `sm`(32)은 섹션 제목 옆 전용이다(§10).
+            */}
+            {jumpTo || canOpenDetail ? (
+              <View style={styles.emptyActions}>
+                {jumpTo ? (
+                  <Button
+                    testID="report-latest-month"
+                    variant="secondary"
+                    tone="accent"
+                    hug
+                    label={`${monthLabel(jumpTo, today)} 리포트 보기`}
+                    onPress={() => pickMonth(jumpTo)}
+                  />
+                ) : null}
+                {/* 푼 학습이 없어도 배정·오답이 있으면 상세가 말할 것이 있다. */}
+                {canOpenDetail ? detailLink("md") : null}
+              </View>
+            ) : null}
           </View>
         </Group>
       ) : (
         <>
           {/* ③ 이 달을 한 문장으로. */}
-          <Section
-            title={`${r.label} 학습`}
-            action={
-              <Button
-                testID="report-detail"
-                variant="secondary"
-                size="sm"
-                tone="accent"
-                hug
-                label="자세히 보기"
-                trailing={<Icon name="arrow-right" size={15} color={colors.accent} />}
-                onPress={() =>
-                  router.push(`/parent/detail?child=${child.userId}&month=${r.month}` as never)
-                }
-              />
-            }
-          >
+          <Section title={`${r.label} 학습`} action={detailLink("sm")}>
             <AppText tone="secondary">
-              {r.label} 한 달 동안 {totals.days}일 공부하고 {totals.questions}문항을 풀었어요.
+              {r.label} 한 달 동안 {totals.days}일 공부하고 {totals.questions}
+              문항을 풀었어요.
             </AppText>
             <Group>
               <Metric
                 testID="metric-days"
                 label="공부한 날"
                 value={`${totals.days}일`}
-                note={delta(totals.days, prev?.days, '일')}
+                note={delta(totals.days, prev?.days, "일")}
               />
               <Metric
                 testID="metric-time"
                 label="학습 시간"
-                value={fmtTime(totals.timeSec)}
-                note={prev ? `지난달 ${fmtTime(prev.timeSec)}` : undefined}
+                value={formatDuration(totals.timeSec)}
+                note={
+                  prev ? `지난달 ${formatDuration(prev.timeSec)}` : undefined
+                }
               />
             </Group>
             {r.undated > 0 ? (
-              <AppText variant="caption" tone="tertiary">
-                학원에서 받은 제출 기록 {r.undated}건은 날짜가 남아 있지 않아 어느 달에도 세지
-                않았어요.
+              <AppText variant="caption" tone="secondary">
+                학원에서 받은 제출 기록 {r.undated}건은 날짜가 남아 있지 않아
+                어느 달에도 세지 않았어요.
               </AppText>
             ) : null}
           </Section>
@@ -363,7 +411,7 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
                     note={
                       academySubmit.submitted < academySubmit.assigned
                         ? `안 낸 과제 ${academySubmit.assigned - academySubmit.submitted}개`
-                        : '모두 냈어요'
+                        : "모두 냈어요"
                     }
                   />
                 ) : null}
@@ -389,15 +437,16 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
                 ) : null}
               </Group>
               {academySubmit.noDueDate > 0 ? (
-                <AppText variant="caption" tone="tertiary">
-                  마감일이 없는 배정 {academySubmit.noDueDate}개는 어느 달에도 세지 않았어요.
+                <AppText variant="caption" tone="secondary">
+                  마감일이 없는 배정 {academySubmit.noDueDate}개는 어느 달에도
+                  세지 않았어요.
                 </AppText>
               ) : null}
               {!academyCompare && bySource.academy.count > 0 ? (
-                <AppText variant="caption" tone="tertiary">
-                  {r.rows.some((x) => x.source === 'academy' && x.cls === null)
+                <AppText variant="caption" tone="secondary">
+                  {r.rows.some((x) => x.source === "academy" && x.cls === null)
                     ? `반에서 낸 학생이 ${RANK_MIN_SUBMITTERS}명보다 적어 반 비교는 보여 주지 않아요.`
-                    : '반 비교를 계산할 제출 기록이 아직 없어요.'}
+                    : "반 비교를 계산할 제출 기록이 아직 없어요."}
                 </AppText>
               ) : null}
             </Section>
@@ -432,7 +481,9 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
         {notes.added === 0 ? (
           <Group>
             <View style={{ padding: spacing.lg, gap: spacing.xs }}>
-              <AppText tone="secondary">{r.label}에 담아 둔 오답이 없어요.</AppText>
+              <AppText tone="secondary">
+                {r.label}에 담아 둔 오답이 없어요.
+              </AppText>
               <AppText variant="caption" tone="tertiary">
                 지금까지 담긴 오답은 모두 {notes.total}개예요.
               </AppText>
@@ -445,11 +496,12 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
               목록 행으로 만들면 201px을 쓰는데 한 줄이면 20px이다.
             */}
             <AppText variant="label" testID="report-notes">
-              담은 오답 {notes.added}개 · AI와 정리 {notes.organized}개 · 별표 {notes.starred}개
+              담은 오답 {notes.added}개 · AI와 정리 {notes.organized}개 · 별표{" "}
+              {notes.starred}개
             </AppText>
             {notes.total > 0 ? (
               <AppText variant="caption" tone="tertiary">
-                오늘까지 담긴 오답은 모두 {notes.total}개예요.
+                지금까지 담긴 오답은 모두 {notes.total}개예요.
               </AppText>
             ) : null}
             {note ? (
@@ -457,12 +509,14 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
                 <View style={styles.note}>
                   <View style={styles.noteHead}>
                     <SourceTag source={note.source} />
-                    {note.starred ? <Icon name="star" size={14} color={colors.accent} /> : null}
+                    {note.starred ? (
+                      <Icon name="star" size={14} color={colors.accent} />
+                    ) : null}
                   </View>
                   <AppText variant="label">{note.prompt}</AppText>
                   <AppText variant="caption" tone="tertiary">
                     {note.area} · {note.title}
-                    {note.createdAt ? ` · ${formatDate(note.createdAt)}` : ''}
+                    {note.createdAt ? ` · ${formatDate(note.createdAt)}` : ""}
                   </AppText>
                   <AppText variant="caption" style={{ color: colors.success }}>
                     정답 · {note.choices[note.answerIndex]}
@@ -495,10 +549,21 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
       {/* ⑦ 어디가 약한가(이 달). 문항 수를 함께 적는다. */}
       {r.byArea.length > 0 ? (
         <Section title="영역별 정답률">
-          <AppText variant="caption" tone="tertiary">
-            학원 과제와 개인 학습을 합쳐 셌어요. 문항 {WEAK_MIN_QUESTIONS}개부터 약한 영역으로
-            봐요.
+          <AppText variant="caption" tone="secondary">
+            학원 과제와 개인 학습을 합쳐 셌어요. 문항 {WEAK_MIN_QUESTIONS}개부터
+            약한 영역으로 봐요.
           </AppText>
+          {/*
+            뺀 것을 밝힌다. 학원이 학생에게 공개하지 않은 세트는 학부모의 조회에서 영역이
+            비어 오고(`content_sets_select`에 학부모 절이 없다), 그대로 세면 이름 없는 막대가
+            하나 선다. 빼는 쪽을 골랐으니 몇 개를 뺐는지는 말해야 한다.
+          */}
+          {r.unknownArea > 0 ? (
+            <AppText variant="caption" tone="secondary" testID="area-unknown">
+              학원이 공개하지 않은 학습 {r.unknownArea}개는 영역을 알 수 없어
+              빼고 셌어요.
+            </AppText>
+          ) : null}
           {weakest ? (
             <AppText variant="caption" tone="secondary">
               {!weakest.enough
@@ -537,12 +602,26 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
                 size="sm"
                 tone="accent"
                 hug
-                label={showAll ? '접기' : `${r.rows.length - PREVIEW}개 더 보기`}
+                label={
+                  showAll ? "접기" : `${r.rows.length - PREVIEW}개 더 보기`
+                }
                 onPress={() => setShowAll((v) => !v)}
               />
             ) : null
           }
         >
+          {/*
+            **누를 수 있다는 사실을 문장으로 남긴다.** 이 줄의 `trailing`은 재풀이 토글이라
+            chevron을 둘 수 없어서(§8 — 둘을 함께 두면 chevron이 버튼 왼쪽으로 밀린다),
+            누를 수 있는 행과 없는 행이 화면에서 완전히 같은 모양이었다. 문항별 내역으로 가는
+            길은 레포에서 이 행뿐이라 발견되지 않으면 그 화면이 없는 것과 같다(§14-1과 같은 규칙 —
+            색·기호만으로 뜻을 전하지 않고 문장으로 이유를 남긴다).
+          */}
+          {visible.some((a) => a.hasDetail) ? (
+            <AppText variant="caption" tone="secondary">
+              줄을 누르면 문항별로 볼 수 있어요.
+            </AppText>
+          ) : null}
           <Group>
             {visible.map((a) => {
               /*
@@ -553,16 +632,21 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
                 `정답률 ${a.accuracy}%`,
                 a.area,
                 `${a.questions}문항`,
-                a.dateISO ? formatDate(a.dateISO) : '제출일 기록 없음',
+                a.dateISO ? formatDate(a.dateISO) : "제출일 기록 없음",
                 // 반 비교는 실제 제출 기록에서 계산된다. 없으면 말하지 않는다.
                 a.cls ? `반 ${a.cls.submitters}명 중 ${a.cls.rank}번째` : null,
+                /*
+                  누를 수 없는 행은 그 이유를 말한다. 문구는 그 화면이 같은 사실을 말할 때
+                  쓰는 것과 같다(`app/parent/attempt.tsx`) — 같은 사실이 두 문장이 되지 않게.
+                */
+                a.hasDetail ? null : "문항 내역이 남아 있지 않아요",
               ].filter(Boolean) as string[];
               return (
                 <Row
                   key={a.itemId}
                   testID={`report-item-${a.itemId}`}
                   title={a.title}
-                  subtitle={bits.join(' · ')}
+                  subtitle={bits.join(" · ")}
                   leading={<SourceTag source={a.source} />}
                   onPress={a.hasDetail ? () => openDetail(a.itemId) : undefined}
                   trailing={
@@ -576,8 +660,9 @@ export function ChildReport({ child, month: fromQuery }: { child: Account; month
               );
             })}
           </Group>
-          <AppText variant="caption" tone="tertiary">
-            요청해도 지금 기록은 지워지지 않아요. 자녀가 다시 풀면 새 결과로 바뀌어요.
+          <AppText variant="caption" tone="secondary">
+            요청해도 지금 기록은 지워지지 않아요. 자녀가 다시 풀면 새 결과로
+            바뀌어요.
           </AppText>
         </Section>
       ) : null}
@@ -642,7 +727,7 @@ function WeekSummary({
         );
       } catch {
         // 예외도 실패로 다룬다 — 아래에서 같은 숫자로 만든 대체 문장을 쓴다.
-        r = { ok: false, text: '' };
+        r = { ok: false, text: "" };
       }
       const byAI = r.ok;
       const text = byAI ? tidySummary(r.text) : weekFallback(week, prev);
@@ -656,10 +741,10 @@ function WeekSummary({
       // 대리 보기에서는 저장이 거부된다(D-071). 만들지 못한 것을 만들었다고 하지 않는다.
       if (readOnly) return;
       if (!saved.ok) {
-        show(saved.error ?? '요약을 저장하지 못했어요', 'removed');
+        show(saved.error ?? "요약을 저장하지 못했어요", "removed");
         return;
       }
-      show(byAI ? '이번 주 요약을 만들었어요' : '숫자로 요약을 만들었어요');
+      show(byAI ? "이번 주 요약을 만들었어요" : "숫자로 요약을 만들었어요");
     } finally {
       setBusy(false);
     }
@@ -670,8 +755,8 @@ function WeekSummary({
       {nothing ? (
         // 리포트의 첫 블록이라 카드로 두면 '아무것도 안 했다'가 화면에서 가장 무거워진다.
         <AppText variant="caption" tone="secondary">
-          이번 주({formatDate(week.monday)}부터)에는 아직 기록이 없어요. 이 달 전체는 아래에서 볼
-          수 있어요.
+          이번 주({formatDate(week.monday)}부터)에는 아직 기록이 없어요. 이 달
+          전체는 아래에서 볼 수 있어요.
         </AppText>
       ) : saved ? (
         <>
@@ -680,13 +765,14 @@ function WeekSummary({
               <RichText text={saved.text} />
             </View>
           </Group>
-          <AppText variant="caption" tone="tertiary">
+          <AppText variant="caption" tone="secondary">
             {formatDate(saved.at)}에 만든 요약이에요
-            {saved.byAI ? '' : ' · AI 없이 숫자만 이어 붙였어요'}
+            {saved.byAI ? "" : " · AI 없이 숫자만 이어 붙였어요"}
           </AppText>
           {failed ? (
             <AppText variant="caption" tone="secondary">
-              AI 요약을 만들지 못해 숫자로 대신했어요. 잠시 뒤 다시 시도해 볼 수 있어요.
+              AI 요약을 만들지 못해 숫자로 대신했어요. 잠시 뒤 다시 시도해 볼 수
+              있어요.
             </AppText>
           ) : null}
           {/*
@@ -749,43 +835,63 @@ function Praise({ child }: { child: Account }) {
     // 대리 보기에서는 보내지지 않는다(D-071).
     if (readOnly) return;
     if (!res.ok) {
-      show(res.error ?? '칭찬을 보내지 못했어요', 'removed');
+      show(res.error ?? "칭찬을 보내지 못했어요", "removed");
       return;
     }
-    show('칭찬을 보냈어요');
+    show("칭찬을 보냈어요");
   }
 
   return (
     <View style={{ gap: spacing.sm }}>
       {thisWeek.length > 0 ? (
         <AppText variant="caption" tone="accent" testID="praise-sent">
-          이번 주에 보낸 칭찬 · {Array.from(new Set(thisWeek.map((p) => PRAISE_LABEL[p.kind]))).join(' · ')}
+          이번 주에 보낸 칭찬 ·{" "}
+          {Array.from(new Set(thisWeek.map((p) => PRAISE_LABEL[p.kind]))).join(
+            " · ",
+          )}
         </AppText>
       ) : null}
       {open ? (
-        <View style={styles.praiseRow}>
-          {/* 마음이 바뀌면 나갈 길을 둔다 — 유일한 출구가 되돌릴 수 없는 쓰기이면 안 된다. */}
-          <Button
-            testID="praise-close"
-            variant="ghost"
-            size="sm"
-            hug
-            label="닫기"
-            onPress={() => setOpen(false)}
-          />
-          {(Object.keys(PRAISE_LABEL) as PraiseKind[]).map((kind) => (
+        <>
+          {/*
+            **펼치면 제목이 사라진다** — 접힌 상태에서는 버튼 라벨(`칭찬 보내기`)이 곧 제목인데,
+            펼치면 그 버튼이 없어져 선택지 넷만 남는다(실측 390: 화면에 무엇에 대한 고르기인지
+            말하는 글자가 0개였다). 그리고 이 고르기는 **한 번 누르면 자녀에게 가고 되돌릴 수
+            없다**(A-045). 두 사실을 한 줄로 말한다.
+          */}
+          <AppText variant="caption" tone="secondary" testID="praise-hint">
+            고르면 자녀 홈에 바로 떠요. 보낸 뒤에는 지울 수 없어요.
+          </AppText>
+          <View style={styles.praiseRow}>
+            {/*
+            **한 번 누르면 되돌릴 수 없는 쓰기가 자녀에게 간다.** 그래서 기본 크기(44)를 쓴다 —
+            `sm`(32)은 섹션 제목 옆 전용이고 터치 하한은 44다(§10, 예외는 `SegmentedControl` 하나).
+          */}
+            {(Object.keys(PRAISE_LABEL) as PraiseKind[]).map((kind) => (
+              <Button
+                key={kind}
+                testID={`praise-${kind}`}
+                variant="secondary"
+                tone="accent"
+                hug
+                label={PRAISE_LABEL[kind]}
+                onPress={() => void send(kind)}
+              />
+            ))}
+            {/*
+            마음이 바뀌면 나갈 길을 둔다 — 유일한 출구가 되돌릴 수 없는 쓰기이면 안 된다.
+            **선택지 뒤에 둔다**(§8 ③) — 취소가 고를 것보다 앞에 오면 먼저 읽히고, 손가락도
+            고르려던 자리에서 한 칸 밀린다.
+          */}
             <Button
-              key={kind}
-              testID={`praise-${kind}`}
-              variant="secondary"
-              size="sm"
-              tone="accent"
+              testID="praise-close"
+              variant="ghost"
               hug
-              label={PRAISE_LABEL[kind]}
-              onPress={() => void send(kind)}
+              label="닫기"
+              onPress={() => setOpen(false)}
             />
-          ))}
-        </View>
+          </View>
+        </>
       ) : (
         <Button
           testID="praise-open"
@@ -829,38 +935,55 @@ function MonthNav({
   const ordered = [...months].sort();
   const at = ordered.indexOf(month);
   const older = at > 0 ? ordered[at - 1] : undefined;
-  const newer = at >= 0 && at < ordered.length - 1 ? ordered[at + 1] : undefined;
+  const newer =
+    at >= 0 && at < ordered.length - 1 ? ordered[at + 1] : undefined;
   return (
     <View style={styles.monthNav}>
       <MonthStep
         testID="month-prev"
         icon="chevron-left"
         name={older ? monthLabel(older, today) : undefined}
+        offName="더 이전 기록이 없어요"
         onPress={() => older && onChange(older)}
       />
-      <AppText variant="subheading" testID="month-label" style={styles.monthLabel}>
+      <AppText
+        variant="subheading"
+        testID="month-label"
+        style={styles.monthLabel}
+      >
         {label}
       </AppText>
       <MonthStep
         testID="month-next"
         icon="chevron-right"
         name={newer ? monthLabel(newer, today) : undefined}
+        offName="더 최근 기록이 없어요"
         onPress={() => newer && onChange(newer)}
       />
     </View>
   );
 }
 
-/** 달 이동 버튼 하나. 갈 곳이 없으면 눌리지 않고, 어디로 가는지 이름으로 밝힌다. */
+/**
+ * 달 이동 버튼 하나. 갈 곳이 없으면 눌리지 않는다.
+ *
+ * **막힌 상태에도 이름이 있어야 한다**(§11) — 예전에는 `accessibilityLabel`이 `undefined`가 되어
+ * 스크린리더가 `버튼`이라고만 읽었다. 갈 곳이 없다는 사실을 그 자리에서 말한다.
+ * 그리고 **불투명도로 흐리지 않는다**(§3) — `opacity`는 대비를 그만큼 곱해 버리므로
+ * 상태는 색 토큰으로만 표현한다.
+ */
 function MonthStep({
   testID,
   icon,
   name,
+  offName,
   onPress,
 }: {
   testID: string;
-  icon: 'chevron-left' | 'chevron-right';
+  icon: "chevron-left" | "chevron-right";
   name?: string;
+  /** 갈 곳이 없을 때 읽히는 이름. 방향마다 다른 사실이라 호출부가 준다. */
+  offName: string;
   onPress: () => void;
 }) {
   const off = !name;
@@ -868,12 +991,16 @@ function MonthStep({
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={name ? `${name} 리포트 보기` : undefined}
+      accessibilityLabel={name ? `${name} 리포트 보기` : offName}
       disabled={off}
       onPress={onPress}
-      style={[styles.monthStep, off && styles.monthStepOff]}
+      style={styles.monthStep}
     >
-      <Icon name={icon} size={18} color={off ? colors.inkTertiary : colors.ink} />
+      <Icon
+        name={icon}
+        size={18}
+        color={off ? colors.inkTertiary : colors.ink}
+      />
     </Pressable>
   );
 }
@@ -898,7 +1025,7 @@ function MonthHistory({
   const max = Math.max(...history.map((h) => h.days), 1);
   return (
     <Section title="달마다 어떻게 변했나">
-      <AppText variant="caption" tone="tertiary">
+      <AppText variant="caption" tone="secondary">
         공부한 날 수예요. 달을 누르면 그 달 리포트를 봐요.
       </AppText>
       <View style={{ gap: spacing.sm }}>
@@ -910,11 +1037,14 @@ function MonthHistory({
             accessibilityLabel={`${monthLabel(h.month, today)} 리포트 보기`}
             disabled={h.count === 0}
             onPress={() => onPick(h.month)}
-            style={({ pressed }) => [styles.histRow, pressed && { backgroundColor: colors.hover }]}
+            style={({ pressed }) => [
+              styles.histRow,
+              pressed && { backgroundColor: colors.hover },
+            ]}
           >
             <AppText
               variant="caption"
-              tone={h.month === current ? 'accent' : 'secondary'}
+              tone={h.month === current ? "accent" : "secondary"}
               style={styles.histLabel}
             >
               {monthLabel(h.month, today)}
@@ -923,7 +1053,7 @@ function MonthHistory({
               <ProgressBar value={(h.days / max) * 100} />
             </View>
             <AppText variant="caption" tone="tertiary" style={styles.histVal}>
-              {h.count === 0 ? '—' : `${h.days}일`}
+              {h.count === 0 ? "—" : `${h.days}일`}
             </AppText>
           </Pressable>
         ))}
@@ -950,9 +1080,9 @@ function RetryToggle({
     <IconButton
       testID={`retry-${itemId}`}
       variant="outlined"
-      name={done ? 'check' : 'refresh-cw'}
+      name={done ? "check" : "refresh-cw"}
       active={done}
-      label={done ? '다시 풀기를 요청했어요' : '다시 풀게 하기'}
+      label={done ? "다시 풀기를 요청했어요" : "다시 풀게 하기"}
       onPress={done ? undefined : onPress}
     />
   );
@@ -981,8 +1111,14 @@ function NoteMemo({ text }: { text: string }) {
           size="sm"
           tone="accent"
           hug
-          label={open ? '접기' : '더 보기'}
-          leading={<Icon name={open ? 'arrow-up' : 'arrow-down'} size={14} color={colors.accent} />}
+          label={open ? "접기" : "더 보기"}
+          leading={
+            <Icon
+              name={open ? "arrow-up" : "arrow-down"}
+              size={14}
+              color={colors.accent}
+            />
+          }
           onPress={() => setOpen((v) => !v)}
         />
       ) : null}
@@ -997,7 +1133,9 @@ function NoteMemo({ text }: { text: string }) {
  */
 function WeekSummaryPending() {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+    <View
+      style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}
+    >
       <AppText variant="caption" tone="secondary">
         요약을 만들고 있어요. 잠시만 기다려 주세요.
       </AppText>
@@ -1009,9 +1147,20 @@ function WeekSummaryPending() {
 
 const styles = StyleSheet.create({
   summary: { padding: spacing.lg },
-  praiseRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  monthLabel: { flex: 1, textAlign: 'center' },
+  praiseRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  /* 빈 달에서 갈 수 있는 곳. 390에서 라벨이 길어지면 아래로 접힌다. */
+  emptyActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  monthNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  monthLabel: { flex: 1, textAlign: "center" },
   /**
    * 화살표만 남긴다 — 테두리를 두르면 버튼 두 개가 달 이름보다 무거워진다.
    * 보이는 것은 `<`·`>`뿐이지만 누름 영역은 44px을 지킨다(DESIGN.md §10).
@@ -1019,17 +1168,16 @@ const styles = StyleSheet.create({
   monthStep: {
     width: 44,
     height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
-  monthStepOff: { opacity: 0.4 },
   // 카드가 아니라 Group 안의 한 칸. 테두리는 Group이 긋는다.
   note: { padding: spacing.lg, gap: 3 },
-  noteHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  noteHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   /* 눌러서 그 달로 가는 진짜 내비게이션이다. 32px에 배경도 없어 버튼으로 안 보였다. */
   histRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.md,
     minHeight: touch.min,
     paddingHorizontal: spacing.sm,
@@ -1038,5 +1186,5 @@ const styles = StyleSheet.create({
   },
   histLabel: { width: 64 },
   histBar: { flex: 1 },
-  histVal: { width: 40, textAlign: 'right' },
+  histVal: { width: 40, textAlign: "right" },
 });

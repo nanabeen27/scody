@@ -100,11 +100,14 @@ export default function ParentHome() {
       {loadError ? null : (
         <Section title="마감이 지난 학원 과제">
           {reading ? (
-            <Group>
-              <View style={{ padding: spacing.lg }}>
-                <AppText tone="secondary">기록을 불러오고 있어요.</AppText>
-              </View>
-            </Group>
+            /*
+              **읽는 중 한 줄은 §9의 형태다** — 리포트·상세가 쓰는 것과 같은
+              `caption` + `secondary` 한 줄이다. 여기만 `Group` 안 본문 크기라, 아직 모르는
+              상태가 실제 목록보다 무거웠다.
+            */
+            <AppText variant="caption" tone="secondary">
+              기록을 불러오고 있어요.
+            </AppText>
           ) : overdue.length > 0 ? (
             <Group>
               {overdue.map((a) => (
@@ -145,7 +148,13 @@ export default function ParentHome() {
                 : [
                     // `7월 2일`처럼 날짜로 읽히지 않게 조사를 넣는다.
                     r ? `${r.label}에 ${r.totals.days}일 공부했어요` : null,
-                    r?.totals.accuracy != null ? `정답률 ${r.totals.accuracy}%` : null,
+                    /*
+                      **정답률은 여기서 말하지 않는다**(D-050 · §19). `totals.accuracy`는 학원
+                      과제와 개인 학습을 합친 값이라 그것이 학원 성적인지 집에서 푼 것인지 알 수
+                      없고, 리포트 본문은 정답률을 출처 블록 안에서만 말한다 — 홈이 합친 값을
+                      말하면 두 화면이 같은 자녀에 대해 다른 성질의 수를 같은 이름으로 부른다.
+                      합쳐도 사실인 것(공부한 날·안 낸 과제)만 남긴다.
+                    */
                     /*
                       **위 섹션과 같은 집합을 센다.** `now.pending`은 마감이 지난 것까지 포함한
                       미제출 전부이고(`src/features/report.ts`), 마감이 지난 것만 위 섹션에 줄로

@@ -30,11 +30,16 @@ import { askScodyAIStream, isAiFailure, isAiSavable } from '@/features/openroute
 import { SCODY_WRONG_SYSTEM, WRONG_MEMO_SYSTEM, wrongCtx } from '@/features/prompts';
 import { findContent } from '@/data';
 import type { NoteEvidence } from '@/data/types';
-import { todayISO } from '@/features/clock';
+import type { LoggedReview } from '@/repo/notes';
+import { addDaysISO, todayISO } from '@/features/clock';
 import {
+  ACADEMY_MEMO_NOTICE,
   choiceSeed,
+  closingLine,
+  EVIDENCE_ORDER,
   evidenceLabels,
   evidenceQuestion,
+  GRADUATE_STREAK,
   nextReviewLabel,
   passesLeft,
   scopedDeck,
@@ -58,11 +63,80 @@ function deckTitle(area: string | undefined, onlyStarred: boolean, all: boolean)
   return all ? '전체 카드 복습' : '카드 복습';
 }
 
-/** 근거 3택의 순서. 화면과 테스트가 같은 순서를 쓰게 한곳에 둔다. */
-const EVIDENCE_ORDER: readonly NoteEvidence[] = ['passage', 'choices', 'unsure'];
-
 /** 완료 요약의 `헷갈린 문항` 상한(§8의 5줄 상한). 그 이상은 `N개 더 보기`로 펼친다. */
 const MISSED_PREVIEW = 5;
+
+/**
+ * 빈 덱의 다섯 화면.
+ *
+ * 범위를 고른 덱 셋(별표·전체·영역)은 제목이 같고 부제만 갈린다. 담은 오답이 아예 없는 계정만
+ * 학습 탭으로 보낸다 — 나머지는 오답노트에 볼 것이 있다.
+ */
+const EMPTY_DECK = {
+  starred: {
+    title: '이 범위에 복습할 오답이 없어요.',
+    subtitle: '별표를 달거나, 오늘 본 오답은 내일 다시 볼 수 있어요.',
+    to: 'notebook',
+  },
+  all: {
+    title: '이 범위에 복습할 오답이 없어요.',
+    subtitle: '오늘 본 오답은 빠져 있어요. 내일 다시 볼 수 있어요.',
+    to: 'notebook',
+  },
+  area: {
+    title: '이 범위에 복습할 오답이 없어요.',
+    subtitle: '이 영역 오답을 담으면 여기에 모여요.',
+    to: 'notebook',
+  },
+  doneToday: {
+    title: '오늘 다시 볼 오답은 없어요.',
+    subtitle: '차례가 되면 홈에서 알려 줄게요.',
+    to: 'notebook',
+  },
+  none: {
+    title: '복습할 오답이 없어요.',
+    subtitle: '결과 화면에서 틀린 문제를 담으면 카드로 복습할 수 있어요.',
+    to: 'learn',
+  },
+} as const;
+
+/** 대화가 없을 때 돌려주는 값. 모듈 상수라 렌더마다 새 배열을 만들지 않는다. */
+const EMPTY_CONVO: readonly { q: string; a: string }[] = [];
+
+/**
+ * 카드 한 장에 매달린 상태. **`id`가 이 상태의 주인이다.**
+ *
+ * 소속을 값 안에 두면 카드가 바뀔 때 초기화를 잊을 수 없고, 상태를 하나 늘릴 때 고칠 자리가
+ * 하나다.
+ */
+interface CardState {
+  id: string;
+  /** 화면에 보이는 선지 자리(섞인 순서에서의 index). 원본 자리는 `pickedOriginal`이 안다. */
+  slot: number | null;
+  evidence: NoteEvidence | null;
+  /** 서버가 채점해 돌려준 결과. 기록이 남은 뒤에만 채워진다. */
+  result: LoggedReview | null;
+  checkError: string | null;
+  recap: string;
+  recapSaved: string | null;
+  convo: { q: string; a: string }[];
+  /** 메모를 덮어쓰기 전 확인 중인지. 잃을 것이 있을 때만 세운다. */
+  confirmMemo: boolean;
+}
+
+function emptyCard(id: string): CardState {
+  return {
+    id,
+    slot: null,
+    evidence: null,
+    result: null,
+    checkError: null,
+    recap: '',
+    recapSaved: null,
+    convo: [],
+    confirmMemo: false,
+  };
+}
 
 /**
  * 카드 복습의 겉. **읽는 중 · 실패 · 덱을 셋으로 가른다**(D-133·D-136과 같은 규칙 · D-153).
@@ -253,37 +327,25 @@ function ReviewDeck({
    */
   const [deck, setDeck] = useState<string[]>(() => pool.map((n) => n.id));
   const [index, setIndex] = useState(0);
-  /** 화면에 보이는 선지 자리(섞인 순서에서의 index). 원본 자리는 `pickedOriginal`이 안다. */
-  const [pickedSlot, setPickedSlot] = useState<number | null>(null);
-  const [evidence, setEvidence] = useState<NoteEvidence | null>(null);
-  /** 서버가 채점해 돌려준 결과. 기록이 남은 뒤에만 채워진다. */
-  const [result, setResult] = useState<{ isCorrect: boolean; scheduled: boolean } | null>(null);
+  /**
+   * **카드 한 장에 매달린 상태 전부.** `id`가 그 상태의 주인이다.
+   *
+   * 예전에는 여섯 개의 독립 `useState`와 "그게 어느 카드의 것인가"를 들고 있는 일곱 번째 상태
+   * (`activeId`)로 나뉘어 있었다. 그래서 카드별 상태를 하나 늘릴 때마다 ①`useState` ②`resetCard`의
+   * 초기화 ③파생 별칭 ④`setActiveId(card.id)` 반복 네 자리를 함께 고쳐야 했고, `resetCard`에서 한
+   * 줄을 빠뜨리는 것이 정확히 아래 `live`가 막는 재발 경로다(D-113).
+   *
+   * 소속을 값 안에 넣으면 초기화가 `setCard(null)` 한 줄이 된다.
+   */
+  const [cardState, setCardState] = useState<CardState | null>(null);
+  /** 카드 하나에 매이지 않는 것들 — 세션 전역이다. */
   const [saving, setSaving] = useState(false);
-  const [checkError, setCheckError] = useState<string | null>(null);
-  const [recap, setRecapText] = useState('');
-  const [recapSaved, setRecapSaved] = useState<string | null>(null);
   const [question, setQuestion] = useState('');
   const [live, setLive] = useState('');
-  const [convo, setConvo] = useState<{ q: string; a: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [askFailed, setAskFailed] = useState(false);
-  /** 메모를 덮어쓰기 전 확인 중인 카드 id. 잃을 것이 있을 때만 세운다. */
-  const [confirmMemo, setConfirmMemo] = useState<string | null>(null);
   /** 완료 요약의 `헷갈린 문항` 상한을 풀었는지. */
   const [showAllMissed, setShowAllMissed] = useState(false);
-
-  /**
-   * 위 카드 상태가 **어느 카드의 것인지.**
-   *
-   * 덱 자리(`at`)는 다른 화면에서 노트를 지우면 `useMemo` 안에서 조용히 다음 자리로 올라간다.
-   * 그때 `resetCard()`는 불리지 않으므로(`nextCard`/`restart`에서만 부른다) 앞 카드의
-   * `pickedSlot`·`result`·`convo`가 새 카드에 그대로 남았다 — 결과는 ①**기록 없이 정답·해설
-   * 공개** ②학생이 누른 적 없는 선지에 `내 답` 표식 ③앞 카드의 AI 대화가 **다른 노트의 메모로
-   * 저장**이다. D-113이 막았다고 적은 어긋남이 이 경로로 재발했다.
-   *
-   * effect로 지우지 않고 **소속을 확인한다** — 카드가 바뀌면 상태를 없는 것으로 읽는다.
-   */
-  const [activeId, setActiveId] = useState<string | null>(null);
 
   /**
    * 지금 유효한 호출 회차.
@@ -307,20 +369,39 @@ function ReviewDeck({
   }, [index, deck, byId]);
 
   const card = at < deck.length ? byId.get(deck[at]) : undefined;
-  /** 덱에 아직 남아 있는 카드 수. 진행 표시와 완료 요약이 같은 수를 쓴다. */
-  const total = useMemo(() => deck.filter((id) => byId.has(id)).length, [deck, byId]);
+  /**
+   * 덱에서 아직 살아 있는 id. **진행 표시와 완료 요약이 같은 값을 쓴다.**
+   *
+   * 예전에는 같은 필터가 세 자리(`total`·`seen`·완료 요약의 `alive`)에 있었다 — 조건이 바뀌면
+   * 세 곳을 찾아야 하고, 진행 표시와 완료 요약이 다른 수를 말하는 자리가 생긴다.
+   */
+  const alive = useMemo(() => deck.filter((id) => byId.has(id)), [deck, byId]);
+  const total = alive.length;
   /** 남아 있는 카드 중 몇 번째인가(0부터). 지운 자리는 세지 않는다. */
   const seen = useMemo(
     () => deck.slice(0, at).filter((id) => byId.has(id)).length,
     [deck, at, byId],
   );
 
-  /** 이 카드의 상태가 유효한가. 카드가 바뀌었으면 위 상태는 앞 카드의 것이다. */
-  const live0 = card != null && activeId === card.id;
-  const checked = live0 ? result : null;
-  const slot = live0 ? pickedSlot : null;
-  const pickedEvidence = live0 ? evidence : null;
-  const messages = live0 ? convo : [];
+  /**
+   * 이 카드의 상태. **카드가 바뀌었으면 앞 카드의 것이므로 없는 것으로 읽는다.**
+   *
+   * 덱 자리(`at`)는 다른 화면에서 노트를 지우면 `useMemo` 안에서 조용히 다음 자리로 올라간다.
+   * 그때 초기화는 불리지 않으므로(`nextCard`/`restart`에서만 부른다) 앞 카드의 답·판정·대화가
+   * 새 카드에 남았다 — 결과는 ①**기록 없이 정답·해설 공개** ②학생이 누른 적 없는 선지에 `내 답`
+   * ③앞 카드의 AI 대화가 **다른 노트의 메모로 저장**이다. D-113이 막았다고 적은 어긋남이 이
+   * 경로로 재발했다. effect로 지우지 않고 소속을 확인한다.
+   */
+  const cs = card && cardState?.id === card.id ? cardState : null;
+  const checked = cs?.result ?? null;
+  const slot = cs?.slot ?? null;
+  const pickedEvidence = cs?.evidence ?? null;
+  const messages = cs?.convo ?? EMPTY_CONVO;
+  const recap = cs?.recap ?? '';
+  const recapSaved = cs?.recapSaved ?? null;
+  const checkError = cs?.checkError ?? null;
+  /** 카드 한 장의 진행 단계. 조건식을 세 자리에서 다시 조립하지 않는다. */
+  const step = checked ? 'done' : slot == null ? 'pick' : pickedEvidence == null ? 'why' : 'confirm';
 
   const content = card?.contentId ? findContent(sets, card.contentId) : undefined;
   const hasPassage = Boolean(content?.passage);
@@ -349,20 +430,37 @@ function ReviewDeck({
   function resetCard() {
     // 앞 카드에 보낸 호출을 무효로 만든다. 남은 응답은 도착해도 버려진다.
     askSeq.current += 1;
+    setCardState(null);
     setBusy(false);
-    setActiveId(null);
-    setPickedSlot(null);
-    setEvidence(null);
-    setResult(null);
     setSaving(false);
-    setCheckError(null);
-    setRecapText('');
-    setRecapSaved(null);
-    setConvo([]);
     setLive('');
     setQuestion('');
     setAskFailed(false);
-    setConfirmMemo(null);
+  }
+
+  /**
+   * 이 카드의 상태를 고친다. 카드가 바뀌었으면 앞 카드의 값 위에 얹지 않고 새로 시작한다.
+   *
+   * **누른 순간에만 쓴다**(`pick`·`chooseEvidence`·입력·확인 단계). `await` 뒤에는 `patchLive`다.
+   */
+  function patchCard(id: string, patch: Partial<Omit<CardState, 'id'>>) {
+    setCardState((prev) => ({ ...(prev?.id === id ? prev : emptyCard(id)), ...patch }));
+  }
+
+  /**
+   * `await` 뒤에 도착한 갱신. **카드가 이미 바뀌었으면 버린다.**
+   *
+   * `patchCard`는 없는 상태를 만들어 주므로 늦게 도착한 갱신이 **앞 카드 id로 자리를 차지한다.**
+   * 상태 자리는 하나뿐이라 그 순간 지금 보이는 카드의 `cs`가 `null`이 되고, 학생이 방금 고른
+   * 답과 근거가 화면에서 사라진다(확인 버튼까지 함께 사라진다). 한 줄 저장 → 다음 문제 →
+   * 새 카드에서 답 고르기 순으로 누르면 실제로 그렇게 된다 — 예전 `setRecapSaved`는 소속을
+   * 건드리지 않아서 이 경로가 없었다.
+   *
+   * `prev`를 인자로 준다 — 목록에 덧붙이는 갱신(`convo`)이 렌더 시점의 사본이 아니라 지금 값
+   * 위에 얹히게 한다.
+   */
+  function patchLive(id: string, patch: (prev: CardState) => Partial<Omit<CardState, 'id'>>) {
+    setCardState((prev) => (prev?.id === id ? { ...prev, ...patch(prev) } : prev));
   }
 
   /**
@@ -389,15 +487,12 @@ function ReviewDeck({
 
   function pick(nextSlot: number) {
     if (!card || checked) return;
-    setActiveId(card.id);
-    setPickedSlot(nextSlot);
-    setCheckError(null);
+    patchCard(card.id, { slot: nextSlot, checkError: null });
   }
 
   function chooseEvidence(next: NoteEvidence) {
     if (!card || checked) return;
-    setActiveId(card.id);
-    setEvidence(next);
+    patchCard(card.id, { evidence: next });
   }
 
   /**
@@ -409,7 +504,7 @@ function ReviewDeck({
   async function check() {
     if (!card || pickedOriginal == null || !pickedEvidence || saving) return;
     setSaving(true);
-    setCheckError(null);
+    patchCard(card.id, { checkError: null });
     const res = await logCard({
       noteId: card.id,
       pickedIndex: pickedOriginal,
@@ -418,12 +513,16 @@ function ReviewDeck({
     setSaving(false);
     if (!res.ok || !res.review) {
       const message = res.error ?? '복습을 기록하지 못했어요';
-      setCheckError(message);
+      patchLive(card.id, () => ({ checkError: message }));
       show(message, 'removed');
       return;
     }
-    setActiveId(card.id);
-    setResult({ isCorrect: res.review.isCorrect, scheduled: res.review.scheduled });
+    /*
+      **서버가 돌려준 것을 그대로 담는다.** 정오·다음 차례·연속 횟수를 화면이 `card`(provider
+      캐시)에서 다시 읽으면, 그 값이 낙관적 갱신에 의존하고 `scheduled`가 거짓일 때는 갱신되지도
+      않는다 — 화면과 서버가 다른 날짜를 말할 자리가 생긴다.
+    */
+    patchLive(card.id, () => ({ result: res.review, checkError: null }));
   }
 
   async function saveRecap() {
@@ -435,7 +534,7 @@ function ReviewDeck({
       show(res.error ?? '한 줄을 저장하지 못했어요', 'removed');
       return;
     }
-    setRecapSaved(text);
+    patchLive(card.id, () => ({ recapSaved: text }));
     show('한 줄을 저장했어요');
   }
 
@@ -487,8 +586,7 @@ function ReviewDeck({
       setAskFailed(true);
       return;
     }
-    setActiveId(card.id);
-    setConvo((prev) => [...prev, { q, a: answer }]);
+    patchLive(card.id, (prev) => ({ convo: [...prev.convo, { q, a: answer }] }));
     setQuestion('');
   }
 
@@ -551,40 +649,46 @@ function ReviewDeck({
 
   if (total === 0) {
     /*
-      **오늘 볼 것이 없는 것과 담은 오답이 없는 것을 구분한다.** 같은 문장으로 말하면, 서른 개를
-      담아 두고 어제 다 복습한 학생이 `결과 화면에서 틀린 문제를 담으면…`을 읽는다.
+      **다섯 가지 빈 화면을 표에서 꺼낸다.** 예전에는 제목·부제·행동이 각자 삼항 트리라 어떤
+      조합이 어떤 화면을 만드는지 읽으려면 세 트리를 동시에 올려야 했고, 실제로 세 축이
+      비대칭이었다(제목과 행동은 `hasAny`를 보는데 부제는 보지 않았다).
+
+      가리는 것은 하나다 — **오늘 볼 것이 없는 것과 담은 오답이 없는 것은 다른 사실이다.** 같은
+      문장으로 말하면 서른 개를 담아 두고 어제 다 복습한 학생이 `결과 화면에서 틀린 문제를
+      담으면…`을 읽는다.
     */
-    const hasAny = wrongNotes.length > 0;
+    const kind = onlyStarred
+      ? 'starred'
+      : allNotes
+        ? 'all'
+        : area
+          ? 'area'
+          : wrongNotes.length > 0
+            ? 'doneToday'
+            : 'none';
+    const empty = EMPTY_DECK[kind];
+    /*
+      **담은 오답이 아예 없으면 오답노트도 비어 있다.** 표의 `to`만 보면 범위 덱(별표·전체·영역)이
+      항상 오답노트를 가리키는데, 노트가 0개인 계정에는 그쪽도 빈 화면이라 나갈 문이 없는 자리가
+      된다 — 직접 URL(`?starred=1`·`?all=1`·`?area=…`)이나 마지막 노트를 지운 뒤 뒤로가기로
+      실제로 닿는다. 표의 주석이 정한 규칙(`담은 오답이 아예 없는 계정만 학습 탭으로 보낸다`)을
+      행동 축에서도 지킨다. 조건은 한 번만 묻는다.
+    */
+    const toNotebook = empty.to === 'notebook' && wrongNotes.length > 0;
     return (
       <Screen testID="student-review" backFallback="/student/learn" title={title}>
         {failureRow}
         <EmptyState
-          title={
-            scoped
-              ? '이 범위에 복습할 오답이 없어요.'
-              : hasAny
-                ? '오늘 다시 볼 오답은 없어요.'
-                : '복습할 오답이 없어요.'
-          }
-          subtitle={
-            scoped
-              ? onlyStarred
-                ? '별표를 달거나, 오늘 본 오답은 내일 다시 볼 수 있어요.'
-                : allNotes
-                  ? '오늘 본 오답은 빠져 있어요. 내일 다시 볼 수 있어요.'
-                  : '이 영역 오답을 담으면 여기에 모여요.'
-              : hasAny
-                ? '차례가 되면 홈에서 알려 줄게요.'
-                : '결과 화면에서 틀린 문제를 담으면 카드로 복습할 수 있어요.'
-          }
+          title={empty.title}
+          subtitle={empty.subtitle}
           action={
             <Button
-              testID={hasAny ? 'review-to-notebook' : 'review-to-learn'}
+              testID={toNotebook ? 'review-to-notebook' : 'review-to-learn'}
               variant="secondary"
               hug
-              label={hasAny ? '오답노트 보기' : '학습으로 돌아가기'}
+              label={toNotebook ? '오답노트 보기' : '학습으로 돌아가기'}
               onPress={() =>
-                router.replace((hasAny ? '/student/notebook' : '/student/learn') as never)
+                router.replace((toNotebook ? '/student/notebook' : '/student/learn') as never)
               }
             />
           }
@@ -601,13 +705,21 @@ function ReviewDeck({
 
       기록을 근거로 센다(화면 로컬 상태가 아니다) — 중간에 나갔다 들어와도 같은 수가 나온다.
     */
-    const alive = deck.filter((id) => byId.has(id));
     const missed = alive
       .map((id) => ({ note: byId.get(id)!, res: todayResult(id, noteReviews, today) }))
       .filter((r) => r.res && !r.res.isCorrect)
       .map((r) => r.note);
     const done = alive.filter((id) => todayResult(id, noteReviews, today)).length;
     const resting = missed.filter((n) => n.state === 'stuck');
+    /**
+     * 틀린 것 중 **내일 오지 않는** 것. `내일 다시 만나요`를 말할지 가른다.
+     *
+     * 상태로 세지 않는다 — 쉬는 것(`due_on`이 없다) 말고도 **차례가 아니었던 복습**이 있다.
+     * 별표·영역·전체 덱은 차례를 보지 않고 열리므로 그 회차는 `due_on`을 움직이지 않고
+     * (`scheduled: false`) 다음 차례가 그대로다. 서버가 정한 날짜를 그대로 읽는다.
+     */
+    const tomorrow = addDaysISO(today, 1);
+    const notTomorrow = missed.filter((n) => n.dueOn !== tomorrow).length;
     const visibleMissed = showAllMissed ? missed : missed.slice(0, MISSED_PREVIEW);
     return (
       <Screen testID="student-review" backFallback="/student/learn" title="복습을 끝냈어요">
@@ -620,21 +732,16 @@ function ReviewDeck({
                 : `${done}개를 다시 풀었고 ${done - missed.length}개를 맞혔어요.`}
             </AppText>
             {/*
-              **`쉬는` 문항에 `내일 다시 만나요`라고 말하지 않는다.** 서버는 서로 다른 날 세 번
-              연속 틀린 문항을 큐에서 내린다(`due_on = null`) — 그 카드는 내일 오지 않는다.
-              한 흐름의 두 화면이 같은 카드의 일정을 반대로 말하던 자리다.
+              **내일 오지 않는 카드에 `내일 다시 만나요`라고 말하지 않는다.** 쉬는 것(`due_on`이
+              없다)과 차례가 아니었던 복습(`scheduled: false`) 둘 다 그렇다 — `notTomorrow`가
+              그 둘을 날짜 하나로 센다. 한 흐름의 두 화면이 같은 카드의 일정을 반대로 말하던
+              자리다.
 
               그리고 **`차례가 된 오답을 모두 봤어요`라고 단정하지 않는다.** 아래에 `남은 오답 더
               보기`가 함께 서면 두 문장이 서로를 부정한다.
             */}
             <AppText variant="caption" tone="secondary">
-              {missed.length > resting.length
-                ? '헷갈린 문항은 내일 다시 만나요.'
-                : done === 0
-                  ? '건너뛴 문항은 다음 차례에 다시 나와요.'
-                  : pool.length > 0
-                    ? '오늘 몫을 마쳤어요.'
-                    : '차례가 된 오답을 모두 봤어요.'}
+              {closingLine({ missed: missed.length, notTomorrow, done, remaining: pool.length })}
             </AppText>
             {resting.length > 0 ? (
               <AppText variant="caption" tone="secondary" testID="review-resting">
@@ -714,8 +821,23 @@ function ReviewDeck({
     뜻이다(`Question.explanation`은 선택 필드다).
   */
   const explanation = content?.questions.find((q) => q.id === card.qId)?.explanation;
-  const left = passesLeft(card);
-  const graduatedNow = checked?.isCorrect && checked.scheduled && card.state === 'graduated';
+  /*
+    **서버가 돌려준 값을 읽는다.** `card`는 provider 캐시이고 `scheduled`가 거짓일 때는 갱신되지도
+    않는다 — 확인 뒤 세 줄(익힘 도달 · 다음 차례 · 남은 횟수)이 캐시에 의존하면 화면과 서버가
+    다른 사실을 말할 자리가 생긴다.
+  */
+  const left = passesLeft(checked ?? card);
+  /**
+   * **방금 익힘에 도달했는가.** `state === 'graduated'`만 보면 안 된다.
+   *
+   * 서버는 이미 졸업한 문항을 30일마다 유지 복습으로 되돌리고, 그 회차를 맞히면 `state`를 다시
+   * `graduated`로(`streak`은 4·5…) 돌려준다. 그래서 상태만 보면 `서로 다른 날 세 번 맞혔어요`가
+   * 유지 복습마다 되풀이되고, 이 줄이 if/else의 앞이라 **`review-next-due`가 유지 복습에서는
+   * 한 번도 그려지지 않는다.** 처음 도달한 회차는 `streak`이 정확히 `GRADUATE_STREAK`이다.
+   */
+  const graduatedNow = Boolean(
+    checked?.isCorrect && checked.scheduled && checked.streak === GRADUATE_STREAK,
+  );
   /** 지금까지 이 문항을 몇 번 다시 풀었는가. 스트릭·포인트 대신 두는 사실이다. */
   const reviewCount = noteReviews[card.id]?.length ?? 0;
   /** 대리 보기에서는 이 화면의 쓰기가 전부 거부된다. 누르기 전에 한 번 말한다(§8·A-115). */
@@ -754,11 +876,11 @@ function ReviewDeck({
         */}
         {!checked ? (
           <AppText variant="caption" tone="secondary" testID="review-guide">
-            {slot == null
+            {step === 'pick'
               ? explanation
                 ? '답을 고르면 근거를 묻고, 확인하면 정답과 해설을 함께 볼 수 있어요.'
                 : '답을 고르면 근거를 묻고, 확인하면 정답과 내 메모를 함께 볼 수 있어요.'
-              : pickedEvidence == null
+              : step === 'why'
                 ? '근거를 고르면 확인할 수 있어요.'
                 : '확인하면 답을 바꿀 수 없어요.'}
           </AppText>
@@ -906,7 +1028,7 @@ function ReviewDeck({
           없었다(32.1% vs 32.7%, n.s. — Sparck, Bjork & Bjork 2016). 이 3택은 정보량이 있고 찍어서
           맞힌 회차를 숙달로 세지 않는 데 쓰이지만, **효과크기로 뒷받침되지는 않는다.**
         */}
-        {slot != null && !checked ? (
+        {step === 'why' || step === 'confirm' ? (
           <View style={{ gap: spacing.sm }} testID="review-evidence">
             <Divider />
             <AppText variant="label">{evidenceQuestion(hasPassage)}</AppText>
@@ -1015,9 +1137,9 @@ function ReviewDeck({
             ) : (
               <AppText variant="caption" tone="secondary" testID="review-next-due">
                 {checked.scheduled
-                  ? nextReviewLabel(card, today)
+                  ? nextReviewLabel(checked, today)
                   : '차례가 아닌 복습이라 다음 차례는 그대로예요.'}
-                {checked.scheduled && left > 0 && card.state !== 'stuck'
+                {checked.scheduled && left > 0 && checked.state !== 'stuck'
                   ? ` · 다른 날에 ${left}번 더 맞히면 다 익힌 것으로 볼게요`
                   : ''}
               </AppText>
@@ -1034,7 +1156,7 @@ function ReviewDeck({
             */}
             {card.source === 'academy' ? (
               <AppText variant="caption" tone="secondary">
-                학원 과제에서 담은 오답의 메모는 선생님이 볼 수 있어요.
+                {ACADEMY_MEMO_NOTICE}
               </AppText>
             ) : null}
 
@@ -1091,7 +1213,7 @@ function ReviewDeck({
                   accessibilityLabel="내 말로 한 줄"
                   maxHeight={120}
                   value={recap}
-                  onChangeText={setRecapText}
+                  onChangeText={(t) => patchCard(card.id, { recap: t })}
                   onSubmit={() => void saveRecap()}
                   placeholder={
                     checked.isCorrect ? '왜 이게 답인지 한 줄로' : '내가 왜 그 선지를 골랐는지 한 줄로'
@@ -1123,7 +1245,7 @@ function ReviewDeck({
             onPress={nextCard}
           />
         </ActionBar>
-      ) : slot != null && pickedEvidence != null && !cannotWrite ? (
+      ) : step === 'confirm' && !cannotWrite ? (
         /*
           **조건이 갖춰질 때만 그린다.** 답이나 근거가 없을 때 이 버튼을 꺼서 두면 눌러도 아무
           일이 없는 버튼이 된다(§8 · D-036 — 이 시스템의 `Button`에 `disabled`가 없는 이유다).
@@ -1165,23 +1287,23 @@ function ReviewDeck({
                 label={card.dig ? '대화 내용으로 메모 다시 쓰기' : '노트에 정리해 두기'}
                 onPress={() => {
                   // 덮어쓸 것이 없으면 바로 저장한다. 확인 단계는 잃을 것이 있을 때만 둔다.
-                  if (card.dig) setConfirmMemo(card.id);
+                  if (card.dig) patchCard(card.id, { confirmMemo: true });
                   else void saveMemo();
                 }}
               />
             ) : undefined
           }
         >
-          {confirmMemo === card.id ? (
+          {cs?.confirmMemo ? (
             <ConfirmStep
               message="지금 오답노트에 있는 메모가 이 대화의 요약으로 바뀌어요. 되돌릴 수 없어요."
               confirmLabel="새로 쓰기"
               confirmTestID="review-save-memo-confirm"
               confirmAccessibilityLabel="대화 내용으로 메모 다시 쓰기"
               destructive
-              onCancel={() => setConfirmMemo(null)}
+              onCancel={() => patchCard(card.id, { confirmMemo: false })}
               onConfirm={() => {
-                setConfirmMemo(null);
+                patchCard(card.id, { confirmMemo: false });
                 void saveMemo();
               }}
             />

@@ -19,15 +19,18 @@ import { useCurrentAccount, useSession } from '@/session';
 import { useProgress } from '@/features/progress';
 import { useContent } from '@/features/content';
 import { useToast } from '@/features/toast';
-import { formatDate } from '@/features/learning';
+import { formatDate, formatDuration } from '@/features/learning';
 import { classStat } from '@/features/report';
 import { findContent } from '@/data';
 import { colors } from '@/theme/tokens';
 
-function fmtTime(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return m > 0 ? `${m}분 ${s}초` : `${s}초`;
+/**
+ * 행의 값. **`Row.meta`에 두지 않는다** — `inkTertiary`(라이트 대비 2.96:1, AA 미달)라
+ * 판단에 쓰는 값이 화면에서 가장 흐린 글자가 된다(`DESIGN.md` §8 · §19).
+ * 같은 형태를 `app/parent/children.tsx`와 `app/admin/user/[id].tsx`가 쓴다.
+ */
+function Val({ children }: { children: string }) {
+  return <AppText variant="label">{children}</AppText>;
 }
 
 /**
@@ -234,26 +237,36 @@ export default function ParentAttemptDetail() {
         detail={`${attempt.total}문항 중 ${attempt.correct}문항 정답 · 오답 ${wrong.length}개`}
       />
 
+      {/*
+        **판단에 쓰는 값은 `meta`에 두지 않는다**(§8 · §19 · §20). `meta`는 `inkTertiary`라
+        화면에서 가장 흐린 글자인데(라이트 대비 2.96:1, AA 미달) 학부모가 이 화면에서 읽는 것이
+        바로 이 값들이다 — 언제 냈는지 · 마감은 언제였는지 · 얼마나 걸렸는지 · 반에서 몇 번째인지.
+        값은 `trailing`의 `label`이고 `meta`에는 값이 아닌 **분류**(영역)만 남긴다.
+      */}
       <Group>
-        {attempt.dateISO ? (
-          <Row title="제출한 날" meta={formatDate(attempt.dateISO)} />
-        ) : (
-          <Row title="제출한 날" meta="기록 없음" />
-        )}
-        {dueDate ? <Row title="마감" meta={formatDate(dueDate)} /> : null}
-        <Row title="걸린 시간" meta={fmtTime(attempt.timeSec)} />
+        {/* 제출 시각이 없으면 마감일로 대신하지 않는다(§19). 없다는 사실을 그 자리에 둔다. */}
+        <Row
+          title="제출한 날"
+          trailing={<Val>{attempt.dateISO ? formatDate(attempt.dateISO) : '기록 없음'}</Val>}
+        />
+        {dueDate ? <Row title="마감" trailing={<Val>{formatDate(dueDate)}</Val>} /> : null}
+        <Row title="걸린 시간" trailing={<Val>{formatDuration(attempt.timeSec)}</Val>} />
         <Row title="영역" meta={`국어 · ${attempt.area}`} />
         {cls ? (
           <Row
             testID="attempt-class"
             title="반에서"
             subtitle={`제출한 ${cls.submitters}명 기준 · 반 평균 ${cls.avg}%`}
-            meta={`${cls.rank}번째`}
+            trailing={<Val>{`${cls.rank}번째`}</Val>}
           />
         ) : null}
         <Row
           title="문항당 평균"
-          meta={attempt.total ? fmtTime(Math.round(attempt.timeSec / attempt.total)) : '—'}
+          trailing={
+            <Val>
+              {attempt.total ? formatDuration(Math.round(attempt.timeSec / attempt.total)) : '—'}
+            </Val>
+          }
         />
       </Group>
 

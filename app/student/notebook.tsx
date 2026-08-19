@@ -31,7 +31,13 @@ import { askScodyAIStream, isAiFailure, isAiSavable } from '@/features/openroute
 import { SCODY_WRONG_SYSTEM, WRONG_MEMO_SYSTEM, wrongCtx } from '@/features/prompts';
 import { findContent, type LearningItem } from '@/data';
 import { todayISO } from '@/features/clock';
-import { DAILY_CAP, nextReviewLabel, stateCounts, stuckAdvice } from '@/features/review';
+import {
+  ACADEMY_MEMO_NOTICE,
+  nextReviewLabel,
+  stateCounts,
+  stuckAdvice,
+  todayCount,
+} from '@/features/review';
 import { colors, spacing, typeface, font } from '@/theme/tokens';
 import { useColumn } from '@/theme/useColumn';
 
@@ -191,8 +197,16 @@ export default function Notebook() {
    * 일어나는지 알 수 없다.
    */
   const loadError = retrying ? null : (progressError ?? contentError);
-  /** 오늘 볼 것 · 나중 · 익힘 · 쉬는 것. 개수를 세는 곳은 `stateCounts` 하나다. */
+  /** 오늘 볼 것 · 나중 · 익힘 · 쉬는 것. 칸 개수와 `> 0` 게이트에 쓰는 원값이다. */
   const counts = useMemo(() => stateCounts(allNotes, today), [allNotes, today]);
+  /**
+   * 화면이 학생에게 말하는 오늘 개수. **상한이 적용된 값이다.**
+   *
+   * 예전에는 이 두 자리가 `Math.min(counts.dueToday, DAILY_CAP)`을 손으로 곱했다 —
+   * `todayCount`의 주석이 정확히 그것을 금지한다("세 화면이 각자 `Math.min`을 곱하면 한 곳에서
+   * 빠뜨린다"). 실제로 홈·학습 탭만 함수를 부르고 이 화면만 예외로 남아 있었다.
+   */
+  const dueToday = useMemo(() => todayCount(allNotes, today), [allNotes, today]);
 
   /** 두 조회를 함께 다시 시도한다. 실패가 어느 쪽에서 왔는지 학생이 고를 일은 아니다. */
   async function retryLoad() {
@@ -545,12 +559,12 @@ export default function Notebook() {
 
         조회가 끝나기 전에는 그리지 않는다 — 읽지 못한 목록으로 센 개수를 말하지 않는다(§9).
       */}
-      {!firstLoad && !loadError && counts.today > 0 ? (
+      {!firstLoad && !loadError && dueToday > 0 ? (
         <Group>
           <Row
             testID="notebook-to-review"
             title="오늘 다시 볼 오답이 있어요"
-            subtitle={`${Math.min(counts.today, DAILY_CAP)}개만 풀면 오늘 몫은 끝이에요`}
+            subtitle={`${dueToday}개만 풀면 오늘 몫은 끝이에요`}
             onPress={() => router.push('/student/review' as never)}
             showChevron
           />
@@ -812,7 +826,7 @@ export default function Notebook() {
                     */}
                     {n.source === 'academy' ? (
                       <AppText variant="caption" tone="secondary" style={styles.notice}>
-                        학원 과제에서 담은 오답의 메모는 선생님이 볼 수 있어요.
+                        {ACADEMY_MEMO_NOTICE}
                       </AppText>
                     ) : null}
                     {/*
@@ -1140,11 +1154,11 @@ export default function Notebook() {
 
             **차례가 온 것이 있을 때만 둔다**(§8) — 없으면 눌러도 빈 덱이 나온다.
           */}
-          {counts.today > 0 ? (
+          {dueToday > 0 ? (
             <Row
               testID="wrapup-to-review"
               title="이제 다시 풀어 볼게요"
-              subtitle={`오늘 볼 오답 ${Math.min(counts.today, DAILY_CAP)}개예요`}
+              subtitle={`오늘 볼 오답 ${dueToday}개예요`}
               showChevron
               onPress={() => router.push('/student/review' as never)}
             />

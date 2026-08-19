@@ -12,15 +12,9 @@ import {
   LoadFailed,
 } from '@/components';
 import { useCurrentAccount, useSession } from '@/session';
-import { formatDate } from '@/features/learning';
+import { formatDate, formatDuration } from '@/features/learning';
 import { useChildReport, RANK_MIN_SUBMITTERS } from '@/features/report';
 import { spacing } from '@/theme/tokens';
-
-function fmtTime(sec: number): string {
-  if (sec >= 3600) return `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분`;
-  const m = Math.floor(sec / 60);
-  return m > 0 ? `${m}분 ${sec % 60}초` : `${sec}초`;
-}
 
 /** 반에서 어느 구간인지. 정확한 등수보다 압박이 적고, 등수와 함께 두면 뜻이 분명해진다. */
 function band(rank: number, submitters: number): string {
@@ -86,17 +80,25 @@ export default function ParentDetail() {
   const retrying = r.loading && r.loaded;
   /** 이 화면이 셀 것이 손에 하나도 없다(그 달 학습 · 담긴 오답 · 학원 배정 전부). */
   const nothing = r.totals.count === 0 && r.notes.total === 0 && academySubmit.assigned === 0;
-  /** 실패 자리. 이 화면의 모든 값이 같은 두 조회에서 오므로 면은 하나다(§9). */
-  const failure = r.error ? (
-    <LoadFailed
-      testID="detail-load-failed"
-      retryTestID="detail-load-retry"
-      what="기록"
-      message={r.error}
-      retrying={retrying}
-      onRetry={() => void r.reload()}
-    />
-  ) : null;
+  /**
+   * 실패 자리. 이 화면의 모든 값이 같은 두 조회에서 오므로 면은 하나다(§9).
+   *
+   * `again`은 **이미 읽어 둔 값이 화면에 있을 때만** 준다(§9) — 그 화면은 지금 값을 보여 주고
+   * 있으므로 `불러오지 못했어요`만 쓰면 아무것도 못 읽은 것처럼 읽힌다. 손에 아무것도 없는
+   * 갈래(바로 아래 `nothing`)는 처음부터 못 읽은 것이라 `다시`를 붙이지 않는다.
+   */
+  const failure = (again: boolean) =>
+    r.error ? (
+      <LoadFailed
+        testID="detail-load-failed"
+        retryTestID="detail-load-retry"
+        what="기록"
+        message={r.error}
+        retrying={retrying}
+        again={again}
+        onRetry={() => void r.reload()}
+      />
+    ) : null;
 
   /* 첫 조회 중에는 아무것도 세지 않는다. 문장은 학부모 홈·리포트와 같다. */
   if (!r.loaded) {
@@ -110,10 +112,10 @@ export default function ParentDetail() {
   }
 
   /* 손에 아무것도 없는데 조회가 실패했다면 `없어요`는 거짓이다 — 실패만 말한다(D-136). */
-  if (nothing && failure) {
+  if (nothing && r.error) {
     return (
       <Screen testID="parent-detail" backFallback={back} title={title}>
-        {failure}
+        {failure(false)}
       </Screen>
     );
   }
@@ -121,7 +123,7 @@ export default function ParentDetail() {
   return (
     <Screen testID="parent-detail" backFallback={back} title={title}>
       {/* 실패했지만 읽어 둔 값이 있을 때. 가진 것은 여전히 사실이라 지우지 않는다(D-136). */}
-      {failure}
+      {failure(true)}
 
       {r.totals.count === 0 ? (
         <Group>
@@ -164,7 +166,7 @@ export default function ParentDetail() {
           */}
           {r.byWeekday.length > 1 && maxLoad > 1 ? (
             <>
-              <AppText variant="caption" tone="tertiary">
+              <AppText variant="caption" tone="secondary">
                 마감이 어느 요일에 몰렸는지 봐요.
               </AppText>
               <View style={{ gap: spacing.sm }}>
@@ -206,8 +208,9 @@ export default function ParentDetail() {
               />
             ))}
           </Group>
-          <AppText variant="caption" tone="tertiary">
-            제출한 학생이 {RANK_MIN_SUBMITTERS}명 미만인 과제는 비교하지 않아요.
+          {/* 같은 하한을 리포트도 말한다(`ChildReport`) — 같은 사실이 두 말투가 되지 않게. */}
+          <AppText variant="caption" tone="secondary">
+            제출한 학생이 {RANK_MIN_SUBMITTERS}명보다 적은 과제는 비교하지 않아요.
           </AppText>
         </Section>
       ) : null}
@@ -218,8 +221,15 @@ export default function ParentDetail() {
       */}
       {r.byTopic.length > 0 ? (
         <Section separated title="제재·갈래별 성취도">
-          <AppText variant="caption" tone="tertiary">
-            자녀가 푼 학습만 나와요. 유형마다 세트가 하나뿐인 경우가 많아 문항 수를 함께 봐 주세요.
+          {/*
+            **합친 사실을 밝힌다.** 계산(`report.ts`의 `byTopic`)이 개인 학습과 학원 과제를 출처
+            구분 없이 누적하는데, 이 섹션이 학원 전용 블록(`학원 과제 현황`·`반에서`) 바로 아래에
+            있어 학원 성적으로 읽혔다. 문장은 같은 성질의 `영역별 정답률`이 쓰는 것과 같다
+            (`src/components/ChildReport.tsx`) — 같은 사실을 두 문장으로 말하지 않는다.
+          */}
+          <AppText variant="caption" tone="secondary">
+            학원 과제와 개인 학습을 합쳐 셌어요. 자녀가 푼 학습만 나와요. 유형마다 세트가 하나뿐인
+            경우가 많아 문항 수를 함께 봐 주세요.
           </AppText>
           {/*
             제재 이름은 길어서 좁은 화면에서는 트랙이 남지 않는다. 어디서 쌓을지는 `BarRow`가
@@ -254,7 +264,7 @@ export default function ParentDetail() {
               />
             ))}
           </View>
-          <AppText variant="caption" tone="tertiary">
+          <AppText variant="caption" tone="secondary">
             한 번에 여러 학습을 풀면 같은 날로 묶여요.
           </AppText>
         </Section>
@@ -268,12 +278,12 @@ export default function ParentDetail() {
               testID="detail-per-question"
               title="문항당 평균"
               subtitle="학습 하나를 시작해 제출할 때까지의 시간을 문항 수로 나눈 값이에요"
-              trailing={<AppText variant="label">{fmtTime(perQuestion)}</AppText>}
+              trailing={<AppText variant="label">{formatDuration(perQuestion)}</AppText>}
             />
             <Row
-              title="이 달 학습 시간"
+              title={`${r.label} 학습 시간`}
               subtitle="화면을 켜 둔 시간도 포함돼요. 순공부 시간은 아니에요"
-              trailing={<AppText variant="label">{fmtTime(r.totals.timeSec)}</AppText>}
+              trailing={<AppText variant="label">{formatDuration(r.totals.timeSec)}</AppText>}
             />
           </Group>
         </Section>
@@ -281,31 +291,44 @@ export default function ParentDetail() {
 
       {/* 6. 오답노트 — '복습률'이 아니라 '정리율'이다 */}
       <Section title="오답노트">
-        <Group>
-          <Row
-            testID="detail-notes"
-            title="이 달에 담은 오답"
-            subtitle={`지금까지 모두 ${r.notes.total}개`}
-            trailing={<AppText variant="label">{r.notes.added}개</AppText>}
-          />
-          <Row
-            testID="detail-organized"
-            title="AI와 정리한 비율"
-            subtitle="담은 오답 중 메모로 정리한 비율이에요"
-            trailing={
-              <AppText variant="label">
-                {r.notes.added > 0
-                  ? `${Math.round((r.notes.organized / r.notes.added) * 100)}%`
-                  : '—'}
-              </AppText>
-            }
-          />
-          <Row
-            title="별표"
-            subtitle="자녀가 다시 볼 것으로 골라 둔 문항이에요"
-            trailing={<AppText variant="label">{r.notes.starred}개</AppText>}
-          />
-        </Group>
+        {/*
+          **빈 카드를 남기지 않는다**(§9). 담은 오답이 하나도 없으면 이 섹션이 `0개 · — · 0개`
+          세 줄로 서서, 아무 뜻도 없는 자리가 화면에서 가장 큰 블록이 됐다. 문장은 리포트가 같은
+          사실을 말할 때 쓰는 것과 같다(`src/components/ChildReport.tsx`).
+        */}
+        {r.notes.added === 0 && r.notes.total === 0 ? (
+          <Group>
+            <View style={{ padding: spacing.lg }}>
+              <AppText tone="secondary">{r.label}에 담아 둔 오답이 없어요.</AppText>
+            </View>
+          </Group>
+        ) : (
+          <Group>
+            <Row
+              testID="detail-notes"
+              title={`${r.label}에 담은 오답`}
+              subtitle={`지금까지 모두 ${r.notes.total}개`}
+              trailing={<AppText variant="label">{r.notes.added}개</AppText>}
+            />
+            <Row
+              testID="detail-organized"
+              title="AI와 정리한 비율"
+              subtitle="담은 오답 중 메모로 정리한 비율이에요"
+              trailing={
+                <AppText variant="label">
+                  {r.notes.added > 0
+                    ? `${Math.round((r.notes.organized / r.notes.added) * 100)}%`
+                    : '—'}
+                </AppText>
+              }
+            />
+            <Row
+              title="별표"
+              subtitle="자녀가 다시 볼 것으로 골라 둔 문항이에요"
+              trailing={<AppText variant="label">{r.notes.starred}개</AppText>}
+            />
+          </Group>
+        )}
       </Section>
 
       {/* 7. 개인 학습과 학원 과제 비율 */}
@@ -323,7 +346,7 @@ export default function ParentDetail() {
               }
             />
           </Group>
-          <AppText variant="caption" tone="tertiary">
+          <AppText variant="caption" tone="secondary">
             시킨 공부만 하는지, 스스로 고른 공부도 하는지 봐요.
           </AppText>
         </Section>

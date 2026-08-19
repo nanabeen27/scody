@@ -20,6 +20,7 @@ import { useSession } from '@/session';
 import { byDue, useQueuedItems, useStudentItems } from '@/features/learning';
 import { useContent } from '@/features/content';
 import { useProgress, type PerQuestion } from '@/features/progress';
+import { ACADEMY_MEMO_NOTICE } from '@/features/review';
 import { useRecommendations } from '@/features/recommend';
 import { useToast } from '@/features/toast';
 import { findContent, type LearningItem } from '@/data';
@@ -59,6 +60,7 @@ export default function ResultScreen() {
   const {
     attempts,
     addWrongNote,
+    addWrongNotes,
     removeWrongNote,
     hasNote,
     wrongNotes,
@@ -162,6 +164,21 @@ export default function ResultScreen() {
 
   const indexed = attempt.perQuestion.map((q, i) => ({ q, i }));
   const wrong = indexed.filter(({ q }) => !q.correct);
+  /**
+   * 아직 담지 않은 오답. **한 번만 센다.**
+   *
+   * 예전에는 같은 식(`wrong.filter(hasNote)`)이 렌더 본문과 `addAllWrong`에 각각 있었다.
+   *
+   * `useMemo`를 쓰지 않는다 — 이 자리는 이른 return(`if (!item || !content || !attempt)`) 뒤라
+   * 훅을 조건부로 부르게 된다. 바로 위 `indexed`·`wrong`도 같은 이유로 메모가 없다.
+   *
+   * 비용은 감당된다. `hasNote`는 `wrongNotes`를 훑는 선형 검사이므로 25문항 × 노트 300개면
+   * 7,500회 비교이고, 이 화면의 로컬 상태는 `scope`·`showAllQuestions`·`busyAll` 셋뿐이라
+   * 리렌더가 잦지 않다(입력창도 스트리밍도 없다). 줄여야 할 때 고칠 자리는 이 호출부가 아니라
+   * `hasNote`다 — provider가 `${qId}|${itemId}` 집합을 들면 여기와 줄마다의 검사가 함께 O(1)이
+   * 된다.
+   */
+  const unsaved = wrong.filter(({ q }) => !hasNote(q.qId, item.id));
   // 다 맞았으면 고를 것이 없으니 전체를 보여준다.
   const effectiveScope = wrong.length === 0 ? 'all' : scope;
   const listed = effectiveScope === 'wrong' ? wrong : indexed;
@@ -266,22 +283,29 @@ export default function ResultScreen() {
    */
   async function addAllWrong() {
     if (busyAll) return;
-    const targets = wrong.filter(({ q }) => !hasNote(q.qId, item!.id));
+    // 버튼을 세운 목록과 보내는 목록이 같아야 한다 — 이름을 하나 더 두면 갈라질 자리가 생긴다.
+    const targets = unsaved;
     if (targets.length === 0) return;
     setBusyAll(true);
-    let added = 0;
-    let failed = 0;
-    for (const { q } of targets) {
-      const res = await addWrongNote({
+    /*
+      **한 번에 보내고 재조회는 한 번이다.** 루프에서 `addWrongNote`를 부르면 항목마다 전체
+      재조회가 돌아 오답 7개에 요청 63개·순차 14단계가 됐고 그중 56개는 직전과 같은 값을 다시
+      읽었다. 사용자에게는 그 시간만큼 버튼이 `담는 중이에요`로 서 있는 것으로 보인다.
+    */
+    /*
+      **개수가 없는 결과가 실재한다.** provider가 예외를 잡은 갈래는 `{ ok: false, error }`만
+      돌려주므로 기본값을 여기서 정한다 — 없는 값을 `undefined > 0`으로 물으면 실패가 아래
+      성공 문장으로 빠져나가 `undefined개를 담았어요`가 된다.
+    */
+    const { added = 0, failed = targets.length } = await addWrongNotes(
+      targets.map(({ q }) => ({
         questionId: q.qId,
         contentId: content!.id,
         source: item!.source,
         assignmentId: item!.source === 'academy' ? item!.id : undefined,
         pickedIndex: q.pickedIndex,
-      });
-      if (res.ok) added += 1;
-      else failed += 1;
-    }
+      })),
+    );
     setBusyAll(false);
     if (readOnly) return;
     if (failed > 0) {
@@ -418,7 +442,7 @@ export default function ResultScreen() {
             진행은 라벨로 말하고 버튼을 언마운트하지 않는다 — 웹에서 포커스된 요소가 사라지면
             `<body>`로 떨어진다(A-130).
           */}
-          {wrong.filter(({ q }) => !hasNote(q.qId, item.id)).length > 1 ? (
+          {unsaved.length > 1 ? (
             <Button
               testID="result-note-all"
               variant="secondary"
@@ -435,7 +459,7 @@ export default function ResultScreen() {
           */}
           {item.source === 'academy' ? (
             <AppText variant="caption" tone="secondary">
-              학원 과제에서 담은 오답의 메모는 선생님이 볼 수 있어요.
+              {ACADEMY_MEMO_NOTICE}
             </AppText>
           ) : null}
           <Group>

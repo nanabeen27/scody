@@ -494,9 +494,21 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
     noDueDate: mine.filter((a) => !reportDueOf(a)).length,
   };
 
-  /** 영역별 정답률(이 달). 낮은 순. `enough`가 false면 약점으로 단정하지 않는다. */
+  /**
+   * 영역별 정답률(이 달). 낮은 순. `enough`가 false면 약점으로 단정하지 않는다.
+   *
+   * **영역을 모르는 기록은 빼고 센다.** `content_sets_select`(0009 계열)에 학부모 절이 없어서,
+   * 학원이 학생에게 공개하지 않은 세트(`publish_to_students = false`)는 학부모의 조회에서
+   * 조인이 비고 `area`가 빈 문자열이 된다(`src/repo/learning.ts`의 `?? ''`). 그대로 세면
+   * **이름 없는 막대**가 하나 서서 그 문항 수가 어느 영역에도 속하지 않은 채 그려졌다
+   * (실측: 정예린 8월 리포트의 `80% · 10문항` 막대에 이름이 없었다).
+   *
+   * 빼고 세되 **뺀 사실을 화면이 말한다** — 마감일 없는 배정을 다루는 방식과 같다.
+   */
+  const unknownArea = rows.filter((a) => !a.area).length;
   const acc: Record<string, { correct: number; total: number }> = {};
   for (const a of rows) {
+    if (!a.area) continue;
     acc[a.area] = acc[a.area] ?? { correct: 0, total: 0 };
     acc[a.area].correct += correctOf(a);
     acc[a.area].total += a.questions;
@@ -623,6 +635,7 @@ export function buildChildReport(childId: string, deps: Deps, wantMonth?: string
     academyCompare,
     academySubmit,
     byArea,
+    unknownArea,
     byTopic,
     byDay,
     onTime,
