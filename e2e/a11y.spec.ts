@@ -5,8 +5,8 @@ import { answerAll, choices, openFirstPersonal } from './_solve';
 test.describe('M6 접근성', () => {
   test('로그인 폼 요소에 접근 가능한 라벨이 있다', async ({ page }) => {
     await page.goto('/login');
-    // 입력 필드가 접근 가능한 이름을 가진다(로그인은 아이디 + 비밀번호다, D-171)
-    await expect(page.getByRole('textbox', { name: '스코디 아이디' })).toBeVisible();
+    // 입력 필드가 접근 가능한 이름을 가진다(로그인은 이메일 + 비밀번호다, D-184)
+    await expect(page.getByRole('textbox', { name: '이메일' })).toBeVisible();
     await expect(page.getByLabel('비밀번호')).toBeVisible();
     // 버튼은 역할과 이름으로 접근 가능
     await expect(page.getByRole('button', { name: '로그인', exact: true })).toBeVisible();

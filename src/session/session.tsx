@@ -11,7 +11,7 @@ import {
 import type { AcademyClass, Account, Role } from '@/data/types';
 import { errorMessage, hasSupabaseConfig, supabase } from '@/lib/supabase';
 import { DEV_LOGIN_ENABLED, DEV_LOGIN_PASSWORD, devLoginEmail } from '@/session/devAccounts';
-import { staffEmail } from '@/session/staffEmail';
+import { loginEmail } from '@/session/email';
 import {
   loadDirectory,
   loadSelfRoles,
@@ -76,13 +76,14 @@ interface SessionValue {
    */
   signInWithTestAccount: (scodyId: string) => Promise<SignInResult>;
   /**
-   * **스코디 아이디 + 비밀번호로 로그인한다**(D-165). `/staff`가 쓴다.
+   * **자격 증명으로 로그인한다.** `/login`은 이메일을(D-184), `/staff`는 스코디 아이디를 넘긴다
+   * (D-165) — `loginEmail`이 둘 다 계정 주소로 옮긴다.
    *
    * `signInWithTestAccount`와 다른 점은 비밀번호를 **사람이 입력한다**는 것이다. 그래서
    * `DEV_LOGIN_ENABLED` 스위치와 무관하게 운영 빌드에서도 동작한다 — 벽은 화면 숨김이 아니라
    * Supabase 인증이고, 비밀번호는 공개 저장소에 없는 난수다(D-157).
    */
-  signInWithScodyId: (scodyId: string, password: string) => Promise<SignInResult>;
+  signInWithCredentials: (input: string, password: string) => Promise<SignInResult>;
   signOut: () => Promise<void>;
   /** 스냅샷을 다시 읽는다. 반·학생·소속을 바꾼 뒤 부른다. */
   reload: () => Promise<void>;
@@ -237,7 +238,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [hydrate]);
 
   /**
-   * 스코디 아이디 + 비밀번호로 세션을 연다. 두 로그인 경로가 이 본문을 함께 쓴다.
+   * 계정 주소 + 비밀번호로 세션을 연다. 두 로그인 경로가 이 본문을 함께 쓴다.
    *
    * 이메일 주소를 만드는 곳은 `devLoginEmail` 하나다 — 여기 템플릿 리터럴을 두면 개발 로그인을
    * 끈 빌드에서도 그 문자열이 번들에 남는다(D-145에서 실측했다).
@@ -247,7 +248,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (!hasSupabaseConfig()) {
         return { ok: false, error: 'Supabase 설정이 없어요.' };
       }
-      if (!email) return { ok: false, error: '아이디를 확인해 주세요.' };
+      if (!email) return { ok: false, error: '로그인 정보를 확인해 주세요.' };
       setLoading(true);
       const { data, error } = await supabase().auth.signInWithPassword({ email, password });
       if (error || !data.user) {
@@ -274,12 +275,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [fetchDirectory],
   );
 
-  const signInWithScodyId = useCallback<SessionValue['signInWithScodyId']>(
-    (scodyId, password) => {
-      const id = scodyId.trim().toLowerCase();
-      if (!id) return Promise.resolve({ ok: false, error: '아이디를 적어 주세요.' });
+  /*
+    **빈 칸 안내를 중립으로 둔다.** 이 함수는 두 화면이 함께 쓰는데 묻는 것이 다르다 —
+    `/login`은 이메일, `/staff`는 스코디 아이디다(D-184). 어느 한쪽의 말로 적으면 다른 화면에서
+    거짓이 되므로, 무엇을 물었는지 아는 화면이 자기 말로 먼저 검사한다.
+  */
+  const signInWithCredentials = useCallback<SessionValue['signInWithCredentials']>(
+    (input, password) => {
+      const v = input.trim();
+      if (!v) return Promise.resolve({ ok: false, error: '로그인 정보를 적어 주세요.' });
       if (!password) return Promise.resolve({ ok: false, error: '비밀번호를 적어 주세요.' });
-      return openSession(staffEmail(id), password);
+      return openSession(loginEmail(v), password);
     },
     [openSession],
   );
@@ -588,7 +594,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       loading,
       account,
       signInWithTestAccount,
-      signInWithScodyId,
+      signInWithCredentials,
       signOut,
       reload,
       accountOf,
@@ -614,7 +620,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       loading,
       account,
       signInWithTestAccount,
-      signInWithScodyId,
+      signInWithCredentials,
       signOut,
       reload,
       accountOf,

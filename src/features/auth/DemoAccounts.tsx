@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { AppText, Button, Group, Icon, LiveRegion, Row } from '@/components';
 import { useAuthReveal } from '@/features/auth/AuthShell';
-import { DEV_ACCOUNTS } from '@/session/devAccounts';
+import { DEV_ACCOUNTS, devLoginEmail } from '@/session/devAccounts';
 import { ROLE_LABEL } from '@/session/routing';
 import { colors, spacing } from '@/theme/tokens';
 
@@ -32,12 +32,10 @@ export function DemoAccounts({
   testID,
   open: openProp,
   onOpenChange,
-  onEnter,
 }: {
   testID: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  onEnter: (scodyId: string) => void;
 }) {
   const accounts = DEV_ACCOUNTS;
   const [openSelf, setOpenSelf] = useState(false);
@@ -105,17 +103,27 @@ export function DemoAccounts({
             revealBelow();
           }}
         >
+          {/*
+            **누르는 목록이 아니라 읽는 목록이다**(D-184).
+
+            예전에는 행을 누르면 바로 들어갔다. 그러려면 비밀번호가 **클라이언트에** 있어야 하고
+            (`signInWithTestAccount`가 `DEV_LOGIN_PASSWORD`를 쓴다), 그러면 데모 계정 여섯의
+            비밀번호를 번들에 실어야 한다 — D-157이 실측으로 닫은 자리다.
+
+            그래서 위 폼에 **직접 타이핑해서** 들어간다. 비밀번호는 `.env`에 있고 화면에도 번들에도
+            없다. 잃는 것은 클릭 한 번이고, 얻는 것은 자격 증명이 배포물에 실리지 않는 것이다.
+          */}
           <AppText variant="caption" tone="secondary">
-            개발용 계정이에요. 실제 사용자 데이터가 아니에요.
+            개발용 계정이에요. 실제 사용자 데이터가 아니에요. 위 칸에 이메일과 비밀번호를 넣어
+            들어가요.
           </AppText>
           <Group>
             {accounts.map((a) => (
               <Row
                 key={a.scodyId}
                 title={`${a.name} · ${a.roles.map((r) => ROLE_LABEL[r]).join('/')}`}
-                subtitle={a.note}
-                onPress={() => onEnter(a.scodyId)}
-                showChevron
+                /* 타이핑할 주소를 그대로 보여 준다. 꺼진 빌드에서는 `devLoginEmail`이 빈 문자열이다. */
+                subtitle={`${devLoginEmail(a.scodyId)} · ${a.note}`}
               />
             ))}
           </Group>

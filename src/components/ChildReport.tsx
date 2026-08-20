@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { View, Pressable, StyleSheet } from "react-native";
 import { AppText } from "./AppText";
 import { Section } from "./Section";
+import { StudyProof } from "./StudyProof";
 import { Group } from "./Group";
 import { Row } from "./Row";
 import { Button } from "./Button";
@@ -115,7 +116,12 @@ export function ChildReport({
   month?: string;
 }) {
   const router = useRouter();
-  const { requestRetryFor, retryOf } = useProgress();
+  const { requestRetryFor, retryOf, recordsOf } = useProgress();
+  /*
+    자녀의 학습 기록. **서버가 계산한 값이다**(`rpc_readable_records`) — 이 컴포넌트가 세지 않는
+    이유는 `useChildReport`의 계산이 달 단위이고 학습 시간·오답 복습을 담지 않기 때문이다.
+  */
+  const childRecords = recordsOf(child.userId);
   const { show } = useToast();
   const { readOnly } = useSession();
   /*
@@ -319,7 +325,23 @@ export function ChildReport({
         />
       ) : null}
 
-      {/* ③ 어느 달을 보는지 고른다. 왼쪽이 과거, 오른쪽이 미래다. */}
+      {/*
+        ③ 학습 증명. **요약 문장 바로 아래에 그 문장의 근거 숫자를 둔다.**
+
+        `이번 주 요약`은 AI(또는 계산된 대체 문장)가 쓴 글이고, 학부모가 그다음에 묻는 것은
+        `정말 그만큼 했나`다. 그 답을 달 선택 뒤로 미루면 이번 주 상태를 보려고 달을 골라야 한다.
+
+        **이번 달을 볼 때만 둔다** — 위 요약과 같은 이유다. 지난달 리포트에 `이번 주`를 두면
+        뜻이 어긋난다.
+
+        `recordsOf`가 없으면 그리지 않는다: 조회 전이거나, 이 계정이 그 학생의 기록을 읽을 수
+        없는 경우다(서버가 `can_read_student`로 판단한다 — 학원 교직원은 여기 오지 않는다).
+      */}
+      {r.month === monthOf(today) && childRecords ? (
+        <StudyProof records={childRecords} />
+      ) : null}
+
+      {/* ④ 어느 달을 보는지 고른다. 왼쪽이 과거, 오른쪽이 미래다. */}
       <MonthNav
         months={r.months}
         month={r.month}

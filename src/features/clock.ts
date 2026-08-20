@@ -14,6 +14,42 @@ export function todayISO(): string {
 }
 
 /**
+ * 표시용 날짜(`7월 24일`). ISO 문자열을 화면에 그대로 내보내지 않는다.
+ * 학생·학부모·학원이 같은 형식을 쓰도록 한곳에 둔다. **앞의 0을 뗀다** — `08월 01일`을 만드는
+ * 자리가 있었고(축하 문장) 같은 화면의 다른 날짜와 모양이 갈렸다.
+ */
+export function formatDate(iso: string): string {
+  const [, m, d] = iso.split('-');
+  /*
+    **잘못된 문자열에는 원문을 돌려준다.** `Number('')`은 `NaN`이라 가드가 없으면
+    `NaN월 NaN일`이 화면에 나간다. 이 가드는 `DayHeatmap`이 자기 사본(`dayLabel`)에 갖고 있던
+    것을 여기로 옮긴 것이다 — 그 사본이 있던 이유가 이 한 줄이었다.
+  */
+  if (!m || !d) return iso;
+  return `${Number(m)}월 ${Number(d)}일`;
+}
+
+/**
+ * 표시용 소요 시간(`1시간 15분` · `12분 3초` · `48초`).
+ *
+ * **한 시간을 넘기면 분 단위로 접는다** — `75분 12초`는 학부모가 다시 계산해야 읽힌다.
+ * 학부모 리포트·자세히 보기·학습 상세·학생 기록이 같은 값을 같은 형식으로 말하도록 한곳에 둔다
+ * (예전에는 세 화면이 각자 `fmtTime`을 두었고 그중 하나만 시간 분기가 없어서, 같은 75분이
+ * 상세에서 `1시간 15분`, 그 학습 상세에서 `75분 12초`였다 — D-178·A-147).
+ *
+ * **`learning.ts`가 아니라 여기 있는 이유**: 그 파일은 훅(`useStudentItems`)을 담아 react-native을
+ * 끌어오고, 그러면 `scripts/verify-*.ts`가 이 모듈을 지나 상수 하나를 가져올 수 없다(실측:
+ * `tsx`가 `react-native/index.js`를 변환하지 못한다). 이 파일은 `Date`만 쓴다.
+ * `learning.ts`는 기존 import 경로를 지키기 위해 다시 내보낸다.
+ */
+export function formatDuration(sec: number): string {
+  if (sec >= 3600) return `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}분 ${s}초` : `${s}초`;
+}
+
+/**
  * `YYYY-MM-DD`를 로컬 자정으로. 잘못된 문자열이면 `null`이다.
  *
  * **`?? 1` 같은 기본값 가드는 효과가 없다** — 숫자가 아닌 조각은 `undefined`가 아니라 `NaN`이

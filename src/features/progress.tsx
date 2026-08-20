@@ -15,6 +15,8 @@ import * as repo from '@/repo/learning';
 import * as notesRepo from '@/repo/notes';
 import type { LoggedReview, NoteEvidence, NoteReview } from '@/repo/notes';
 import * as parentRepo from '@/repo/parent';
+import * as recordsRepo from '@/repo/records';
+import type { StudentRecords } from '@/repo/records';
 import { useSession } from '@/session';
 import { useAcademyStaff } from './academy';
 import { addDaysISO, todayISO } from './clock';
@@ -47,6 +49,7 @@ export type QueueEntry = repo.QueueEntry;
 export type WriteResult = repo.WriteResult;
 export type PraiseKind = parentRepo.PraiseKind;
 export type Praise = parentRepo.Praise;
+export type { StudentRecords } from '@/repo/records';
 
 export const PRAISE_LABEL: Record<PraiseKind, string> = {
   steady: '꾸준히 했어요',
@@ -208,6 +211,16 @@ interface ProgressValue {
   hasNote: (questionId: string, itemId: string) => boolean;
   /** 학원이 볼 수 있는 오답노트: 담당 반 학생의 배정 학습 오답만. */
   academyNotesOf: (studentId: string) => AcademyNote[];
+  /**
+   * 지금 보고 있는 계정의 학습 기록(오늘·연속·누적·최고·주간·잔디). 아직 못 읽었으면 `null`이다.
+   *
+   * **서버가 계산한 값을 그대로 들고 있는다.** 화면이 `attempts`를 세어 누적을 만들지 않는 이유는
+   * 두 가지다 — ①이 provider의 `attempts`는 **최신 회차만** 남기므로 지난 회차가 빠지고
+   * ②오답 복습·학습 시간은 여기 오지 않는다. 두 값이 갈리면 홈과 기록 화면이 다른 수를 말한다.
+   */
+  records: StudentRecords | null;
+  /** 다른 학생(연결된 자녀)의 기록. 권한이 없으면 없다. */
+  recordsOf: (studentId: string) => StudentRecords | null;
   /** 그 학생의 학원 과제별 반 비교(평균·순위). 서버 집계다. */
   comparisonsOf: (studentId: string) => Record<string, repo.ClassComparison>;
   queue: QueueEntry[];
@@ -253,6 +266,40 @@ interface ProgressValue {
 }
 
 const ProgressContext = createContext<ProgressValue | null>(null);
+
+/**
+ * 자기(또는 자녀) 학습을 읽는 역할인가.
+ *
+ * **소비처가 있는 역할만 받는다.** 학원 교직원에게는 서버가 0행을 주거나 거부하고, 운영자에게는
+ * 값이 와도 읽는 화면이 없다 — 대리 보기로 학생이 되어 들어가는 경로가 그 자리다.
+ *
+ * 이 술어가 세 자리에 있었고 그중 둘은 부정형이었다(`!A && !B`). 주석이 `위 조회 묶음의
+ * wantsRecords와 같은 기준이다`로 그 관계를 문서로만 붙들고 있었는데, 역할 축이 하나 늘면
+ * 세 곳을 함께 고쳐야 하고 그 결합을 검사하는 것이 없었다.
+ */
+function readsLearning(target: Account): boolean {
+  return target.roles.includes('student') || target.roles.includes('parent');
+}
+
+/**
+ * 없어도 화면이 거짓을 말하지 않는 조회. **실패를 흡수하고 대체값을 얹는다.**
+ *
+ * `Promise.all`은 하나가 거절되면 전부 버린다. 그래서 곁가지 조회 하나가 실패하면 학생이 방금
+ * 낸 결과도, 학습 목록도, 담아 둔 학습도 못 본다 — 장식이 핵심 흐름의 단일 실패점이 된다.
+ *
+ * **`필수`와 `곁가지`를 코드에 적는다.** 예전에는 기록 조회에만 `.catch`가 붙어 있었고, 같은
+ * 성격의 다른 조회(`weekSummaries`는 모든 역할에서 무조건 도는데 학생 화면에 소비처가 없다)는
+ * 여전히 필수로 남아 있었다. 이 헬퍼를 지나면 새 조회를 더할 때 그 판단을 하게 된다.
+ *
+ * 흡수해도 거짓을 말하지 않는 것은 소비하는 화면이 **값이 없으면 그 블록을 그리지 않기** 때문이다.
+ * 없는 것과 실패한 것을 구분해야 하는 조회는 이 헬퍼를 쓰지 않는다.
+ */
+function soft<T>(promise: Promise<T>, fallback: T, what: string): Promise<T> {
+  return promise.catch((e: unknown) => {
+    console.warn(`${what}을 읽지 못했어요:`, errorMessage(e));
+    return fallback;
+  });
+}
 
 /**
  * 대리 보기에서 가리는 필드를 지운다(D-071).
@@ -308,6 +355,11 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
    * 세션 진행을 따로 저장할 자리가 없다(A-114를 이 값으로 닫는다).
    */
   const [noteReviews, setNoteReviews] = useState<Record<string, NoteReview[]>>({});
+  /**
+   * 학생 id → 기록 묶음. **서버가 대상까지 정한다**(`rpc_readable_records`) — 본인과 연결이
+   * 승인된 자녀다.
+   */
+  const [recordsByUser, setRecordsByUser] = useState<Record<string, StudentRecords>>({});
   const [retryByUser, setRetryByUser] = useState<Record<string, string[]>>({});
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -373,6 +425,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       setNotesByUser({});
       setAcademyNotes({});
       setNoteReviews({});
+      setRecordsByUser({});
       setRetryByUser({});
       setQueue([]);
       setAssignments([]);
@@ -394,16 +447,25 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     setReading(true);
     try {
       const isAcademy = target.roles.includes('academy');
-      const [attemptRows, notes, retry, q, asgn, summaries, praises, aNotes, reviews] =
+      /** 기록·복습 로그를 읽는 화면이 있는 역할인가(위 `readsLearning`). */
+      const wantsLearning = readsLearning(target);
+
+      const [attemptRows, notes, retry, q, asgn, summaries, praises, aNotes, reviews, records] =
         await Promise.all([
+        // ── 필수: 없으면 화면이 할 일을 말할 수 없다 ─────────────────────────
         repo.loadAttempts(),
         repo.loadNotes(),
         parentRepo.loadRetryRequests(),
         repo.loadQueue(),
         repo.loadAssignments(),
-        parentRepo.loadWeekSummaries(),
-        parentRepo.loadPraises(),
-        isAcademy ? repo.loadAcademyNotes() : Promise.resolve({}),
+        // ── 곁가지: 없어도 그 블록만 사라진다(`soft`) ────────────────────────
+        /*
+          주간 요약은 **모든 역할에서 무조건** 도는데 소비처는 학부모 리포트 하나다
+          (`ChildReport`). 학생 홈이 그것 때문에 통째로 비는 것은 맞지 않다.
+        */
+        soft(parentRepo.loadWeekSummaries(), {}, '주간 요약'),
+        soft(parentRepo.loadPraises(), {}, '칭찬'),
+        isAcademy ? soft(repo.loadAcademyNotes(), {}, '학원 오답노트') : Promise.resolve({}),
         /*
           **읽는 화면이 있는 역할만 받는다.** 정책은 `can_read_student(student_id) or
           is_admin()`이라 본인·연결된 학부모·운영자에게 행이 나가고 교직원에게는 0행이 나간다.
@@ -412,15 +474,22 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
           **운영자를 여기서 끊는 것이 요점이다.** RLS가 `is_admin()`으로 열려 있어 대리 보기가
           아닌 평범한 로그인에도 남의 `recap` 본문이 최대 `REVIEW_PAGE`행까지 세션에 올라오고
           (`readOnly`가 아니라 `visibleReviews`의 가리기도 지나가지 않는다) 읽는 화면은 없다.
-          그래서 `academy`를 지목하지 않고 **소비처가 있는 역할**로 조건을 적는다 — 운영자는
-          `student`·`parent` 어느 쪽도 아니라 이 갈래로 걸러진다.
 
           `recap` 노출의 최종 경계는 여전히 DB 정책이다. 이 게이트는 클라이언트가 쓰지 않는 값을
           받지 않는다는 뜻이고, 정책을 대신하지 않는다.
         */
-        !target.roles.includes('student') && !target.roles.includes('parent')
-          ? Promise.resolve({})
-          : notesRepo.loadNoteReviews(),
+        wantsLearning ? soft(notesRepo.loadNoteReviews(), {}, '복습 기록') : Promise.resolve({}),
+        /*
+          기록은 가장 무겁고(28일 잔디 + 8주 + 히스토리 루프) 가장 곁가지다. 그리는 세 화면이
+          값이 없으면 그 블록을 아예 그리지 않는다(`index.tsx` · `records.tsx` · `result/[id].tsx`).
+        */
+        wantsLearning
+          ? soft(
+              recordsRepo.loadReadableRecords(),
+              {} as Record<string, StudentRecords>,
+              '학습 기록',
+            )
+          : Promise.resolve<Record<string, StudentRecords>>({}),
       ]);
       if (!alive()) return await awaitSuccessor(id);
       setAttemptsByUser(attemptRows);
@@ -432,6 +501,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       setPraiseByChild(praises);
       setAcademyNotes(aNotes);
       setNoteReviews(reviews);
+      setRecordsByUser(records);
       /*
         반 비교는 **기록을 읽을 수 있는 학생마다** 한 번씩 받는다(본인 + 연결된 자녀).
         제출한 학원 과제가 있는 학생만 대상이다 — 없으면 빈 객체가 온다.
@@ -508,6 +578,61 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   /** 서버에서 다시 읽는다. **조회가 화면에 얹힌 뒤에 풀린다.** */
   const reload = useCallback(() => read(account), [account, read]);
 
+  /**
+   * **기록만** 다시 읽는다.
+   *
+   * ## 왜 별 경로가 필요한가
+   *
+   * `records`를 위 조회 묶음에 얹으면서 "모든 쓰기가 `reload()`를 부른다"고 가정했는데 그것이
+   * 틀렸다. 재조회를 하는 헬퍼는 `mutate`·`mutateLocal`뿐이고 **복습 경로는 일부러 그것을 쓰지
+   * 않는다** — 서버가 다음 차례를 돌려주므로 카드마다 열 번의 왕복을 기다릴 이유가 없다
+   * (`logCard`의 docblock이 그 판단을 적어 두었다).
+   *
+   * 그래서 오답 카드를 다섯 장 풀어도 홈은 `오늘 3문항을 풀면 기록이 시작돼요`로 남았다 —
+   * 서버는 그 날을 이미 학습일로 판정했는데(채점 문항 3개 이상 · 복습 카드 포함) 화면이 방금 한
+   * 일을 안 한 것으로 말했다.
+   *
+   * 그래서 전체 재조회 대신 **RPC 하나만** 다시 부르고, `mutate`의 두 번째 인자로 넘긴다
+   * (`refreshRecordsSoon`).
+   *
+   * **같은 갈래의 형제는 이것이 필요 없다** — `deferNote`(차례만 미룬다) · `setRecap`(메모 본문) ·
+   * `requeueNote`(큐 복귀)는 기록에 들어가는 값을 바꾸지 않는다. 기록을 바꾸는 쓰기는
+   * 제출(`submitAttempt` → 전체 재조회)과 복습 기록 둘뿐이다.
+   *
+   * **늦게 온 응답이 새 값을 덮지 않는다.** 자기 번호(`recordsRun`)와 계정 조회 번호(`runId`)를
+   * 함께 확인한다 — 계정이 바뀐 뒤 도착한 응답을 얹으면 남의 기록이 잠깐 보인다.
+   */
+  const recordsRun = useRef(0);
+  const refreshRecords = useCallback(async () => {
+    const target = account;
+    if (!target) return;
+    if (!readsLearning(target)) return;
+    const id = (recordsRun.current += 1);
+    const readId = runId.current;
+    try {
+      const next = await recordsRepo.loadReadableRecords();
+      if (recordsRun.current !== id || runId.current !== readId) return;
+      setRecordsByUser(next);
+    } catch (e) {
+      /*
+        실패는 삼킨다. 이 값은 화면의 곁가지이고, 다음 복습·제출이 다시 시도한다 —
+        복습을 막을 이유가 없다(같은 판단을 `useActiveTime`의 flush가 이미 한다).
+      */
+      console.warn('학습 기록을 다시 읽지 못했어요:', errorMessage(e));
+    }
+  }, [account]);
+
+  /**
+   * 기록만 다시 읽되 **기다리지 않는다.**
+   *
+   * `mutate`의 두 번째 인자로 넘기는 값이다 — 그 헬퍼는 refresh를 `await`하는데, 카드가 넘어가는
+   * 속도를 이 왕복에 매달 이유가 없다(그것이 복습 경로가 애초에 `mutate`를 피한 이유다).
+   * 즉시 풀리는 약속을 돌려주어 **무엇을 다시 읽는지는 호출부의 인자로 남기고** 기다림만 없앤다.
+   */
+  const refreshRecordsSoon = useCallback(async () => {
+    void refreshRecords();
+  }, [refreshRecords]);
+
   /** 대리 보기 중에는 아무것도 쓰지 않는다(D-071). 서버는 운영자를 운영자로 보므로 여기서 막는다. */
   const denied = readOnly;
 
@@ -579,6 +704,17 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   const comparisonsOf = useCallback(
     (studentId: string) => comparisons[studentId] ?? NO_COMPARISONS,
     [comparisons],
+  );
+  /*
+    **기록은 가리지 않는다**(D-071과 다른 판단이다). `dig`·`recap`은 학생이 자기 말로 쓴 글이라
+    대리 보기에서 지우지만, 기록은 세어진 수다 — 운영자가 대리 보기로 학생 홈을 확인할 때 그
+    화면이 무엇을 말하는지 보이지 않으면 대리 보기의 목적(그 학생이 보는 화면을 본다)이 사라진다.
+    누적 문항 수는 학원에도 열지 않는 값이 아니고, 학부모는 이미 리포트에서 본다.
+  */
+  const records = recordsByUser[uid] ?? null;
+  const recordsOf = useCallback(
+    (studentId: string) => recordsByUser[studentId] ?? null,
+    [recordsByUser],
   );
 
   /**
@@ -657,11 +793,25 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
    * `DENIED` 문장을 인라인으로 다시 적던 네 곳은 함께 사라졌다.
    */
   const mutate = useCallback(
-    <T extends WriteResult>(run: () => Promise<T>): Promise<T | WriteResult> =>
+    <T extends WriteResult>(
+      run: () => Promise<T>,
+      /**
+       * 성공한 뒤 무엇을 다시 읽을지. 기본은 전체 재조회다.
+       *
+       * **이 인자가 없어서 세 번째 경로가 생겼다.** 복습 경로(`logCard`)는 카드마다 열 번의
+       * 왕복을 기다릴 이유가 없어 이 헬퍼를 피했고, 그래서 기록이 갱신되지 않는 결함이 생겼다 —
+       * 고칠 때 `void refreshRecords()`를 그 함수 본문에 손으로 붙였는데, 그러면 같은 갈래의
+       * 형제(`deferNote`·`setRecap`·`requeueNote`)는 그 줄을 **기억해야** 한다.
+       *
+       * 무엇을 다시 읽을지를 인자로 받으면 그 기억이 호출부의 인자가 된다. 이 헬퍼의 docblock이
+       * 적어 둔 방향 그대로다 — `이 헬퍼를 쓰면 검사를 빠뜨릴 수 없지만, 쓰지 않는 길이 아직 있다`.
+       */
+      refresh: () => Promise<void> = reload,
+    ): Promise<T | WriteResult> =>
       write(async () => {
         if (denied) return DENIED;
         const result = await run();
-        if (result.ok) await reload();
+        if (result.ok) await refresh();
         return result;
       }),
     [denied, reload, write],
@@ -785,8 +935,13 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
    */
   const logCard = useCallback<ProgressValue['logCard']>(
     (input) =>
-      write(async () => {
-        if (denied) return DENIED;
+      /*
+        **무엇을 다시 읽는지 인자로 말한다.** 예전에는 `write`를 쓰고 본문 한 줄에
+        `void refreshRecords()`를 붙였는데, 그러면 같은 갈래의 형제(`deferNote`·`setRecap`·
+        `requeueNote`)와 앞으로 생길 쓰기가 그 줄을 **기억해야** 했다 — 이번 결함이 정확히 그
+        기억을 한 번 놓친 결과였다. `mutate`가 `denied` 검사도 함께 맡는다.
+      */
+      mutate(async () => {
         const result = await notesRepo.logNoteReview(input);
         if (!result.ok) return result;
         const next = result.review;
@@ -831,8 +986,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
           }));
         }
         return result;
-      }),
-    [denied, uid, write],
+      }, refreshRecordsSoon),
+    [mutate, refreshRecordsSoon, uid],
   );
 
   const deferNote = useCallback<ProgressValue['deferNote']>(
@@ -1065,6 +1220,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       requeueNote,
       hasNote,
       academyNotesOf,
+      records,
+      recordsOf,
       comparisonsOf,
       queue,
       addToQueue,
@@ -1110,6 +1267,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       requeueNote,
       hasNote,
       academyNotesOf,
+      records,
+      recordsOf,
       comparisonsOf,
       queue,
       addToQueue,

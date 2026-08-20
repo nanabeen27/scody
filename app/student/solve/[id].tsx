@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Animated, View, Pressable, StyleSheet, Platform, type ViewStyle } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -18,7 +18,7 @@ import { useCurrentAccount, useSession } from '@/session';
 import { dueLabel, useStudentItems } from '@/features/learning';
 import { useContent } from '@/features/content';
 import { useProgress } from '@/features/progress';
-import { now } from '@/features/clock';
+import { useActiveTime } from '@/features/activeTime';
 import { useResponsive } from '@/theme/useResponsive';
 import { useReplayFade } from '@/theme/useMotion';
 import { findContent, type Question } from '@/data';
@@ -68,7 +68,6 @@ export default function Solve() {
     reload: reloadProgress,
   } = useProgress();
   const { isDesktop } = useResponsive();
-  const startRef = useRef<number>(now());
   const [mode, setMode] = useState<ViewMode>('five');
   const [page, setPage] = useState(0);
   /**
@@ -92,6 +91,16 @@ export default function Solve() {
 
   const item = all.find((i) => i.id === id);
   const content = item ? findContent(sets, item.contentId) : undefined;
+
+  /*
+    **걸린 시간은 벽시계가 아니라 활동 시간이다.** 예전에는 마운트 시각을 한 번 잡고 제출에서
+    뺐다 — 탭을 열어 둔 채 세 시간 뒤에 제출하면 `10800초`가 기록됐고, 학부모 화면이 그 값을
+    `실제 학습 시간`이라고 불렀다(`src/features/activeTime.ts`의 근거).
+
+    학습을 못 읽은 상태에서는 재지 않는다. 읽는 중·실패 화면에서 시간이 자라면 조회가 느린
+    학생의 기록이 늘어난다.
+  */
+  const active = useActiveTime('solve', item?.contentId, !!item && !!content);
 
   /*
     **읽는 중 · 실패 · 없는 학습을 셋으로 가른다**(A-116). 이 화면이 특히 중요하다 —
@@ -187,6 +196,7 @@ export default function Solve() {
 
   /** 보기 모드를 바꿔도 지금 보던 문항이 화면에 남게 페이지를 다시 계산한다. */
   function changeMode(next: ViewMode) {
+    active.ping();
     const firstIndex = current * pageSize;
     const nextSize = next === 'one' ? 1 : PAGE_SIZE;
     setMode(next);
@@ -195,7 +205,8 @@ export default function Solve() {
 
   async function onSubmit() {
     if (submitting) return;
-    const timeSec = Math.max(1, Math.round((now() - startRef.current) / 1000));
+    // 1초 미만도 1초로 둔다 — 0이면 `걸린 시간`이 비어 어떤 값도 말하지 못한다.
+    const timeSec = Math.max(1, active.seconds());
     setSubmitting(true);
     /*
       **채점은 서버가 한다**(`rpc_submit_attempt`). 예전에는 `session.submit()`이 세션 안에서
@@ -203,13 +214,27 @@ export default function Solve() {
       학습은 `markAssignmentSubmitted`로 한 번 더 알려야 했다. 지금은 한 번의 호출이 시도·문항별
       정오·배정 제출 표시를 한 트랜잭션으로 남긴다.
     */
-    const result = await submitAttempt({
-      source: item!.source,
-      contentId: item!.contentId,
-      assignmentId: item!.source === 'academy' ? item!.id : undefined,
-      timeSec,
-      picked: answers[item!.id] ?? {},
-    });
+    /*
+      **남은 활동 시간과 제출을 함께 보낸다.**
+
+      예전에는 `await active.flush()`를 먼저 하고 제출했는데, `flush`가 바꾸는 것은 `flushedSec`
+      하나이고 제출에 넣는 `timeSec`은 `activeMs`에서 온다 — **기다림이 값에 기여하는 바가 0**이면서
+      학생이 `제출할게요`를 누른 뒤의 지연에 왕복 하나를 직렬로 더했다.
+
+      `void`로 흘려보내지 않는 이유: 화면을 떠나면서 정리 함수의 flush와 경쟁하는데
+      `useActiveTime`의 전송 중 가드에 걸려 마지막 60초 미만이 유실될 수 있다. 함께 기다리면
+      그 경쟁이 없고 지연은 둘 중 느린 하나다.
+    */
+    const [, result] = await Promise.all([
+      active.flush(),
+      submitAttempt({
+        source: item!.source,
+        contentId: item!.contentId,
+        assignmentId: item!.source === 'academy' ? item!.id : undefined,
+        timeSec,
+        picked: answers[item!.id] ?? {},
+      }),
+    ]);
     setSubmitting(false);
     if (!result.ok) {
       // 내지 못했는데 결과 화면으로 보내면 제출된 것처럼 보인다.
@@ -247,6 +272,8 @@ export default function Solve() {
             question={q}
             pickedIndex={picked[q.id]}
             onPick={(ci) => {
+              /* 답을 고르는 것이 이 화면에서 가장 확실한 활동 신호다. */
+              active.ping();
               saveAnswer({
                 itemId: item.id,
                 source: item.source,
@@ -272,7 +299,10 @@ export default function Solve() {
               label="이전"
               leading={<Icon name="chevron-left" size={16} color={colors.ink} />}
               accessibilityLabel="이전"
-              onPress={() => setPage(current - 1)}
+              onPress={() => {
+                active.ping();
+                setPage(current - 1);
+              }}
             />
           ) : null}
         </View>
@@ -292,7 +322,10 @@ export default function Solve() {
               label="다음"
               trailing={<Icon name="chevron-right" size={16} color={colors.ink} />}
               accessibilityLabel="다음"
-              onPress={() => setPage(current + 1)}
+              onPress={() => {
+                active.ping();
+                setPage(current + 1);
+              }}
             />
           )}
         </View>

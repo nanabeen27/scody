@@ -1226,6 +1226,44 @@ export type Database = {
           },
         ]
       }
+      study_activity: {
+        Row: {
+          active_sec: number
+          id: number
+          kind: Database["public"]["Enums"]["study_activity_kind"]
+          occurred_at: string
+          occurred_on: string
+          ref_id: string | null
+          student_id: string
+        }
+        Insert: {
+          active_sec: number
+          id?: number
+          kind: Database["public"]["Enums"]["study_activity_kind"]
+          occurred_at?: string
+          occurred_on?: string
+          ref_id?: string | null
+          student_id: string
+        }
+        Update: {
+          active_sec?: number
+          id?: number
+          kind?: Database["public"]["Enums"]["study_activity_kind"]
+          occurred_at?: string
+          occurred_on?: string
+          ref_id?: string | null
+          student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "study_activity_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       study_queue: {
         Row: {
           content_set_id: string
@@ -1338,6 +1376,7 @@ export type Database = {
           dig: string | null
           dismissed_at: string | null
           due_on: string | null
+          graduated_on: string | null
           id: string
           mastered: boolean
           miss_streak: number
@@ -1357,6 +1396,7 @@ export type Database = {
           dig?: string | null
           dismissed_at?: string | null
           due_on?: string | null
+          graduated_on?: string | null
           id?: string
           mastered?: boolean
           miss_streak?: number
@@ -1376,6 +1416,7 @@ export type Database = {
           dig?: string | null
           dismissed_at?: string | null
           due_on?: string | null
+          graduated_on?: string | null
           id?: string
           mastered?: boolean
           miss_streak?: number
@@ -1573,6 +1614,23 @@ export type Database = {
         }
         Relationships: []
       }
+      v_daily_learning_stats: {
+        Row: {
+          active_sec: number | null
+          correct_questions: number | null
+          counts_as_study_day: boolean | null
+          day: string | null
+          graded_questions: number | null
+          notes_added: number | null
+          notes_mastered: number | null
+          reviews_correct: number | null
+          reviews_done: number | null
+          sets_completed: number | null
+          solved_questions: number | null
+          student_id: string | null
+        }
+        Relationships: []
+      }
       v_latest_attempts: {
         Row: {
           accuracy: number | null
@@ -1655,6 +1713,10 @@ export type Database = {
       can_see_assignment: { Args: { target: string }; Returns: boolean }
       can_see_student: { Args: { target: string }; Returns: boolean }
       class_academy_id: { Args: { target: string }; Returns: string }
+      compact_study_activity: {
+        Args: { p_keep_days?: number }
+        Returns: number
+      }
       current_pricing: {
         Args: never
         Returns: {
@@ -1745,6 +1807,15 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_log_study_time: {
+        Args: {
+          p_active_sec: number
+          p_kind: Database["public"]["Enums"]["study_activity_kind"]
+          p_ref_id?: string
+        }
+        Returns: number
+      }
+      rpc_readable_records: { Args: never; Returns: Json }
       rpc_reassign: {
         Args: { p_assignment_id: string; p_due_date: string }
         Returns: undefined
@@ -1767,6 +1838,7 @@ export type Database = {
         Args: { p_scody_id: string }
         Returns: boolean
       }
+      rpc_student_records: { Args: { p_student_id: string }; Returns: Json }
       rpc_submit_attempt: {
         Args: {
           p_answers: Json
@@ -1803,6 +1875,7 @@ export type Database = {
       payer_kind: "student" | "parent" | "academy"
       payment_status: "pending" | "paid" | "failed" | "refunded"
       praise_kind: "steady" | "submitted" | "reviewed" | "thanks"
+      study_activity_kind: "solve" | "review"
       subject_kind: "국어"
     }
     CompositeTypes: {
@@ -1957,6 +2030,7 @@ export const Constants = {
       payer_kind: ["student", "parent", "academy"],
       payment_status: ["pending", "paid", "failed", "refunded"],
       praise_kind: ["steady", "submitted", "reviewed", "thanks"],
+      study_activity_kind: ["solve", "review"],
       subject_kind: ["국어"],
     },
   },

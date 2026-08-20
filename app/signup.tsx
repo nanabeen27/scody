@@ -1,20 +1,19 @@
 import { useState } from 'react';
 import { View, StyleSheet, Pressable, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { AppText, Button, Field, Group, Icon, KakaoSymbol, PhoneMark } from '@/components';
+import { AppText, Button, Field, Group, Icon, KakaoSymbol, MailMark } from '@/components';
 import {
   AuthError,
   AuthHeading,
   AuthSection,
   AuthShell,
-  AuthSteps,
   LabeledDivider,
   TextLink,
 } from '@/features/auth/AuthShell';
 import { DEV_LOGIN_ENABLED } from '@/session/devAccounts';
 import { ROLE_LABEL } from '@/session/routing';
 import type { Role } from '@/data';
-import { isScodyIdTaken, isPhoneTaken } from '@/repo/directory';
+import { looksLikeEmail } from '@/session/email';
 import { colors, spacing, radius } from '@/theme/tokens';
 
 const ROLE_OPTIONS: { role: Role; desc: string }[] = [
@@ -36,19 +35,29 @@ function rolesFromParam(param?: string): Role[] {
   return [known?.role ?? 'student'];
 }
 
-/** 로그인으로 이어지는 오류. 문구가 가리키는 행동을 그 자리에서 할 수 있게 아래에 링크를 붙인다. */
-const PHONE_TAKEN = '이미 가입된 번호예요. 로그인으로 들어올 수 있어요.';
+/** 이메일 형태가 아닐 때. 로그인 화면과 같은 문장을 쓴다 — 같은 판정이 두 말을 갖지 않게. */
+const EMAIL_INVALID = '이메일 주소를 다시 확인해 주세요.';
 
-/**
- * 중복 검사를 하지 못했을 때.
- *
- * 검사는 서버가 답한다(`rpc_signup_phone_taken`·`rpc_signup_scody_id_taken`). 조회가 실패하면
- * **쓸 수 있다고 말하지 않는다** — 예전 픽스처 검사가 하던 거짓말이 그 방향이었다.
- */
-const CHECK_FAILED = '지금은 확인할 수 없어요. 잠시 뒤 다시 시도해 주세요.';
+/*
+  **이메일 중복을 서버에 묻지 않는다.**
 
-/** 프로토타입의 휴대폰 인증번호. 실제 발송은 SMS provider 계약과 함께 온다(A-020). */
-const DEMO_PHONE_CODE = '000000';
+  예전에는 번호를(`rpc_signup_phone_taken`) 그리고 아이디를(`rpc_signup_scody_id_taken`) 익명으로
+  물었다. 이메일에 같은 함수를 하나 더 만들지 않는 이유 넷.
+
+  ① `profiles`에 email 컬럼이 없다 — 이메일은 `auth.users`에만 있어서, 묻자면 `security definer`
+     함수의 권한 범위를 `public` 밖으로 내보내야 한다.
+  ② **이메일은 번호보다 열거하기 쉽다.** 번호 열거는 형식 공간을 훑는 일이고 이메일 열거는 남이
+     만든 유출 목록을 그대로 넣는 일이다. A-100이 그 오라클에 상한이 없다는 것을 이미 실측해
+     미해결로 올려 두었는데(익명 키 40회가 1,932ms에 전부 200), 거기에 **더 나쁜 키로** 하나를
+     더 얹는 방향이다.
+  ③ Supabase 자신이 `signUp` 응답을 흐리게 만들어 이 누출을 막는다 — 그 플랫폼 보호를 우리가
+     우회하는 함수가 된다.
+  ④ **지금 그 검사의 쓸모가 0이다.** 계정은 어차피 만들어지지 않는다(M-DB-2). 값 없는 기능에
+     오라클을 붙이는 것은 D-141의 반대 방향이다.
+
+  중복 판정은 계정 생성이 붙는 날 **서버의 `signUp` 응답**이 답한다(A-152) — 익명 사전 조회가
+  아니라 의사를 밝힌 뒤의 판정이라 오라클이 아니다.
+*/
 
 /**
  * 계정 만들기가 아직 서버에 연결되지 않았다는 안내.
@@ -66,8 +75,24 @@ const SIGNUP_PENDING = DEV_LOGIN_ENABLED
   : '계정 만들기는 아직 연결되지 않았어요.';
 
 /**
- * 신규 가입. 방법(카카오·휴대폰)을 먼저 고르고, 그다음 역할과 계정 정보를 채운다.
- * 휴대폰으로 가입하면 번호 확인을 거친다. 카카오는 연결만 하고 번호 단계를 건너뛴다.
+ * 신규 가입. 방법(이메일·카카오)을 먼저 고르고, 그다음 역할과 계정 정보를 채운다.
+ *
+ * ## 두 단계다 (D-184)
+ *
+ * 예전에는 휴대폰 경로가 3단계였다(방법 → 번호 확인 → 상세). 그 중간 단계가 사라진 이유 둘.
+ *
+ * **① 이메일만 담은 중간 화면은 서버에 물을 것도, 갈라 보낼 곳도 없다.** 번호 단계는
+ * `rpc_signup_phone_taken`을 물어서 존재 이유가 있었는데(위 상수 블록이 왜 그것을 이메일로
+ * 옮기지 않는지 적어 두었다), 그것이 없으면 필드 하나를 담은 빈 단계가 된다 — 로그인 화면이
+ * 2단계를 버린 것과 같은 논리다(`app/login.tsx`).
+ *
+ * **② 인증번호 칸은 그 존재 자체가 D-141 위반이었다.** 메일 발송 provider가 없고(M-DB-2에
+ * SMS만 적혀 있고 메일은 아예 없다) 옛 번호 칸도 실제로는 보내지 않아서, `hint`가 "발송은 아직
+ * 연결되지 않았어요"라고 **고백하는 칸**이었다. 할 수 없는 일에는 칸을 두지 않고 이유를 한 줄로
+ * 말한다 — 그 한 줄은 이미 첫 화면에 있다.
+ *
+ * 그래서 `AuthSteps` 호출부가 0이 됐다. 부품은 `AuthShell`에 남긴다 — §15가 규칙으로 적어 둔
+ * 어휘이고, 계정 복구(A-021)가 단계형으로 오면 그 자리에서 쓴다.
  *
  * 마지막 단계는 묻는 것을 두 묶음으로 나눈다: 어떻게 쓸지(역할) → 계정 정보.
  * 역할을 먼저 물어야 학원일 때 학원 이름을 이어서 물을 수 있다.
@@ -83,34 +108,25 @@ const SIGNUP_PENDING = DEV_LOGIN_ENABLED
 export default function Signup() {
   const router = useRouter();
   const { role } = useLocalSearchParams<{ role?: string }>();
-  const [step, setStep] = useState<'method' | 'phone' | 'detail'>('method');
-  const [method, setMethod] = useState<'kakao' | 'phone'>('phone');
-  const [phone, setPhone] = useState('');
-  const [code, setCode] = useState('');
-  const [codeSent, setCodeSent] = useState(false);
+  const [step, setStep] = useState<'method' | 'detail'>('method');
+  const [method, setMethod] = useState<'kakao' | 'email'>('email');
   const [name, setName] = useState('');
-  const [id, setId] = useState('');
+  const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [roles, setRoles] = useState<Role[]>(() =>
     rolesFromParam(typeof role === 'string' ? role : undefined),
   );
   const [academyName, setAcademyName] = useState('');
   const [error, setError] = useState<string | null>(null);
-  // 중복 검사를 서버에 묻는 동안. 같은 버튼을 두 번 누르면 두 번 묻는다.
-  const [checking, setChecking] = useState(false);
-
-  // 카카오는 번호 단계를 건너뛰므로 전체 단계 수가 다르다. 모르는 단계 수를 지어내지 않는다.
-  const totalSteps = method === 'kakao' ? 2 : 3;
-  const currentStep = step === 'phone' ? 2 : totalSteps;
 
   function toggle(role: Role) {
     setRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]));
   }
 
-  function startWith(next: 'kakao' | 'phone') {
+  function startWith(next: 'kakao' | 'email') {
     setMethod(next);
     setError(null);
-    setStep(next === 'kakao' ? 'detail' : 'phone');
+    setStep('detail');
   }
 
   function toLogin() {
@@ -126,13 +142,7 @@ export default function Signup() {
   function stepBack() {
     setError(null);
     if (step === 'detail') {
-      setStep(method === 'phone' ? 'phone' : 'method');
-      return;
-    }
-    if (step === 'phone') {
       setStep('method');
-      setCodeSent(false);
-      setCode('');
       return;
     }
     // 방법 선택 중이면 들어온 화면으로.
@@ -140,85 +150,34 @@ export default function Signup() {
     else if (Platform.OS === 'web') router.replace('/introduce' as never);
   }
 
-  const backLabel =
-    step === 'method'
-      ? '스코디 소개로 가기'
-      : step === 'detail' && method === 'phone'
-        ? '번호 확인으로 돌아가기'
-        : '다른 방법으로 가입하기';
+  /* 단계가 둘이라 이탈 경로도 둘이다. 예전의 `번호 확인으로 돌아가기`는 그 단계와 함께 사라졌다. */
+  const backLabel = step === 'method' ? '스코디 소개로 가기' : '다른 방법으로 가입하기';
 
-  async function onCheckPhone() {
-    if (checking) return;
-    if (!phone.trim()) {
-      setError('휴대폰 번호를 입력해 주세요.');
-      return;
-    }
-    setChecking(true);
-    const taken = await isPhoneTaken(phone);
-    setChecking(false);
-    // 서버가 답하지 못하면 넘기지 않는다. 통과시키면 "쓸 수 있는 번호"라고 말한 셈이 된다.
-    if (taken == null) {
-      setError(CHECK_FAILED);
-      return;
-    }
-    if (taken) {
-      setError(PHONE_TAKEN);
-      return;
-    }
-    setError(null);
-    setCodeSent(true);
-  }
-
-  /**
-   * 번호를 고치면 확인 결과를 버린다.
-   *
-   * 중복 검사는 **그때 입력돼 있던 번호**에 대한 답이다. 결과를 남겨 두면 안 쓰는 번호로 확인을
-   * 받은 뒤 이미 가입된 번호로 바꿔 넣고 `000000`으로 다음 단계까지 갈 수 있었다.
-   */
-  function onChangePhone(next: string) {
-    setPhone(next);
-    if (!codeSent) return;
-    setCodeSent(false);
-    setCode('');
-    setError(null);
-  }
-
-  function onVerify() {
-    if (code.trim() !== DEMO_PHONE_CODE) {
-      setError('인증번호가 맞지 않아요.');
-      return;
-    }
-    setError(null);
-    setStep('detail');
-  }
-
-  async function onSubmit() {
-    if (checking) return;
-    if (!name.trim() || !id.trim() || !pw.trim()) {
-      setError('이름, 아이디, 비밀번호를 모두 입력해 주세요.');
+  function onSubmit() {
+    /*
+      **카카오 경로는 자격 증명을 묻지 않는다.** 카카오가 곧 자격 증명이다. 예전에는 카카오로
+      와도 아이디·비밀번호를 물어서 앞뒤가 맞지 않았다 — `카카오 연결은 건너뛴다`고 말한 화면이
+      바로 아래에서 비밀번호를 정하라고 했다.
+    */
+    if (method === 'email') {
+      if (!looksLikeEmail(email)) {
+        setError(EMAIL_INVALID);
+        return;
+      }
+      if (!name.trim() || !pw.trim()) {
+        setError('이름과 비밀번호를 모두 입력해 주세요.');
+        return;
+      }
+    } else if (!name.trim()) {
+      setError('이름을 입력해 주세요.');
       return;
     }
     if (roles.length === 0) {
       setError('역할을 하나 이상 선택해 주세요.');
       return;
     }
-    /*
-      학원 이름은 서버에 묻기 전에 본다 — 입력만 보고 알 수 있는 것을 조회 뒤로 미루면
-      사람이 기다린 다음에 "이름을 입력해 주세요"를 듣는다.
-    */
     if (roles.includes('academy') && !academyName.trim()) {
       setError('학원 이름을 입력해 주세요.');
-      return;
-    }
-    setChecking(true);
-    const taken = await isScodyIdTaken(id);
-    setChecking(false);
-    if (taken == null) {
-      setError(CHECK_FAILED);
-      return;
-    }
-    if (taken) {
-      setError('이미 사용 중인 아이디예요. 다른 아이디로 시작해 주세요.');
       return;
     }
     /*
@@ -231,6 +190,10 @@ export default function Signup() {
       **만들어진 척하지 않는다.** 예전에는 여기서 이용권 없는 계정으로 홈에 들어가 두 번째 화면에서
       흐름이 끊겼다(A-096). 이제 이 사실은 첫 화면에서 이미 말했고, 여기서는 되풀이만 한다 —
       마지막까지 온 사람이 결과를 못 듣고 끝나지 않게.
+
+      **서버 왕복이 없어졌다.** 아이디 중복을 묻던 자리인데 아이디를 더 이상 받지 않는다(D-184 —
+      스코디 아이디는 표시·검색용으로만 남고 계정을 만들 때 서버가 만든다, A-153). 그래서
+      `checking` 상태와 `확인하고 있어요` 라벨도 함께 사라졌다.
     */
     setError(SIGNUP_PENDING);
   }
@@ -242,9 +205,11 @@ export default function Signup() {
     `SIGNUP_PENDING`도 로그인 화면을 가리키는데 링크가 없었다 — "로그인 화면으로 가라"고 말하고
     갈 길은 앞 단계에만 뒀다. 다만 그 뒷문장은 개발용 로그인이 켜진 빌드에만 있으므로(위 상수)
     링크도 그때만 둔다. 가리킬 곳이 없는 링크는 그 자체로 또 하나의 거짓이다.
+
+    `이미 가입된 번호예요`도 이 목록에 있었다. 번호 중복 검사가 사라져(D-184) 그 문장과 함께
+    빠졌다 — 이메일 중복은 이 화면이 묻지 않는다(위 상수 블록).
   */
-  const errorPointsToLogin =
-    error === PHONE_TAKEN || (error === SIGNUP_PENDING && DEV_LOGIN_ENABLED);
+  const errorPointsToLogin = error === SIGNUP_PENDING && DEV_LOGIN_ENABLED;
   const errorBlock = error ? (
     <View style={styles.errorBox}>
       <AuthError>{error}</AuthError>
@@ -269,7 +234,8 @@ export default function Signup() {
             <AppText variant="body" tone="secondary">
               가입 절차는 끝까지 볼 수 있지만, 마지막에 계정이 만들어지지 않아요.
             </AppText>
-            <AppText variant="caption" tone="tertiary">
+            {/* 읽어야 하는 문장이라 `tertiary`를 쓰지 않는다 — 대비 2.96:1로 AA 미달이다(D-166). */}
+            <AppText variant="caption" tone="secondary">
               {DEV_LOGIN_ENABLED
                 ? '이미 계정이 있거나 지금 둘러보려면 로그인 화면의 테스트 계정을 쓸 수 있어요.'
                 : '이미 계정이 있으면 로그인할 수 있어요.'}
@@ -278,7 +244,7 @@ export default function Signup() {
           </View>
           <View style={styles.actions}>
             <Button
-              testID="signup-phone"
+              testID="signup-email"
               /*
                 이 앱의 실제 가입 경로라 맨 위에 둔다(카카오는 연결 없이 다음 단계로 넘어간다).
                 크림 배경 위의 `secondary`는 면 색이 거의 같아 상자로만 보였다 — 주 행동이므로
@@ -286,14 +252,19 @@ export default function Signup() {
               */
               size="lg"
               fullWidth
-              label="휴대폰 번호로 가입하기"
-              accessibilityLabel="휴대폰 번호로 가입하기"
-              /* 로그인 화면과 같은 마크를 쓴다 — 같은 수단이 화면마다 다른 그림이면 다른 것으로 읽힌다. */
-              leading={<PhoneMark size={18} color={colors.accentText} />}
-              onPress={() => startWith('phone')}
+              label="이메일로 가입하기"
+              accessibilityLabel="이메일로 가입하기"
+              /* 카카오 심볼과 무게를 맞춘 채운 봉투다(§15). 선 아이콘을 쓰지 않는다. */
+              leading={<MailMark size={18} color={colors.accentText} />}
+              onPress={() => startWith('email')}
             />
+            {/*
+              **알림을 약속하지 않는다.** 옛 문장은 `번호는 로그인·알림에만 쓰고`였는데, 메일
+              발송 provider가 없어서(M-DB-2) 알림을 말하면 거짓이 된다. 뒷절은 확정 정책 2절의
+              `계정 식별자`다 — 기록은 이메일이 아니라 영구 `user_id`에 붙는다.
+            */}
             <AppText variant="caption" tone="secondary">
-              번호는 로그인·알림에만 쓰고, 학습 기록은 계정에 남아요.
+              이메일로 로그인해요. 이메일을 바꿔도 학습 기록은 계정에 남아요.
             </AppText>
             <LabeledDivider label="또는" />
             <Button
@@ -319,73 +290,16 @@ export default function Signup() {
         </>
       ) : null}
 
-      {step === 'phone' ? (
-        <>
-          <AuthSteps step={currentStep} total={totalSteps} />
-          <AuthHeading title="휴대폰 번호를 알려주세요" sub="번호는 로그인과 알림에만 써요." />
-          <View style={styles.actions}>
-            <Field
-              label="휴대폰 번호"
-              testID="signup-phone-number"
-              keyboardType="phone-pad"
-              autoComplete="tel"
-              value={phone}
-              onChangeText={onChangePhone}
-              placeholder="010-0000-0000"
-              onSubmitEditing={onCheckPhone}
-            />
-            {codeSent ? (
-              <Field
-                label="인증번호"
-                testID="signup-phone-code"
-                keyboardType="number-pad"
-                value={code}
-                onChangeText={setCode}
-                placeholder="6자리"
-                /*
-                  **보내지 않은 번호를 보냈다고 말하지 않는다.** 예전 문구는
-                  `{번호}으로 6자리 번호를 보냈어요.`로 시작했는데 발송은 연결돼 있지 않다
-                  (로그인 화면은 같은 자리에서 `보낼 수 없다`고 말한다 — 한 수단이 두 화면에서
-                  다르게 말하고 있었다). 프로토타입 통과 코드는 그 자리에서 정직하게 알린다.
-                */
-                hint={`인증번호 발송은 아직 연결되지 않았어요. 프로토타입에서는 ${DEMO_PHONE_CODE}을 넣으면 다음 단계로 가요.`}
-                onSubmitEditing={onVerify}
-              />
-            ) : null}
-            {errorBlock}
-            {codeSent ? (
-              <Button
-                testID="signup-phone-next"
-                size="lg"
-                fullWidth
-                label="다음"
-                onPress={onVerify}
-              />
-            ) : (
-              <Button
-                testID="signup-phone-send"
-                size="lg"
-                fullWidth
-                /* 이 버튼이 실제로 하는 일은 발송이 아니라 이미 가입된 번호인지 확인하는 것이다. */
-                label={checking ? '확인하고 있어요' : '번호 확인하기'}
-                onPress={onCheckPhone}
-              />
-            )}
-          </View>
-          <TextLink testID="signup-back" label={backLabel} onPress={stepBack} />
-        </>
-      ) : null}
-
       {step === 'detail' ? (
         <>
-          <AuthSteps step={currentStep} total={totalSteps} />
           <AuthHeading
             title="어떻게 사용할까요?"
             sub={
               method === 'kakao'
                 ? /* 연결하지 않은 것을 `연결했어요`라고 말하던 자리다. 방법 선택 화면의 캡션과 같은 사실을 말한다. */
                   '카카오 연결은 프로토타입에서 건너뛰어요.'
-                : '번호가 이미 가입돼 있지 않은지 확인했어요.'
+                : /* 옛 문장은 `번호가 이미 가입돼 있지 않은지 확인했어요.`였다 — 그 검사가 없어져 거짓이 됐다. */
+                  '역할을 고르고 계정 정보를 적으면 끝이에요.'
             }
           />
 
@@ -422,10 +336,27 @@ export default function Signup() {
             </Group>
           </AuthSection>
 
-          <AuthSection title="계정 정보" hint="이름은 학원·학부모에게 보이는 이름이에요.">
+          <AuthSection
+            title="계정 정보"
+            /*
+              **placeholder로 라벨을 되풀이하지 않는다**(§15 — 같은 말을 두 번 쓰지 않는다).
+              `이름`·`비밀번호` 칸이 라벨과 똑같은 placeholder를 갖고 있었는데, 이메일 칸을
+              placeholder 없이 두면서 한 묶음 안에서 기준이 갈렸다.
+            */
+            hint={
+              method === 'email'
+                ? '이름은 학원·학부모에게 보이는 이름이에요. 이메일과 비밀번호로 로그인해요.'
+                : '이름은 학원·학부모에게 보이는 이름이에요.'
+            }
+          >
             {/*
               `autoComplete`를 준다 — 비밀번호 관리자와 브라우저 자동 채우기가 이것으로
-              무슨 칸인지 안다. 없으면 학생이 휴대폰에서 아이디·비밀번호를 손으로 다 적는다.
+              무슨 칸인지 안다. 없으면 학생이 휴대폰에서 이메일·비밀번호를 손으로 다 적는다.
+            */}
+            {/*
+              **이름이 먼저다.** 두 경로가 함께 묻는 것이 이름 하나라서, 그것을 맨 위에 두면
+              카카오로 와도 이 묶음의 첫 칸이 같은 자리에 있다. 그리고 이메일·비밀번호가 **붙어**
+              있어야 비밀번호 관리자가 한 쌍으로 본다(로그인 화면도 두 칸이 나란하다).
             */}
             <Field
               label="이름"
@@ -433,26 +364,35 @@ export default function Signup() {
               autoComplete="name"
               value={name}
               onChangeText={setName}
-              placeholder="이름"
             />
-            <Field
-              label="스코디 아이디"
-              testID="signup-id"
-              autoCapitalize="none"
-              autoComplete="username"
-              value={id}
-              onChangeText={setId}
-              placeholder="영문 아이디"
-            />
-            <Field
-              label="비밀번호"
-              testID="signup-pw"
-              secureTextEntry
-              autoComplete="new-password"
-              value={pw}
-              onChangeText={setPw}
-              placeholder="비밀번호"
-            />
+            {method === 'email' ? (
+              <Field
+                label="이메일"
+                testID="signup-email-address"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="email"
+                value={email}
+                onChangeText={setEmail}
+              />
+            ) : null}
+            {/*
+              **스코디 아이디를 묻지 않는다**(D-184). 이메일로 로그인하면 그 값은 사용자에게 아무
+              힘이 없다 — 운영자 화면이 이미 `카카오로 가입한 학생은 자기 scodyId를 모른다`고 적어
+              두었다(`app/admin/users.tsx`). 표시·검색용으로 컬럼에 남고 계정을 만들 때 서버가
+              만든다(A-153). 로그인에 쓰지 않는 값을 가입 폼에서 고민하게 만들 이유가 없다.
+            */}
+            {method === 'email' ? (
+              <Field
+                label="비밀번호"
+                testID="signup-pw"
+                secureTextEntry
+                autoComplete="new-password"
+                value={pw}
+                onChangeText={setPw}
+              />
+            ) : null}
             {roles.includes('academy') ? (
               <Field
                 label="학원 이름"
@@ -472,14 +412,15 @@ export default function Signup() {
               지금 일어나는 일은 입력 검사와 아이디 중복 확인까지다. 무엇이 일어나는지 누르기
               전에 밝히고, 계정 만들기가 연결되면 라벨이 다시 `스코디 시작하기`로 돌아온다.
             */}
-            <AppText variant="caption" tone="tertiary">
+            {/* 읽어야 하는 고지라 `secondary`다(D-166 — `tertiary`는 대비 2.96:1로 AA 미달). */}
+            <AppText variant="caption" tone="secondary">
               지금은 입력한 내용만 확인해요. 계정은 아직 만들어지지 않아요.
             </AppText>
             <Button
               testID="signup-submit"
               size="lg"
               fullWidth
-              label={checking ? '확인하고 있어요' : '입력한 내용 확인하기'}
+              label="입력한 내용 확인하기"
               onPress={onSubmit}
             />
             <View style={styles.consent}>

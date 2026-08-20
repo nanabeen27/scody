@@ -19,16 +19,31 @@ import {
 import { useCurrentAccount, useSession } from '@/session';
 import { useStudentItems, useQueuedItems, byDue, dueLabel } from '@/features/learning';
 import { useContent } from '@/features/content';
+import { formatCount, streakLine, todayLine } from '@/features/records';
+import type { StudentRecords } from '@/repo/records';
 import { useProgress, PRAISE_LABEL } from '@/features/progress';
 import { todayCount } from '@/features/review';
 import { todayISO } from '@/features/clock';
 import { useToast } from '@/features/toast';
 import { useResponsive } from '@/theme/useResponsive';
 import { tap } from '@/theme/styles';
-import { colors, spacing, radius, typeface, font } from '@/theme/tokens';
+import { colors, spacing, radius, typeface, font, touch } from '@/theme/tokens';
 
 /** 홈 목록은 다섯 줄까지만. 그 아래는 전체 목록으로 넘긴다. */
 const PREVIEW = 5;
+
+/**
+ * 홈의 연속 학습 한 줄. **이 화면에는 값의 자리가 없어서 문장이 수를 함께 말한다.**
+ *
+ * `streakLine`은 조건만 말한다 — 수는 `Row`의 `trailing`이 맡는다(기록 화면·결과 화면). 홈은
+ * 조용한 한 줄이라 그 자리가 없으므로 앞에 `N일 연속 ·`을 붙인다. 그래도 화면에 수는 한 번이고,
+ * 연속이 0인 계정에는 붙이지 않는다(`0일 연속`은 뜻이 없는 수치다 — §13).
+ */
+function streakSummary(records: StudentRecords): string {
+  const { current } = records.streak;
+  if (current === 0) return streakLine(records);
+  return `${formatCount(current)}일 연속 · ${streakLine(records)}`;
+}
 
 /**
  * 학생 홈. 3초 안에 "오늘 뭘 해야 하는지" 이해되도록 **세 덩어리**로 흐른다.
@@ -68,6 +83,7 @@ export default function StudentHome() {
     dismissPraise,
     wrongNotes,
     attempts,
+    records,
     loading: progressLoading,
     loaded: progressLoaded,
     error: progressError,
@@ -371,6 +387,64 @@ export default function StudentHome() {
       <AppText variant="caption" tone="secondary">
         {account.name} 님, 오늘도 반가워요
       </AppText>
+
+      {/*
+        ## 오늘의 기록과 연속 학습
+
+        **인사 바로 아래, 확인할 것보다 위에 둔다.** 이 줄은 `무엇이 달라졌는지`(칭찬·새 과제·
+        오늘 볼 오답)가 아니라 **지금 내 상태**라, 그 셋과 섞이면 학생이 눌러야 할 것을 고르지
+        못한다. 그래서 자리는 위이고 **색은 강조색이 아니다** — 아래 세 줄이 강조색을 쓰고,
+        이 줄이 같은 색이면 넷 다 알림처럼 보인다.
+
+        **카드로 만들지 않는다.** 히어로(오늘의 학습)가 이 화면의 하나뿐인 주요 행동이고,
+        위에 면을 하나 더 두면 무엇을 먼저 볼지 갈린다(D-167). 큰 숫자와 축하는 결과 화면과
+        기록 화면이 맡는다.
+
+        **`ready`를 기다린다.** 조회 전에 `기록이 시작돼요`를 그리면, 17일 이어 온 학생에게
+        한 프레임 동안 거짓을 말한다(이 파일이 `loadedFor`로 이미 한 번 고친 창이다).
+      */}
+      {ready && records ? (
+        <Pressable
+          testID="home-record"
+          accessibilityRole="link"
+          accessibilityLabel={`${streakSummary(records)}${
+            todayLine(records) ? `. 오늘 ${todayLine(records)}` : ''
+          }. 나의 기록 보기`}
+          onPress={() => router.push('/student/records' as never)}
+          /*
+            **`tap.textLine`을 쓰지 않는다.** 그 상수의 음수 마진(-12)은 **캡션 한 줄(약 20px)**
+            기준이고(`src/theme/styles.ts`가 그렇게 적어 두었다) 이 줄은 캡션 둘(약 42px)이라,
+            늘어난 높이가 아니라 **덩어리 사이 간격을 먹었다** — 모바일에서 위아래가 약 5px로
+            붙었다(실측). 내용이 이미 44에 가까우므로 여기서는 `minHeight`만 준다
+            (`Brand`가 같은 이유로 자기 높이로 계산하는 선례다).
+          */
+          style={({ pressed }) => [
+            styles.notice,
+            styles.recordRow,
+            pressed && { backgroundColor: colors.hover },
+          ]}
+        >
+          <Icon name="activity" size={15} color={colors.inkSecondary} />
+          <View style={styles.recordLines}>
+            <AppText variant="caption" weight="semibold">
+              {streakSummary(records)}
+            </AppText>
+            {todayLine(records) ? (
+              <AppText testID="home-record-today" variant="caption" tone="tertiary">
+                오늘 {todayLine(records)}
+              </AppText>
+            ) : null}
+          </View>
+          {/*
+            **눌린다는 신호가 이 화면에서 가장 흐린 색이면 안 된다.** 예전에는
+            `size={14}` + `inkTertiary`(§3이 `bg` 위 2.96:1로 실측해 둔 토큰)였고, 정작 눌리지 않는
+            아래 줄들은 전부 강조색이었다 — 강조색을 안 쓴 유일한 줄이 눌리는 줄이었다.
+            무게는 `Row`의 chevron과 같은 18로 올리고 색은 대비가 있는 `inkSecondary`로 둔다.
+            **강조색으로 바꾸지 않는다**: 아래 세 줄이 강조색이라 넷 다 알림처럼 보인다(D-179).
+          */}
+          <Icon name="chevron-right" size={18} color={colors.inkSecondary} />
+        </Pressable>
+      ) : null}
 
       {/*
         부모님이 보낸 칭찬. 히어로보다 위에 **조용한 한 줄**로 둔다 — 카드로 만들면
@@ -892,6 +966,14 @@ const styles = StyleSheet.create({
     안 되고, 둘이 같은 종류라 같은 모양을 쓴다.
   */
   notice: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  /* 기록 줄은 두 줄이 될 수 있다. 한 덩어리 안에서 줄만 갈리므로 `xxs`다. */
+  recordLines: { flex: 1, gap: spacing.xxs },
+  /*
+    누름 영역 44(§10). **음수 마진을 두지 않는다** — 이 줄은 두 줄이 될 수 있어서 내용 높이가
+    이미 42px 안팎이고, `tap.textLine`의 보정값(캡션 한 줄 기준)을 그대로 쓰면 덩어리 간격이
+    사라진다(위 호출부의 근거). 한 줄인 날(오늘 한 일이 없을 때)은 이 값이 높이를 채운다.
+  */
+  recordRow: { minHeight: touch.min },
   noticeText: { flex: 1 },
   /*
     히어로 카드 안 마지막 줄. **행동은 오른쪽 끝**이다(§8 규칙 ③ · `endRow`).

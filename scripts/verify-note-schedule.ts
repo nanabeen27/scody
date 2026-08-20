@@ -127,8 +127,36 @@ async function main() {
   if (picked.rowCount === 0) throw new Error('정예린의 개인 학습 오답노트가 없어요. seed를 먼저 넣어 주세요.');
   const noteId = picked.rows[0].id;
   const before = await sched(db, noteId);
+  /*
+    **seed가 이 노트에 넣어 둔 복습 로그를 그대로 떠 둔다**(A-151).
+
+    이 스크립트는 세 자리에서 `delete from note_reviews where note_id = $1`을 부르고, `backdate`는
+    그 노트의 **모든** 행의 `reviewed_on`을 하루씩 뒤로 물린다 — 둘 다 seed 행을 함께 건드린다.
+    그래서 이 스크립트를 돌린 뒤 `verify-rls.ts`가 3건 실패했다(`복습 기록 6건` · `정예린에게
+    6건` · `학부모는 자녀 기록을 읽는다`). 재시드하면 사라지므로 오래 눈에 띄지 않았다.
+
+    지우기를 좁히는 대신 **되돌린다.** 중간 삭제는 각 시나리오의 시작점을 맞추는 의도된 동작이고,
+    좁히려면 세 자리 모두에 조건을 달아야 하는데 그중 하나만 빠뜨리면 같은 결함이 돌아온다.
+    끝에서 행을 그대로 다시 넣으면 `reviewed_on`이 물러난 것까지 함께 복구된다.
+  */
+  const seedReviews = await db.query<{
+    id: string;
+    student_id: string;
+    reviewed_on: string;
+    picked_index: number | null;
+    is_correct: boolean;
+    evidence: string | null;
+    recap: string | null;
+    created_at: string;
+  }>(
+    `select id, student_id, reviewed_on::text as reviewed_on, picked_index, is_correct,
+            evidence::text as evidence, recap, created_at::text as created_at
+       from public.note_reviews where note_id = $1 order by reviewed_on`,
+    [noteId],
+  );
   console.log(`검증 대상 노트 ${noteId}`);
-  console.log(`시작 상태 ${JSON.stringify(before)}\n`);
+  console.log(`시작 상태 ${JSON.stringify(before)}`);
+  console.log(`seed 복습 로그 ${seedReviews.rowCount}건\n`);
 
   try {
     /*
@@ -470,6 +498,37 @@ async function main() {
     // ── 정리: 만든 로그를 지우고 스케줄을 시작 상태로 되돌린다 ──────────────
     console.log('\n[정리]');
     await db.query(`delete from public.note_reviews where note_id = $1`, [noteId]);
+    /*
+      **seed 행을 원래 값으로 다시 넣는다**(A-151). `id`까지 되돌려 다른 검증이 세는 총계와
+      학부모·본인 읽기 단정이 seed 상태와 같아진다. 활동 이벤트 트리거는 `after insert`라
+      여기서 끈다 — 켜 두면 `learning_events`에 `review_done`이 실행마다 쌓인다
+      (그 표는 append-only라 앱 역할이 지울 수 없다).
+    */
+    if (seedReviews.rowCount && seedReviews.rowCount > 0) {
+      await db.query(`alter table public.note_reviews disable trigger note_reviews_event`);
+      try {
+        for (const r of seedReviews.rows) {
+          await db.query(
+            `insert into public.note_reviews
+               (id, note_id, student_id, reviewed_on, picked_index, is_correct, evidence, recap, created_at)
+             values ($1, $2, $3, $4::date, $5, $6, $7::public.note_evidence, $8, $9::timestamptz)`,
+            [
+              r.id,
+              noteId,
+              r.student_id,
+              r.reviewed_on,
+              r.picked_index,
+              r.is_correct,
+              r.evidence,
+              r.recap,
+              r.created_at,
+            ],
+          );
+        }
+      } finally {
+        await db.query(`alter table public.note_reviews enable trigger note_reviews_event`);
+      }
+    }
     await asOwner(
       db,
       `update public.wrong_notes
@@ -482,8 +541,24 @@ async function main() {
       restored.state === before.state && restored.streak === before.streak
       && restored.miss_streak === before.miss_streak,
       JSON.stringify(restored));
-    const logs = await db.query(`select 1 from public.note_reviews where note_id = $1`, [noteId]);
-    check('남긴 복습 로그가 없다', logs.rowCount === 0);
+    /*
+      **`0건`이 아니라 `seed 상태`를 단정한다.** 예전 단정은 seed 행까지 지운 것을 통과로 읽었다 —
+      그것이 A-151의 결함을 이 스크립트 안에서 보이지 않게 만든 자리다.
+    */
+    const logs = await db.query<{ reviewed_on: string }>(
+      `select reviewed_on::text as reviewed_on from public.note_reviews
+         where note_id = $1 order by reviewed_on`,
+      [noteId],
+    );
+    eq('복습 로그가 seed 상태로 돌아왔다', logs.rowCount, seedReviews.rowCount);
+    check(
+      '복습일도 물러나지 않았다',
+      logs.rows.map((r) => r.reviewed_on).join(',') ===
+        seedReviews.rows.map((r) => r.reviewed_on).join(','),
+      `기대 ${seedReviews.rows.map((r) => r.reviewed_on).join(',')} · 실제 ${logs.rows
+        .map((r) => r.reviewed_on)
+        .join(',')}`,
+    );
     await db.end();
   }
 

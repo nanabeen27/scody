@@ -1,5 +1,5 @@
 import { test, expect } from './_fixtures';
-import { login, loginHere, PHONE_BY_ID, SIGNUP_PENDING, DEMO_CODE } from './_auth';
+import { emailOf, login, loginHere, SIGNUP_PENDING } from './_auth';
 import { inviteToken , devPassword } from './_seed';
 
 /*
@@ -125,8 +125,8 @@ test.describe('M1 소개·로그인·역할 분기', () => {
 
   test('가입 화면에서 워드마크를 누르면 앞 단계로 돌아간다', async ({ page }) => {
     await page.goto('/signup');
-    await page.getByTestId('signup-phone').click();
-    await expect(page.getByTestId('signup-phone-number')).toBeVisible();
+    await page.getByTestId('signup-email').click();
+    await expect(page.getByTestId('signup-email-address')).toBeVisible();
     await page.getByTestId('signup-brand').click();
     // 방법 선택 단계로 돌아온다
     await expect(page.getByTestId('signup-kakao')).toBeVisible();
@@ -176,13 +176,13 @@ test.describe('M1 소개·로그인·역할 분기', () => {
   });
 
   /*
-    **아이디 + 비밀번호가 정식 로그인이다**(D-171). 가입 화면이 그 둘을 받는데 그것을 쓰는 공개
-    로그인이 없었고, 대신 로그인 화면이 휴대폰 번호를 받아 **도달할 수 없는 인증번호 단계**를
-    약속했다(`setStep('code')`가 코드에 없었다). 휴대폰은 인증·복구·알림 자리로 돌아갔다.
+    **이메일 + 비밀번호가 정식 로그인이다**(D-184). 예전에는 스코디 아이디를 받았는데(D-171) 그
+    값은 사용자에게 아무 힘이 없었다 — 운영자 화면이 이미 `카카오로 가입한 학생은 자기 scodyId를
+    모른다`고 적어 두었다. 아이디는 표시·검색용으로 남고 `/staff`만 계속 받는다.
   */
-  test('아이디와 비밀번호로 로그인한다', async ({ page }) => {
+  test('이메일과 비밀번호로 로그인한다', async ({ page }) => {
     await page.goto('/login');
-    await page.getByTestId('login-id').fill('doyun');
+    await page.getByTestId('login-email').fill(emailOf('doyun'));
     await page.getByTestId('login-password').fill(devPassword());
     await page.getByTestId('login-submit').click();
     await expect(page).toHaveURL(/\/student/);
@@ -190,13 +190,26 @@ test.describe('M1 소개·로그인·역할 분기', () => {
     await expect(page.getByText(/박도윤 님/)).toBeVisible();
   });
 
+  /*
+    **@가 없는 입력은 보내기 전에 막는다.** 옛 습관으로 아이디를 넣으면 서버가 영어 형식 오류를
+    돌려주고, 그 문장이 그대로 화면에 나갈 수 있었다(`errorMessage`가 `Invalid login`만 잡았다).
+  */
+  test('이메일 형태가 아니면 보내지 않고 그 사실을 말한다', async ({ page }) => {
+    await page.goto('/login');
+    await page.getByTestId('login-email').fill('doyun');
+    await page.getByTestId('login-password').fill(devPassword());
+    await page.getByTestId('login-submit').click();
+    await expect(page.getByRole('alert')).toHaveText('이메일 주소를 다시 확인해 주세요.');
+    await expect(page).toHaveURL(/\/login/);
+  });
+
   test('로그인이 틀리면 어느 쪽이 틀렸는지 말하지 않는다', async ({ page }) => {
     await page.goto('/login');
-    await page.getByTestId('login-id').fill('doyun');
+    await page.getByTestId('login-email').fill(emailOf('doyun'));
     await page.getByTestId('login-password').fill('wrong-password-1234');
     await page.getByTestId('login-submit').click();
-    // 오류는 `role="alert"`로 읽힌다(D-126). 아이디가 있는지 없는지는 말하지 않는다.
-    await expect(page.getByRole('alert')).toHaveText('아이디나 비밀번호를 확인해 주세요.');
+    // 오류는 `role="alert"`로 읽힌다(D-126). 그 이메일이 있는지 없는지는 말하지 않는다.
+    await expect(page.getByRole('alert')).toHaveText('이메일이나 비밀번호를 확인해 주세요.');
     await expect(page).toHaveURL(/\/login/);
     // 오류가 가리키는 행동(회원가입)이 같은 화면에 함께 서 있다 — 단계가 하나뿐이다.
     await expect(page.getByTestId('login-signup')).toBeVisible();
@@ -204,17 +217,21 @@ test.describe('M1 소개·로그인·역할 분기', () => {
 
   /*
     테스트 계정 패널은 **눌렀을 때 보이는 변화**가 있어야 한다. 예전에는 토글이 화면 아래쪽에
-    있어서 펼쳐진 11행이 뷰포트 밖에서 열렸고, 라벨만 바뀌어 "아무 일도 없다"로 읽혔다.
+    있어서 펼쳐진 목록이 뷰포트 밖에서 열렸고, 라벨만 바뀌어 "아무 일도 없다"로 읽혔다.
     같은 라벨(`테스트 계정 보기`)이 오류 아래에도 있어서 둘의 상태가 서로 어긋났다.
+
+    **행은 이제 누르는 것이 아니라 읽는 것이다**(D-184) — 클릭 로그인은 비밀번호를 번들에
+    실어야 해서 없앴다. 그래서 행이 타이핑할 **이메일**을 보여 주는지 함께 단정한다.
   */
-  test('테스트 계정 패널은 개수를 밝히고 펼치면 목록이 보인다', async ({ page }) => {
+  test('테스트 계정 패널은 개수를 밝히고 펼치면 이메일이 보인다', async ({ page }) => {
     await page.goto('/login');
     const toggle = page.getByTestId('login-demo-toggle');
     await expect(toggle).toContainText(/테스트 계정 \d+개 보기/);
     // 같은 뜻의 컨트롤이 화면에 하나뿐이다.
     await expect(page.getByRole('button', { name: /테스트 계정/ })).toHaveCount(1);
     await toggle.click();
-    await expect(page.getByRole('button', { name: /^박도윤 · / })).toBeVisible();
+    await expect(page.getByText(/^유하람 · /)).toBeVisible();
+    await expect(page.getByText(emailOf('student1'), { exact: false })).toBeVisible();
     await expect(toggle).toContainText('테스트 계정 숨기기');
   });
 
@@ -303,7 +320,7 @@ test.describe('M1 소개·로그인·역할 분기', () => {
 
   test('키보드만으로 로그인할 수 있다(Enter)', async ({ page }) => {
     await page.goto('/login');
-    await page.getByTestId('login-id').fill('seojun');
+    await page.getByTestId('login-email').fill(emailOf('seojun'));
     await page.getByTestId('login-password').fill(devPassword());
     // Enter가 `로그인` 버튼과 같은 자리에 닿는다.
     await page.getByTestId('login-password').press('Enter');
@@ -350,19 +367,19 @@ test.describe('M1 소개·로그인·역할 분기', () => {
     await expect(page).toHaveURL(/\/student/);
   });
 
-  test('신규 가입: 휴대폰 번호로 시작한다', async ({ page }) => {
+  test('신규 가입: 이메일로 시작한다', async ({ page }) => {
     await page.goto('/login');
     await page.getByTestId('login-signup').click();
     await expect(page).toHaveURL(/\/signup/);
 
-    await page.getByTestId('signup-phone').click();
-    await page.getByTestId('signup-phone-number').fill('010-5000-1234');
-    await page.getByTestId('signup-phone-send').click();
-    await page.getByTestId('signup-phone-code').fill(DEMO_CODE);
-    await page.getByTestId('signup-phone-next').click();
-
+    /*
+      **두 단계다**(D-184). 번호 확인 단계와 인증번호 칸이 사라졌다 — 메일 발송 provider가 없어
+      그 칸의 `hint`가 "발송은 아직 연결되지 않았어요"라고 고백하고 있었고, 할 수 없는 일에는
+      칸을 두지 않는다(D-141).
+    */
+    await page.getByTestId('signup-email').click();
+    await page.getByTestId('signup-email-address').fill('newbie@example.com');
     await page.getByTestId('signup-name').fill('새사용자');
-    await page.getByTestId('signup-id').fill('newbie');
     await page.getByTestId('signup-pw').fill('test1234');
     // 기본 학생 역할로 시작
     await page.getByTestId('signup-submit').click();
@@ -399,16 +416,25 @@ test.describe('M1 소개·로그인·역할 분기', () => {
     await expect(page.getByTestId('signup-role-student')).toHaveAttribute('aria-checked', 'false');
   });
 
-  test('이미 가입된 번호로는 가입할 수 없다', async ({ page }) => {
+  /*
+    **중복 검사는 이 화면이 하지 않는다**(D-184). 번호 중복(`rpc_signup_phone_taken`)을 묻던 자리인데
+    이메일에 같은 함수를 만들지 않았다 — 익명이 물을 수 있는 계정 열거 오라클이고 A-100이 이미
+    그 상한 없음을 실측해 두었다. 이메일은 번호보다 열거하기 쉽다(유출 목록을 그대로 넣는다).
+    중복은 계정 생성이 붙는 날 `signUp` 응답이 답한다(A-152).
+
+    그래서 이 화면이 실제로 하는 검사를 단정한다: 이메일 **형식**이다.
+  */
+  test('이메일 형태가 아니면 가입을 진행하지 않는다', async ({ page }) => {
     await page.goto('/signup');
-    await page.getByTestId('signup-phone').click();
-    await page.getByTestId('signup-phone-number').fill(PHONE_BY_ID.doyun);
-    await page.getByTestId('signup-phone-send').click();
-    await expect(page.getByText(/이미 가입된 번호예요/)).toBeVisible();
-    await expect(page.getByTestId('signup-phone-code')).toHaveCount(0);
+    await page.getByTestId('signup-email').click();
+    await page.getByTestId('signup-email-address').fill('abc');
+    await page.getByTestId('signup-name').fill('새사용자');
+    await page.getByTestId('signup-pw').fill('test1234');
+    await page.getByTestId('signup-submit').click();
+    await expect(page.getByRole('alert')).toHaveText('이메일 주소를 다시 확인해 주세요.');
   });
 
-  test('신규 가입: 카카오로 가입하면 번호 단계를 건너뛴다', async ({ page }) => {
+  test('신규 가입: 카카오로 오면 자격 증명을 묻지 않는다', async ({ page }) => {
     await page.goto('/signup');
     await page.getByTestId('signup-kakao').click();
     /*
@@ -417,23 +443,23 @@ test.describe('M1 소개·로그인·역할 분기', () => {
       말하고 있었다 — 화면 문구를 사실로 고쳤고 단정도 그 문장을 본다.
     */
     await expect(page.getByText(/카카오 연결은 프로토타입에서 건너뛰어요/)).toBeVisible();
+    /*
+      **카카오가 곧 자격 증명이다**(D-184). 예전에는 카카오로 와도 아이디·비밀번호를 물어서
+      앞뒤가 맞지 않았다 — `카카오 연결은 건너뛴다`고 말한 화면이 바로 아래에서 비밀번호를
+      정하라고 했다.
+    */
+    await expect(page.getByTestId('signup-email-address')).toHaveCount(0);
+    await expect(page.getByTestId('signup-pw')).toHaveCount(0);
     await page.getByTestId('signup-name').fill('카카오가입');
-    await page.getByTestId('signup-id').fill('kakaonew');
-    await page.getByTestId('signup-pw').fill('test1234');
     await page.getByTestId('signup-submit').click();
     await expect(page.getByText(SIGNUP_PENDING)).toBeVisible();
   });
 
   test('신규 가입 다역할 선택 시 공간 선택으로 간다', async ({ page }) => {
     await page.goto('/signup');
-    await page.getByTestId('signup-phone').click();
-    await page.getByTestId('signup-phone-number').fill('010-5000-5678');
-    await page.getByTestId('signup-phone-send').click();
-    await page.getByTestId('signup-phone-code').fill(DEMO_CODE);
-    await page.getByTestId('signup-phone-next').click();
-
+    await page.getByTestId('signup-email').click();
+    await page.getByTestId('signup-email-address').fill('dualrole@example.com');
     await page.getByTestId('signup-name').fill('두역할');
-    await page.getByTestId('signup-id').fill('dualrole');
     await page.getByTestId('signup-pw').fill('test1234');
     await page.getByTestId('signup-role-parent').click(); // 학생 + 학부모
     await page.getByTestId('signup-submit').click();
@@ -451,7 +477,7 @@ test.describe('M1 소개·로그인·역할 분기', () => {
     await page.goto('/login');
     await expect(page.getByText('이미 로그인했어요')).toBeVisible();
     // 로그인을 다시 묻지 않고, 다른 계정으로 갈리는 버튼도 두지 않는다.
-    await expect(page.getByTestId('login-id')).toHaveCount(0);
+    await expect(page.getByTestId('login-email')).toHaveCount(0);
     await expect(page.getByTestId('login-kakao')).toHaveCount(0);
     await page.getByTestId('login-mine').click();
     await expect(page).toHaveURL(/\/student/);
@@ -465,16 +491,23 @@ test.describe('M1 소개·로그인·역할 분기', () => {
     */
     await expect(page.getByText('이미 로그인했어요')).toBeVisible();
     await page.getByTestId('login-switch').click();
-    await expect(page.getByTestId('login-id')).toBeVisible();
+    await expect(page.getByTestId('login-email')).toBeVisible();
     await expect(page.getByTestId('login-mine')).toHaveCount(0);
   });
 
-  test('이미 가입된 번호 오류에서 바로 로그인으로 간다', async ({ page }) => {
+  /*
+    오류가 가리키는 행동을 그 자리에서 할 수 있게 한다(D-126). `이미 가입된 번호예요`가 이 자리를
+    쓰고 있었는데 그 검사가 없어졌다(D-184) — 남은 것은 `SIGNUP_PENDING`이고, 그 문장도 로그인
+    화면을 가리킨다. 링크는 개발용 로그인이 켜진 빌드에만 둔다(가리킬 곳이 있을 때만).
+  */
+  test('계정을 만들 수 없다는 오류에서 바로 로그인으로 간다', async ({ page }) => {
     await page.goto('/signup');
-    await page.getByTestId('signup-phone').click();
-    await page.getByTestId('signup-phone-number').fill(PHONE_BY_ID.doyun);
-    await page.getByTestId('signup-phone-send').click();
-    await expect(page.getByRole('alert')).toHaveText(/이미 가입된 번호예요/);
+    await page.getByTestId('signup-email').click();
+    await page.getByTestId('signup-email-address').fill('newbie@example.com');
+    await page.getByTestId('signup-name').fill('새사용자');
+    await page.getByTestId('signup-pw').fill('test1234');
+    await page.getByTestId('signup-submit').click();
+    await expect(page.getByRole('alert')).toHaveText(SIGNUP_PENDING);
     await page.getByTestId('signup-error-login').click();
     await expect(page).toHaveURL(/\/login/);
   });
@@ -482,17 +515,10 @@ test.describe('M1 소개·로그인·역할 분기', () => {
   /* 마지막 단계의 이탈 경로가 워드마크에만 있어 로고로만 보였다. 글자 링크를 함께 둔다. */
   test('가입 마지막 단계에서 글자 링크로 앞 단계로 돌아간다', async ({ page }) => {
     await page.goto('/signup');
-    await page.getByTestId('signup-phone').click();
-    await page.getByTestId('signup-phone-number').fill('010-5000-4321');
-    await page.getByTestId('signup-phone-send').click();
-    /*
-      가입 화면은 보내지 않은 인증번호를 `보냈어요`라고 말하고 있었다(로그인 화면은 같은 자리에서
-      `보낼 수 없다`고 말한다). 프로토타입 통과 코드만 그 자리에서 밝힌다.
-    */
-    await expect(page.getByText(/인증번호 발송은 아직 연결되지 않았어요/)).toBeVisible();
-    await page.getByTestId('signup-phone-code').fill(DEMO_CODE);
-    await page.getByTestId('signup-phone-next').click();
+    await page.getByTestId('signup-email').click();
+    await expect(page.getByTestId('signup-email-address')).toBeVisible();
     await page.getByTestId('signup-detail-back').click();
-    await expect(page.getByTestId('signup-phone-number')).toBeVisible();
+    // 단계가 둘이라 돌아가는 곳은 방법 선택 화면이다(D-184).
+    await expect(page.getByTestId('signup-email')).toBeVisible();
   });
 });

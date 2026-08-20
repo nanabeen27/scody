@@ -99,15 +99,14 @@ test.describe('M5 이용권·소속 경계', () => {
     await expect(page.getByText('아직 학원에서 받은 학습이 없어요')).toBeVisible();
   });
 
-  test('중복 아이디로는 가입할 수 없다', async ({ page }) => {
-    await page.goto('/signup');
-    await page.getByTestId('signup-kakao').click(); // 방법 선택 후 상세 단계로
-    await page.getByTestId('signup-name').fill('중복');
-    await page.getByTestId('signup-id').fill('yerin');
-    await page.getByTestId('signup-pw').fill('test1234');
-    await page.getByTestId('signup-submit').click();
-    await expect(page.getByText(/이미 사용 중인 아이디/)).toBeVisible();
-  });
+  /*
+    **`중복 아이디로는 가입할 수 없다`를 지웠다**(D-184). 테스트를 완화한 것이 아니라 **없어진
+    행동의 테스트를 걷은 것**이다 — 가입 화면이 스코디 아이디를 더 이상 묻지 않고
+    (`signup-id` 필드가 사라졌다) 그 중복을 익명에게 답하지도 않는다(A-152: 열거 오라클을 만들지
+    않는다). 아이디는 계정을 만들 때 서버가 만든다(A-153).
+
+    이메일 형식 검사는 `auth-flow`의 `이메일 형태가 아니면 가입을 진행하지 않는다`가 본다.
+  */
 
   test('학원은 학생의 개인 학습을 볼 수 없다', async ({ page }) => {
     await login(page, 'hanbit.director');

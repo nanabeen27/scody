@@ -65,20 +65,37 @@ export interface DevAccount {
   이름과 합성 번호가 운영 번들에 죽은 데이터로 남는다(실측으로 확인했다). `process.env.EXPO_*`는
   빌드 때 문자열로 인라인되므로 이 삼항은 상수로 접히고 쓰지 않는 쪽 가지가 사라진다.
 */
+/*
+  **화면에 보여 주는 것은 데모 계정 여섯뿐이다**(D-184).
+
+  seed는 열일곱 계정을 만들지만(기존 열하나 + 데모 여섯) 그 열하나는 **비밀번호가 16자 이상**이라
+  사람이 손으로 칠 수 없다. 목록은 사람이 실제로 들어갈 수 있는 것만 담는다 — 들어갈 수 없는
+  계정을 나열하는 것은 눌러도 아무 일이 없는 버튼과 같다(D-141).
+
+  기존 열하나는 검증 스크립트와 E2E가 계속 쓴다(`e2e/_auth.ts`가 `.env`의 비밀번호로 폼에
+  타이핑한다). 여기서 사라진 것은 **화면의 목록**이고 계정은 그대로 있다.
+
+  여섯이 서로 맞물려 있다: 학원 하나에 원장·선생(반 담당)·학생 둘이 있고 학부모 둘이 각각
+  학생 하나를 자녀로 갖는다. 어느 계정으로 들어가도 화면이 비지 않는다.
+*/
 export const DEV_ACCOUNTS: readonly DevAccount[] = !DEV_LOGIN_ENABLED ? [] : [
-  { name: '김서준', scodyId: 'seojun', roles: ['student'], phone: '010-1000-0001', note: '개인 학습만 · 기록 없음' },
-  { name: '이하은', scodyId: 'haeun', roles: ['student'], phone: '010-1000-0002', note: '학부모 결제 · 개인 기록 3건' },
-  { name: '박도윤', scodyId: 'doyun', roles: ['student'], phone: '010-1000-0003', note: '학원 학습 · 미제출 과제' },
-  { name: '정예린', scodyId: 'yerin', roles: ['student'], phone: '010-1000-0004', note: '개인 + 학원 둘 다' },
-  { name: '최민지', scodyId: 'minji', roles: ['parent'], phone: '010-2000-0001', note: '자녀 2명' },
-  { name: '한빛 원장', scodyId: 'hanbit.director', roles: ['academy'], phone: '010-3000-0001', note: '반·학생 관리' },
-  { name: '오선생', scodyId: 'hanbit.teacher', roles: ['academy'], phone: '010-3000-0002', note: '고1 국어 담당' },
-  { name: '한지훈', scodyId: 'jihoon', roles: ['academy', 'parent'], phone: '010-3000-0003', note: '다역할 · 공간 전환' },
-  { name: '스코디 관리자', scodyId: 'admin', roles: ['admin'], phone: '010-9000-0001', note: '운영자 화면' },
-  // 다른 학원(새길학원). 학원 간 격리를 눈으로도 확인할 수 있게 둔다(M-DB-13).
-  { name: '새길 원장', scodyId: 'saegil.director', roles: ['academy'], phone: '010-4000-0001', note: '다른 학원 · 격리 확인' },
-  { name: '새길 선생', scodyId: 'saegil.teacher', roles: ['academy'], phone: '010-4000-0002', note: '다른 학원 · 반 1개' },
+  { name: '유하람', scodyId: 'student1', roles: ['student'], phone: '010-6000-0001', note: '개인 + 학원 · 기록 많음' },
+  { name: '노도현', scodyId: 'student2', roles: ['student'], phone: '010-6000-0002', note: '학원 학습 · 미제출 과제' },
+  { name: '유선경', scodyId: 'parent1', roles: ['parent'], phone: '010-6000-0011', note: '자녀 1명 · 기록 많음' },
+  { name: '노태식', scodyId: 'parent2', roles: ['parent'], phone: '010-6000-0012', note: '자녀 1명 · 미제출 확인' },
+  { name: '데모 원장', scodyId: 'academy1', roles: ['academy'], phone: '010-6000-0021', note: '반·학생·좌석 관리' },
+  { name: '데모 선생', scodyId: 'academy2', roles: ['academy'], phone: '010-6000-0022', note: '데모 고1 국어 담당' },
 ];
 
-/** 카카오 데모가 들어가는 계정. 프로토타입의 `DEMO_KAKAO_USER`와 같은 사람이다. */
+/**
+ * 카카오 데모가 들어가는 계정. 프로토타입의 `DEMO_KAKAO_USER`와 같은 사람이다.
+ *
+ * **데모 계정 여섯 중 하나로 옮길 수 없다.** 이 경로는 `signInWithTestAccount`이고 그 함수는
+ * 클라이언트가 가진 `DEV_LOGIN_PASSWORD`(16자)를 쓴다 — 데모 여섯의 비밀번호는 접두어 없는
+ * 환경변수라 **번들에 없다**(D-184, 그것이 의도다). 그래서 기존 등급 계정을 계속 가리킨다.
+ *
+ * 그 계정이 아래 목록에는 없다. 버튼 옆 캡션이 `정해진 데모 계정으로 연결되고 그 기록은 실제
+ * 사용자 데이터가 아니다`라고 이미 말하므로(D-125) 남의 기록을 자기 것으로 읽을 위험은 그
+ * 문장이 막는다. 카카오 OAuth가 실제로 연결되면(M-DB-2) 이 상수와 함께 사라진다.
+ */
 export const DEV_KAKAO_SCODY_ID = 'yerin';

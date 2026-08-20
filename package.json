@@ -23,7 +23,9 @@
     "ai:secret": "set -a && . ./.env && set +a && supabase secrets set OPENROUTER_API_KEY=\"$OPENROUTER_API_KEY\"",
     "ai:deploy": "set -a && . ./.env && set +a && supabase functions deploy ai-proxy",
     "ai:verify": "tsx scripts/verify-ai.ts",
-    "db:verify:schedule": "tsx scripts/verify-note-schedule.ts"
+    "db:verify:schedule": "tsx scripts/verify-note-schedule.ts",
+    "db:verify:records": "tsx scripts/verify-records.ts",
+    "db:compact": "tsx scripts/compact-study-time.ts"
   },
   "dependencies": {
     "@expo-google-fonts/space-grotesk": "^0.4.1",

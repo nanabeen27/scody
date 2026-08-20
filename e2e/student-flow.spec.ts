@@ -827,8 +827,12 @@ test.describe('M2 학생 국어 학습 흐름', () => {
     await page.goto('/signup');
     await page.getByTestId('signup-kakao').click();
     await page.getByTestId('signup-name').fill('첫날학생');
-    await page.getByTestId('signup-id').fill('firstday');
-    await page.getByTestId('signup-pw').fill('test1234');
+    /*
+      카카오 경로는 이메일·비밀번호를 묻지 않는다(D-184) — 카카오가 곧 자격 증명이다.
+      **이 테스트는 여전히 아래 URL 단정에서 실패한다**(기준 실패 · A-096): 가입이 계정을 만들지
+      못하므로 `/student`로 가지 않는다. 그 사실은 마스터 플랜이 기록해 두었고, 여기서 고칠 수
+      있는 것이 아니다(결제·인증 연결과 함께 온다).
+    */
     await page.getByTestId('signup-submit').click();
     await expect(page).toHaveURL(/\/student/);
 

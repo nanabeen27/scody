@@ -23,6 +23,7 @@ import {
   Steps,
 } from '@/components';
 import { useSession } from '@/session';
+import { useActiveTime } from '@/features/activeTime';
 import { useProgress, type WrongNote } from '@/features/progress';
 import { useContent } from '@/features/content';
 import { useToast } from '@/features/toast';
@@ -293,6 +294,12 @@ function ReviewDeck({
   const { readOnly } = useSession();
   const { show } = useToast();
   const { isMobile } = useColumn();
+  /*
+    **오답 복습 시간도 학습 시간이다.** `attempts.time_sec`은 제출한 학습에만 붙으므로, 이 화면의
+    시간을 재지 않으면 하루의 절반을 오답 복습에 쓴 학생의 `실제 학습 시간`이 그만큼 비어 있다.
+    측정 규칙은 풀이 화면과 같다(`src/features/activeTime.ts`).
+  */
+  const active = useActiveTime('review');
   /**
    * 세션이 시작된 날. **렌더마다 다시 계산하지 않는다.**
    *
@@ -487,11 +494,13 @@ function ReviewDeck({
 
   function pick(nextSlot: number) {
     if (!card || checked) return;
+    active.ping();
     patchCard(card.id, { slot: nextSlot, checkError: null });
   }
 
   function chooseEvidence(next: NoteEvidence) {
     if (!card || checked) return;
+    active.ping();
     patchCard(card.id, { evidence: next });
   }
 
@@ -523,6 +532,12 @@ function ReviewDeck({
       않는다 — 화면과 서버가 다른 날짜를 말할 자리가 생긴다.
     */
     patchLive(card.id, () => ({ result: res.review, checkError: null }));
+    /*
+      카드 한 장이 끝나는 자리에서 시간을 보낸다. 여기서 보내지 않으면 60초 주기와 화면을 떠날
+      때만 남으므로, 카드 두 장을 풀고 홈으로 돌아간 학생의 기록이 오늘 안에서 늦게 반영된다
+      (홈이 이 값을 읽는다).
+    */
+    void active.flush();
   }
 
   async function saveRecap() {

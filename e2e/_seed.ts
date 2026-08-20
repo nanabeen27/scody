@@ -102,10 +102,23 @@ export function inviteToken(role: 'student' | 'parent' | 'teacher'): string {
  * 읽지 않으므로(설정에 dotenv가 없다) 여기서 한 줄만 꺼낸다.
  */
 export function devPassword(): string {
+  return envValue('EXPO_PUBLIC_DEV_LOGIN_PASSWORD');
+}
+
+/**
+ * 데모 계정 6종의 비밀번호(D-184). **접두어가 없다** — 클라이언트는 이 값을 모르고, 사람과
+ * 이 헬퍼만 폼에 타이핑한다.
+ */
+export function demoPassword(): string {
+  return envValue('DEMO_LOGIN_PASSWORD');
+}
+
+/** `.env`에서 한 줄 꺼낸다. 두 비밀번호가 같은 방식으로 들어오므로 사본을 두지 않는다. */
+function envValue(key: string): string {
   const line = readFileSync('.env', 'utf8')
     .split('\n')
-    .find((l) => l.startsWith('EXPO_PUBLIC_DEV_LOGIN_PASSWORD='));
+    .find((l) => l.startsWith(`${key}=`));
   const value = line?.slice(line.indexOf('=') + 1).trim().replace(/^(['"])(.*)\1$/, '$2');
-  if (!value) throw new Error('`.env`에 `EXPO_PUBLIC_DEV_LOGIN_PASSWORD`가 필요해요.');
+  if (!value) throw new Error(`\`.env\`에 \`${key}\`가 필요해요.`);
   return value;
 }

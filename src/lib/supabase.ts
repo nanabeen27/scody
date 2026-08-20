@@ -90,6 +90,14 @@ export function errorMessage(error: unknown): string {
   if (/row-level security/i.test(raw)) return '권한이 없어요.';
   if (/duplicate key value/i.test(raw)) return '이미 있는 값이에요.';
   if (/JWT|not authenticated|Invalid login/i.test(raw)) return '다시 로그인해 주세요.';
+  /*
+    로그인 칸이 이메일을 받게 되면서(D-184) `@`가 없는 입력에 GoTrue가 형식 오류를 돌려준다.
+    그 문장도 영어이고, 잡지 않으면 아래 `return raw`가 그대로 화면에 내보낸다.
+    **화면이 먼저 막지만**(`looksLikeEmail`) 붙여넣기·자동완성으로 새는 길이 남아 여기도 막는다.
+  */
+  if (/validate email|invalid email|email.*invalid|email_address_invalid/i.test(raw)) {
+    return '이메일 주소를 다시 확인해 주세요.';
+  }
   if (/Failed to fetch|NetworkError|network request failed/i.test(raw)) {
     return '연결이 끊겼어요. 잠시 뒤 다시 시도해 주세요.';
   }

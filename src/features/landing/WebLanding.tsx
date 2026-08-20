@@ -34,7 +34,7 @@ const INTRO = 'Scody는 학생의 학습을 가장 효율적으로 만드는 학
  * 아니라는 것을 알게 된다. 푸터가 말하던 것은 약관 초안·사업자정보 없음뿐이라 이 사실을 대신하지
  * 못한다.
  *
- * 되는 쪽은 스코디 아이디와 비밀번호 로그인이다(`app/login.tsx`의 정식 로그인 수단). 그래서
+ * 되는 쪽은 이메일과 비밀번호 로그인이다(`app/login.tsx`의 정식 로그인 수단 — D-184). 그래서
  * "안 된다"만 말하고 끝내지 않고 지금 열려 있는 문을 함께 말한다.
  *
  * 두 자리(히어로 CTA 아래 · 마지막 CTA 띠)가 같은 상수를 쓴다 — 문장을 두 벌로 두면 한쪽만 낡는다.
@@ -43,7 +43,7 @@ const INTRO = 'Scody는 학생의 학습을 가장 효율적으로 만드는 학
  * 지운다(M-DB-2의 완료 조건).
  */
 const SIGNUP_PENDING = '회원가입은 아직 연결되지 않았어요.';
-const LOGIN_AVAILABLE = '이미 스코디 아이디가 있으면 로그인할 수 있어요.';
+const LOGIN_AVAILABLE = '이미 계정이 있으면 이메일로 로그인할 수 있어요.';
 
 /**
  * 큰 제목의 줄바꿈 규칙. React Native Web은 기본이 `break-word`라
@@ -75,20 +75,12 @@ function Hi({ children }: { children: React.ReactNode }) {
 export function WebLanding() {
   const { isMobile, isDesktop } = useResponsive();
   const router = useRouter();
-  const { account, signInWithTestAccount } = useSession();
+  const { account } = useSession();
   const [visitor, setVisitor] = useState<Visitor>('student');
   const [showDemo, setShowDemo] = useState(false);
   // 목업이 440px 고정폭이라 태블릿(820)에서 2단으로 두면 본문 컬럼이 짜부라진다.
   const heroTwoCol = isDesktop;
   const view = VISITOR_VIEW[visitor];
-
-  /** 개발용 계정으로 바로 들어간다. 실제 로그인 수단은 `/login`에 있다. */
-  async function enterDemo(scodyId: string) {
-    const result = await signInWithTestAccount(scodyId);
-    if (result.ok && result.account) {
-      router.replace(homeHrefFor(result.account) as never);
-    }
-  }
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.page}>
@@ -106,29 +98,48 @@ export function WebLanding() {
             {account ? (
               <Button
                 testID="landing-mine"
+                /*
+                  **`hug`이 필요하다.** `primary`이고 `hug`이 없으면 `styles.wide`(width 100%)가
+                  붙는데, 이 자리의 부모(`navRight`)는 가로 줄이고 폭이 내용에서 나온다 —
+                  §8이 "곁다리 자리의 `primary`는 `hug`으로 뺀다"고 이미 정해 둔 자리다.
+                */
+                hug
+                shape="pill"
                 label="내 공간으로 가기"
                 onPress={() => router.replace(homeHrefFor(account) as never)}
               />
             ) : (
               <>
                 {/*
-                  히어로 CTA가 이 화면의 primary다. 상단 바까지 채운 버튼을 두면 같은 화면에
-                  주인공이 둘이 된다 — 무게로 갈라 둔다(§8).
+                  **상단 바 쌍은 낮은 강조 + 채운 알약이다**(D-185). 조사한 사이트가 이 자리에
+                  쓰는 형태다 — Vercel·Linear 모두 `Log in`은 무게를 낮추고 `Sign Up`만 채운다.
+
+                  §8 R1(`primary`는 화면당 하나)과 부딪히는 것처럼 보이지만, 상단 바는 본문이
+                  아니라 chrome이다(테마 아이콘이 이미 그 근거로 여기 있다, D-165③). R1이 실제로
+                  막는 것은 **전폭 강조색 덩어리**이고 알약은 `hug`이라 그 조건에 들지 않는다.
+                  대신 셋을 지킨다: ①상단 바에 채운 것은 하나뿐 ②그 옆은 `secondary`로 무게를
+                  낮춘다 ③히어로 CTA는 `size="lg"`(52 · semibold 16)로 남겨 상단 바(44 ·
+                  medium 15)보다 **크다**. 위계는 색이 아니라 크기와 자리가 말한다.
 
                   **`ghost`는 쓰지 않는다.** 배경도 테두리도 없으면 버튼으로 보이지 않는다 —
                   §8이 "`ghost`는 링크와 펼침에만, 진짜 명령은 `secondary`"라고 이미 정해 둔
-                  자리인데 여기만 어기고 있었다(D-165). 로그인은 이 화면의 두 번째 행동이다.
+                  자리인데 여기만 어기고 있었다(D-165).
                 */}
                 <Button
                   testID="landing-login"
                   variant="secondary"
+                  shape="pill"
                   label="로그인"
                   onPress={() => router.push('/login' as never)}
                 />
                 <Button
                   testID="landing-signup"
-                  variant="secondary"
-                  tone="accent"
+                  /*
+                    `variant`가 기본값 `primary`다. 예전에는 `secondary` + `tone="accent"`라
+                    글자만 청록이었다 — 면을 칠하면 라벨은 `accentText`가 되므로 `tone`을 뺀다.
+                  */
+                  hug
+                  shape="pill"
                   label="회원가입"
                   onPress={() => router.push('/signup' as never)}
                 />
@@ -322,7 +333,6 @@ export function WebLanding() {
               testID="landing-demo-toggle"
               open={showDemo}
               onOpenChange={setShowDemo}
-              onEnter={(id) => void enterDemo(id)}
             />
           ) : null}
         </View>

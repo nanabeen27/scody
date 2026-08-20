@@ -13,27 +13,34 @@ import {
   ScoreCard,
   SourceTag,
   QuestionReview,
+  RecordHighlight,
   Row,
   AppText,
 } from '@/components';
 import { useSession } from '@/session';
-import { byDue, useQueuedItems, useStudentItems } from '@/features/learning';
+import { byDue, formatDuration, useQueuedItems, useStudentItems } from '@/features/learning';
+import { todayISO } from '@/features/clock';
 import { useContent } from '@/features/content';
 import { useProgress, type PerQuestion } from '@/features/progress';
 import { ACADEMY_MEMO_NOTICE } from '@/features/review';
 import { useRecommendations } from '@/features/recommend';
+import {
+  MILESTONE_AXIS,
+  formatCount,
+  milestoneDetail,
+  milestoneUnit,
+  objectParticle,
+  milestonesCrossedToday,
+  newRecordsToday,
+  streakLine,
+  todayLine,
+} from '@/features/records';
 import { useToast } from '@/features/toast';
 import { findContent, type LearningItem } from '@/data';
 import { colors, spacing } from '@/theme/tokens';
 
 /** 한 화면 목록 상한(§8). 그 이상은 섹션 제목 옆 `N개 더 보기`로 펼친다. */
 const PREVIEW = 5;
-
-function fmtTime(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return m > 0 ? `${m}분 ${s}초` : `${s}초`;
-}
 
 /**
  * 제출 결과: 정답률·걸린 시간 + 문항별 정오·해설 + 오답노트 담기.
@@ -67,6 +74,7 @@ export default function ResultScreen() {
     addToQueue,
     removeFromQueue,
     isQueued,
+    records,
     loading: progressLoading,
     loaded: progressLoaded,
     error: progressError,
@@ -321,6 +329,32 @@ export default function ResultScreen() {
 
   }
 
+  /*
+    ## 방금 쌓인 기록
+
+    **화면에 축하 블록을 최대 두 개만 둔다.** 오늘 넘은 milestone 하나와 새로 세운 개인 최고
+    하나다. 넷을 다 세우면 축하가 목록이 되고, 목록이 된 축하는 축하로 읽히지 않는다.
+
+    **milestone이 먼저다.** `30일 연속 학습`은 몇 달에 한 번이고 `하루 최다 풀이`는 초기에 거의
+    매일 갱신된다 — 드문 것을 위에 둔다.
+
+    `records`가 아직 없으면(조회 전·다른 역할) 이 섹션을 그리지 않는다. 0으로 채운 값을 그리면
+    방금 푼 학습이 기록에 남지 않은 것처럼 보인다.
+  */
+  /*
+    **오늘 낸 학습에만 그린다.**
+
+    이 화면은 기록 탭의 `완료한 학습` 줄에서도 열린다 — 지난주에 낸 세트의 결과다. 그런데
+    `milestonesCrossedToday`·`newRecordsToday`·`todayLine`은 **오늘**을 말하므로, 조건 없이
+    그리면 며칠 전 결과 위에 오늘의 축하가 얹힌다. 값 자체는 오늘에 대해 참인데 **배치가 인과를
+    주장한다** — `다 풀었어요.` 아래 굴러가는 숫자가 서면 이 세트가 그 기록을 만든 것으로 읽히고,
+    화면에는 제출일이 없어 어느 날 것인지 확인할 자리도 없다.
+  */
+  const isTodayAttempt = attempt.dateISO === todayISO();
+  const crossed = records && isTodayAttempt ? milestonesCrossedToday(records)[0] : undefined;
+  const beaten = records && isTodayAttempt ? newRecordsToday(records)[0] : undefined;
+  const todaySummary = records && isTodayAttempt ? todayLine(records) : '';
+
   return (
     <Screen
       testID="student-result"
@@ -344,11 +378,97 @@ export default function ResultScreen() {
         {/* 값은 `trailing`에 둔다. `meta`는 `inkTertiary`(3.23:1, AA 미달)라 값을 담지 않는다(§8). */}
         <Row
           title="걸린 시간"
-          trailing={<AppText variant="label">{fmtTime(attempt.timeSec)}</AppText>}
+          trailing={<AppText variant="label">{formatDuration(attempt.timeSec)}</AppText>}
         />
         {/* 영역은 값이 아니라 분류라서 `meta`가 맞다. */}
         <Row title="영역" meta={`국어 · ${item.area}`} />
       </Group>
+
+      {/*
+        **완료를 기록으로 바꾸는 자리다.** 예전에는 이 화면이 이번 풀이만 말하고 끝났다 —
+        정답률과 걸린 시간은 방금의 결과이고, 학생이 계속 하고 싶어지는 이유는 그것이 **쌓인다**는
+        사실이다. 그 사실을 다른 화면으로 미루지 않고 여기서 말한다.
+
+        위 `ScoreCard`(이번 풀이) → 아래 기록(지금까지) 순서를 지킨다. 기록이 먼저 오면 방금 낸
+        학습의 결과를 찾으러 눈이 내려가야 한다.
+      */}
+      {records && todaySummary ? (
+        <Section
+          title="오늘의 기록"
+          action={
+            <Button
+              testID="result-records"
+              variant="secondary"
+              size="sm"
+              tone="accent"
+              hug
+              label="전체 기록"
+              onPress={() => router.push('/student/records' as never)}
+            />
+          }
+        >
+          {crossed ? (
+            <RecordHighlight
+              testID="result-milestone"
+              eyebrow="달성"
+              /*
+                **제목은 축 이름, 큰 숫자는 기준선이다.** 예전에는 제목이
+                `100문항 풀이`(기준선을 품은 라벨)이고 큰 숫자가 `100개`였다 — 화면에서 가장 큰
+                글자가 바로 위 제목의 수를 되풀이하면서 단위는 `문항`에서 `개`로 어긋났다.
+              */
+              title={MILESTONE_AXIS[crossed.kind]}
+              value={crossed.threshold}
+              format={(n) => milestoneUnit(crossed.kind, n)}
+              detail={milestoneDetail(crossed, records)}
+            />
+          ) : null}
+          {beaten ? (
+            <RecordHighlight
+              testID="result-new-record"
+              eyebrow="새로운 기록"
+              title={beaten.label}
+              value={beaten.to}
+              format={beaten.format}
+              detail={
+                beaten.from > 0
+                  ? /* 조사를 계산한다(§19) — `8개을`·`48초을`이 나가고 있었다. */
+                    `지난 최고 ${beaten.format(beaten.from)}${objectParticle(
+                      beaten.format(beaten.from),
+                    )} 넘었어요.`
+                  : '첫 기록이에요.'
+              }
+            />
+          ) : null}
+          <Group>
+            {/*
+              오늘 한 일과 연속 상태. **한 줄에 한 가지**라 두 줄이고, 값이 아니라 사실이므로
+              `subtitle`에 둔다(`trailing`은 비교하는 값의 자리다).
+            */}
+            <Row testID="result-today" title="오늘 한 공부" subtitle={todaySummary} />
+            {/*
+              **문장과 값이 같은 수를 두 번 말하지 않는다.** `subtitle`은 조건만, `trailing`은 수만
+              말한다 — 연속이 0이면 문장에 수가 없으므로 값도 그리지 않는다(§13 · 기록 화면의
+              `records-streak`와 같은 규칙).
+            */}
+            <Row
+              testID="result-streak"
+              title="연속 학습"
+              subtitle={streakLine(records)}
+              trailing={
+                records.streak.current > 0 ? (
+                  <AppText variant="label" numeric>
+                    {`${formatCount(records.streak.current)}일`}
+                  </AppText>
+                ) : null
+              }
+            />
+            {/*
+              **누적 학습 시간은 여기서 말하지 않는다.** 이 화면의 시간은 `걸린 시간`(위)이고,
+              같은 단위의 값이 두 개 서면 어느 것이 이번 풀이인지 흐려진다. 누적은 기록 화면이다.
+            */}
+          </Group>
+        </Section>
+      ) : null}
 
       <Section
         title="문항별로 확인해요"

@@ -27,7 +27,7 @@ import { spacing } from '@/theme/tokens';
  */
 export default function StaffLogin() {
   const router = useRouter();
-  const { signInWithScodyId } = useSession();
+  const { signInWithCredentials } = useSession();
   const [scodyId, setScodyId] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,7 +37,7 @@ export default function StaffLogin() {
     if (busy) return;
     setBusy(true);
     setError(null);
-    const result = await signInWithScodyId(scodyId, password);
+    const result = await signInWithCredentials(scodyId, password);
     setBusy(false);
     if (!result.ok || !result.account) {
       // 어느 쪽이 틀렸는지 말하지 않는다 — 아이디가 있는지 없는지를 알려 주면 계정을 셀 수 있다.

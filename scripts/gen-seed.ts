@@ -35,10 +35,11 @@ import { writeFileSync } from 'node:fs';
   (`src/data/content.ts` 끝) 두 모듈을 합치면 9세트가 두 번 들어가 PK가 충돌한다(실측).
 */
 import { SEED_CONTENT } from '../src/data/content';
-import { ATTEMPTS_SEED, WRONG_NOTES_SEED } from '../src/data/attempts';
+import { STUDY_TIME_FLUSH_CAP_SEC } from '../src/features/records';
+import { ATTEMPTS_SEED, WRONG_NOTES_SEED, type SeededNote } from '../src/data/attempts';
 import { ACADEMY_CLASSES, ASSIGNMENTS_SEED } from '../src/data/fixtures';
 import { ROSTER_STUDENTS } from '../src/data/roster';
-import { daysBetweenISO, todayISO } from '../src/features/clock';
+import { addDaysISO, daysBetweenISO, todayISO } from '../src/features/clock';
 import type { Account, ContentSet, Grade, Role } from '../src/data/types';
 // `.env`를 `process.env`로 올린다(비밀번호를 여기서 읽는다). 규칙은 `scripts/env.ts`에.
 import './env';
@@ -63,6 +64,43 @@ if (DEV_PASSWORD.length < 16) {
   throw new Error(
     '`.env`에 `EXPO_PUBLIC_DEV_LOGIN_PASSWORD`(16자 이상)를 넣어 주세요. ' +
       'seed 계정의 비밀번호이고, 레포에 리터럴로 두지 않습니다.',
+  );
+}
+
+/**
+ * 데모 계정 6종(학생2·학부모2·학원2)의 비밀번호. **약한 값을 넣어도 되는 자리다**(D-184).
+ *
+ * ## 왜 등급을 가르는가
+ *
+ * 사용자가 손으로 타이핑해서 들어갈 수 있는 비밀번호를 원했다. 그런데 이 파일은 **모든 계정에
+ * 같은 평문**을 써 왔으므로, 그 값을 하나로 두면 `admin`도 그 값이 된다 — 그것이 정확히 D-157이
+ * 실측으로 닫은 구멍이다(번들의 자격 증명으로 `admin@scody.test`에 로그인해 `rpc_admin_overview`
+ * 까지 불렸다). **M-DB-7 때문에 더 위험하다**: 공개 사이트가 이 개발 프로젝트를 가리켜서 약한
+ * 계정은 인터넷에서 도달 가능하다.
+ *
+ * 그래서 두 등급으로 가른다. 이 값이 여는 범위는 아래 불변식이 강제한다 — `admin` 역할 없음,
+ * 데모학원 밖 소속 없음, 데모 학부모의 자녀는 데모 학생뿐. 즉 **실데이터 유출 0 · 운영자 JWT 0**이다.
+ *
+ * ## 왜 `EXPO_PUBLIC_` 접두어가 없는가
+ *
+ * 데모 진입은 **사람이 비밀번호를 입력한다**(클릭 로그인이 아니다 — `DemoAccounts`는 이메일만
+ * 보여 준다). 그래서 클라이언트가 이 값을 알 필요가 없고, 접두어를 떼면 **번들에 들어갈 경로
+ * 자체가 사라진다** — D-135의 상수 접기에 기대는 것보다 강하고 D-157의 접두어 규칙도 지킨다.
+ */
+const DEMO_PASSWORD = process.env.DEMO_LOGIN_PASSWORD ?? '';
+if (DEMO_PASSWORD.length < 6) {
+  throw new Error(
+    '`.env`에 `DEMO_LOGIN_PASSWORD`(6자 이상)를 넣어 주세요. 데모 계정 6종의 비밀번호입니다.',
+  );
+}
+/*
+  **둘이 같으면 두 등급이 아니다.** 같은 값을 양쪽에 붙여넣는 사고가 실제로 있을 수 있는 길이고,
+  그러면 `admin`이 데모 비밀번호로 열려 이 설계 전체의 안전 주장이 조용히 무너진다.
+*/
+if (DEMO_PASSWORD === DEV_PASSWORD) {
+  throw new Error(
+    '`DEMO_LOGIN_PASSWORD`와 `EXPO_PUBLIC_DEV_LOGIN_PASSWORD`가 같습니다. ' +
+      '같으면 admin이 데모 비밀번호로 열려 등급을 가른 의미가 없어집니다.',
   );
 }
 
@@ -131,6 +169,19 @@ function dateFromToday(iso: string): string {
   return `(current_date ${days >= 0 ? '+' : '-'} ${Math.abs(days)})::date`;
 }
 
+/**
+ * `day()`에 넣을 "n일 전". **`ANCHOR` 기준이다.**
+ *
+ * 이 파일은 날짜 기준이 둘이다 — `created_at`·`submitted_on`은 `day()`(ANCHOR 기준)를 지나고
+ * `due_on`·`graduated_on`·`reviewed_on`은 `dateFromToday()`(실제 오늘 기준)를 지난다. 두 기준을
+ * 섞으면 몇 달씩 어긋나고(아래 오답노트 블록의 주석이 그 실측을 적어 두었다), 데모 데이터를
+ * 손으로 넣을 때 가장 틀리기 쉬운 자리가 바로 여기다. 그래서 각 기준에 이름을 붙여 둔다.
+ */
+const anchorAgo = (days: number): string => addDaysISO(ANCHOR, -days);
+
+/** `dateFromToday()`에 넣을 "n일 뒤/전". **실제 오늘 기준이다.** */
+const todayShift = (days: number): string => addDaysISO(todayISO(), days);
+
 function day(iso: string): string {
   const diff = Math.round(
     (Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${ANCHOR}T00:00:00Z`)) / 86_400_000,
@@ -156,6 +207,18 @@ const ACADEMY_KEY = 'ac_hanbit';
 const ACADEMY2_NAME = '새길학원';
 const ACADEMY2_KEY = 'ac_saegil';
 
+/**
+ * **세 번째 학원은 데모용이다**(D-184). 데모 계정 6종이 전부 이 학원 안에서 맞물린다 —
+ * 원장 1 · 선생 1(반 담당) · 반 1 · 학생 2, 그리고 학부모 2가 그 학생을 자녀로 갖는다.
+ *
+ * **한빛·새길을 건드리지 않는 것이 이 배치의 목적이다.** 데모 학생을 기존 학원에 넣으면
+ * `verify-rls.ts`의 학원별 단정(한빛 반2·학생14 / 새길 반1·학생2)과 좌석 수가 함께 움직이고,
+ * `minji`에 자녀를 더하면 `자녀 풀이 10건` 단정이 깨진다. 별개 학원이면 전역 총계만 바뀐다.
+ */
+const DEMO_ACADEMY_NAME = '스코디 데모학원';
+const DEMO_ACADEMY_KEY = 'ac_demo';
+const DEMO_CLASS = { key: 'c_demo_1', name: '데모 고1 국어', grade: 1 as const } as const;
+
 // ── 계정 ─────────────────────────────────────────────────────────────────────
 
 interface SeedAccount {
@@ -170,6 +233,11 @@ interface SeedAccount {
   academyRole?: 'director' | 'teacher' | 'student';
   /** 어느 학원인지. 비우면 한빛학원이다. */
   academyKey?: string;
+  /**
+   * 비밀번호 등급. `demo`는 약한 공용 비밀번호(`DEMO_LOGIN_PASSWORD`)를 쓴다 —
+   * 아래 불변식이 그 자격을 검사한다. 비우면 기존 등급(16자 이상)이다.
+   */
+  tier?: 'demo';
   entitlements: { kind: 'personal' | 'academy'; payer: 'student' | 'parent' | 'academy'; label: string }[];
 }
 
@@ -289,13 +357,153 @@ const ACCOUNTS: readonly SeedAccount[] = [
     academyKey: ACADEMY2_KEY,
     entitlements: [],
   },
+
+  /*
+    ── 데모 계정 6종 (D-184) ────────────────────────────────────────────────
+
+    화면의 테스트 계정 목록이 보여 주는 것은 **이 여섯뿐이다.** 위 열하나는 seed와 E2E·검증
+    스크립트가 계속 쓰지만 목록에는 없다(`src/session/devAccounts.ts`).
+
+    **`scodyId`를 짧게 잡았다.** 이메일이 `{scodyId}@scody.test`로 파생되고(아래 계정 블록),
+    사람이 그것을 **손으로 친다** — `student1@scody.test`는 19자로 칠 수 있지만
+    `demo.student1@scody.test`는 그렇지 않다.
+
+    **번호 대역은 `010-6000`이다.** 기존 대역(1000 학생 · 2000 학부모 · 3000 한빛 · 4000 새길 ·
+    9000 운영)뿐 아니라 **`010-5000`도 쓸 수 없다** — `e2e/auth-flow.spec.ts`가 가입 흐름에서
+    `010-5000-1234`·`-5678`·`-4321`을 "아직 가입되지 않은 번호"로 쓴다. seed가 그 번호를 가지면
+    `이미 가입된 번호예요`가 떠서 가입 스펙 셋이 깨진다.
+  */
+  {
+    key: 'u_demo_student_1',
+    name: '유하람',
+    scodyId: 'student1',
+    phone: '010-6000-0001',
+    roles: ['student'],
+    grade: 1,
+    academyRole: 'student',
+    academyKey: DEMO_ACADEMY_KEY,
+    tier: 'demo',
+    entitlements: [
+      { kind: 'academy', payer: 'academy', label: '학원 이용권' },
+      { kind: 'personal', payer: 'student', label: '개인 월정액' },
+    ],
+  },
+  {
+    key: 'u_demo_student_2',
+    name: '노도현',
+    scodyId: 'student2',
+    phone: '010-6000-0002',
+    roles: ['student'],
+    grade: 1,
+    academyRole: 'student',
+    academyKey: DEMO_ACADEMY_KEY,
+    tier: 'demo',
+    entitlements: [
+      { kind: 'academy', payer: 'academy', label: '학원 이용권' },
+      { kind: 'personal', payer: 'parent', label: '학부모 결제 구독' },
+    ],
+  },
+  {
+    key: 'u_demo_parent_1',
+    name: '유선경',
+    scodyId: 'parent1',
+    phone: '010-6000-0011',
+    roles: ['parent'],
+    tier: 'demo',
+    entitlements: [],
+  },
+  {
+    key: 'u_demo_parent_2',
+    name: '노태식',
+    scodyId: 'parent2',
+    phone: '010-6000-0012',
+    roles: ['parent'],
+    tier: 'demo',
+    entitlements: [],
+  },
+  {
+    key: 'u_demo_director',
+    name: '데모 원장',
+    scodyId: 'academy1',
+    phone: '010-6000-0021',
+    roles: ['academy'],
+    academyRole: 'director',
+    academyKey: DEMO_ACADEMY_KEY,
+    tier: 'demo',
+    entitlements: [],
+  },
+  {
+    /*
+      **선생에게 담당 반이 반드시 있어야 한다.** 세션은 선생에게 `teacherId`가 자기인 반만
+      돌려주므로(`src/session/session.tsx`), 담당 반이 없는 선생 계정은 반·학생 화면이 통째로
+      빈다. 아래 `classes` 블록이 데모 반의 `teacher_id`를 이 계정으로 넣는다.
+    */
+    key: 'u_demo_teacher',
+    name: '데모 선생',
+    scodyId: 'academy2',
+    phone: '010-6000-0022',
+    roles: ['academy'],
+    academyRole: 'teacher',
+    academyKey: DEMO_ACADEMY_KEY,
+    tier: 'demo',
+    entitlements: [],
+  },
 ];
+
+/**
+ * **약한 비밀번호를 쓰는 계정의 자격.**
+ *
+ * 이 검사들이 "D-157의 근거(운영자 JWT·실데이터 유출)가 되살아나지 않는다"는 주장의 전부다.
+ * 주석으로만 두면 다음 사람이 `admin`에 `tier: 'demo'`를 붙이는 순간 **조용히** 깨진다 —
+ * 그래서 기계가 검사한다. 값이 약한 것은 사용자의 선택이고, 그 선택을 안전하게 만드는 것은 범위다.
+ */
+const DEMO_KEYS = new Set(ACCOUNTS.filter((a) => a.tier === 'demo').map((a) => a.key));
+for (const a of ACCOUNTS) {
+  if (a.tier !== 'demo') continue;
+  if (a.roles.includes('admin')) {
+    throw new Error(`${a.key}: 데모 등급에 admin 역할을 줄 수 없습니다(운영자 화면이 열립니다).`);
+  }
+  if (a.academyRole && (a.academyKey ?? ACADEMY_KEY) !== DEMO_ACADEMY_KEY) {
+    throw new Error(`${a.key}: 데모 등급은 데모학원 밖 소속을 가질 수 없습니다.`);
+  }
+}
 
 /** 학부모 → 자녀. 자녀의 학습 기록은 학생 계정에 남는다. */
 const PARENT_CHILDREN: Record<string, readonly string[]> = {
   u_parent: ['u_student_parentpaid', 'u_student_both'],
   u_teacher_parent: ['u_student_academy'],
+  // 데모 학부모는 데모 학생만 본다. 아래 불변식이 그것을 강제한다.
+  u_demo_parent_1: ['u_demo_student_1'],
+  u_demo_parent_2: ['u_demo_student_2'],
 };
+
+/*
+  **데모 학부모의 자녀는 데모 학생뿐이다.** 아니면 약한 비밀번호 계정이 실기록 학생의 이름·정답률·
+  학습 시간을 읽는다 — 위 `DEMO_KEYS` 검사와 같은 목적이고, 이쪽이 실제로 데이터를 여는 자리다.
+*/
+for (const [parent, kids] of Object.entries(PARENT_CHILDREN)) {
+  if (!DEMO_KEYS.has(parent)) continue;
+  for (const kid of kids) {
+    if (!DEMO_KEYS.has(kid)) {
+      throw new Error(`${parent}: 데모 학부모는 데모 학생만 자녀로 가질 수 있습니다(${kid}).`);
+    }
+  }
+}
+
+/*
+  **식별자 중복을 생성 시점에 잡는다.** `profiles`에는 `scody_id`·`phone_digits`·`support_code`
+  유니크 인덱스가 셋 있어서, 겹치면 seed 전체가 `unique violation`으로 죽고 어느 계정 때문인지
+  메시지에 나오지 않는다. `support_code`는 sha1 6자라 충돌 확률이 낮지만 0은 아니다.
+*/
+for (const field of ['scodyId', 'phone'] as const) {
+  const seen = new Map<string, string>();
+  for (const a of ACCOUNTS) {
+    const v = a[field].trim().toLowerCase();
+    const prev = seen.get(v);
+    if (prev) throw new Error(`${field} 중복: ${v} (${prev} · ${a.key})`);
+    seen.set(v, a.key);
+  }
+}
 
 /** 테스트 계정이 속한 반. 규모용 로스터 반은 옮기지 않는다. */
 const CLASS_KEYS = ['c_kor1', 'c_kor2'] as const;
@@ -441,6 +649,11 @@ w(`truncate table`);
 w(
   [
     'public.learning_events',
+    /*
+      학습 시간도 append-only다(0043) — 앱 역할은 지울 수 없다. 목록에서 빠지면 `db:verify`와
+      앱 조작이 남긴 조각이 실행마다 쌓여 `실제 학습 시간`이 영구히 늘어난다.
+    */
+    'public.study_activity',
     'public.audit_logs',
     'public.impersonation_sessions',
     'public.payment_records',
@@ -523,7 +736,7 @@ for (const a of ACCOUNTS) {
     `insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, ${AUTH_TOKEN_COLUMNS.join(', ')})`,
   );
   w(
-    `values ('00000000-0000-0000-0000-000000000000', ${q(id)}, 'authenticated', 'authenticated', ${q(email)}, crypt(${q(DEV_PASSWORD)}, gen_salt('bf')), now(), now() - interval '90 days', now(), '{"provider":"email","providers":["email"]}', ${q(JSON.stringify({ name: a.name }))}, ${AUTH_TOKEN_COLUMNS.map(() => "''").join(', ')})`,
+    `values ('00000000-0000-0000-0000-000000000000', ${q(id)}, 'authenticated', 'authenticated', ${q(email)}, crypt(${q(a.tier === 'demo' ? DEMO_PASSWORD : DEV_PASSWORD)}, gen_salt('bf')), now(), now() - interval '90 days', now(), '{"provider":"email","providers":["email"]}', ${q(JSON.stringify({ name: a.name }))}, ${AUTH_TOKEN_COLUMNS.map(() => "''").join(', ')})`,
   );
   w(`on conflict (id) do nothing;`);
   w(
@@ -601,10 +814,224 @@ w();
 // ── 학원 ─────────────────────────────────────────────────────────────────────
 
 const peerCount = PEER_KEYS.length;
+/*
+  **한빛학원의 재원생만 센다.** 좌석 수를 여기서 파생하는데(`contract_seats`), 예전에는
+  `academyKey`를 보지 않아 다른 학원의 학생까지 함께 셌다. 지금까지는 `academyRole === 'student'`가
+  한빛 소속(doyun·yerin)뿐이라 우연히 맞았고, 데모 학생 둘이 들어오면 한빛 좌석이 27 → 29로
+  부풀어 학원 대시보드의 좌석 활용률이 **조용히 거짓을 말한다**(E2E가 좌석을 단정하지 않아
+  드러나지 않는다). D-184에서 함께 고쳤다.
+*/
 const academyStudents = [
-  ...ACCOUNTS.filter((a) => a.academyRole === 'student').map((a) => a.key),
+  ...ACCOUNTS.filter(
+    (a) => a.academyRole === 'student' && (a.academyKey ?? ACADEMY_KEY) === ACADEMY_KEY,
+  ).map((a) => a.key),
   ...PEER_KEYS,
 ];
+/** 데모학원 재원생. 좌석 수를 이 수에서 파생한다. */
+const demoStudents = ACCOUNTS.filter(
+  (a) => a.academyRole === 'student' && a.academyKey === DEMO_ACADEMY_KEY,
+).map((a) => a.key);
+
+/*
+  ── 데모학원의 배정·풀이·오답노트 (D-184) ──────────────────────────────────
+
+  **콘텐츠 세트를 새로 만들지 않는다.** 기존 세트를 배정한다(한빛이 `ct_acad_1`을 그렇게 쓴다) —
+  그러면 `verify-rls.ts`의 `content_sets`·`questions` 단정을 손대지 않는다. 새길학원이 자기 세트를
+  만든 것은 **콘텐츠 격리를 실측하려는** 목적이었고, 데모학원에는 그 목적이 없다.
+*/
+const DEMO_ASSIGNMENTS = [
+  {
+    key: 'a_demo_1',
+    setOldId: 'ct_gram_1',
+    title: '맞춤법 점검',
+    /*
+      **마감이 완결된 주에 있어야 한다.** 학원 대시보드의 `제출률`·`평균 정답률`은 창의 오른쪽 끝을
+      `lastCompleteWeek`(지난주 월요일)로 잡는다 — 진행 중인 주를 넣으면 마감이 남아 있어 값이
+      통째로 내려앉기 때문이다(`src/features/academyStats.ts`). 처음에는 `-3`으로 뒀더니 배정 둘이
+      모두 이번 주에 들어가 **원장·선생 대시보드의 머리 지표가 `—`였다**(실측: 한빛은 95%).
+
+      `-10`인 이유: 어떤 요일에 seed를 돌려도 완결된 주에 떨어진다(일요일에 돌려도 이번 주
+      월요일보다 4일 앞이다). `-4`는 seed를 돌리는 요일에 따라 이번 주에 남을 수 있다.
+    */
+    dueDays: -10,
+    /** 제출: 학생 → [며칠 전, 틀린 개수, 걸린 초]. 없으면 미제출이다. */
+    submissions: {
+      u_demo_student_1: { agoDays: 11, wrong: 2, timeSec: 520 },
+      u_demo_student_2: { agoDays: 10, wrong: 4, timeSec: 610 },
+    } as Record<string, { agoDays: number; wrong: number; timeSec: number }>,
+  },
+  {
+    key: 'a_demo_2',
+    setOldId: 'ct_read_1',
+    title: '비판적 읽기 연습',
+    dueDays: 5,
+    // 학생2는 내지 않았다 — 학원 제출 현황과 학부모 리포트의 `미제출`을 화면에서 확인하는 자리다.
+    submissions: {
+      u_demo_student_1: { agoDays: 1, wrong: 1, timeSec: 480 },
+    } as Record<string, { agoDays: number; wrong: number; timeSec: number }>,
+  },
+] as const;
+
+/**
+ * 데모 학생의 개인 학습 풀이.
+ *
+ * **학생1의 배열이 기록 화면을 의미 있게 만든다.** `-1~-5` 다섯 날이 붙어 있어 연속이 0이 아니고,
+ * 28일 잔디에 아홉 날이 들어가고(모두 채점 문항 3개 이상 = 학습일), `-31`이 8주 막대의 먼 쪽을
+ * 채워 **주간 비교에 비교할 상대**가 생긴다. 시간 합은 약 113분이라 `실제 학습 시간`이 0분이 아니다.
+ *
+ * **날짜마다 세트가 다르다.** `attempts_target_no_key`가 `(학생, 출처, 세트, 회차)` 유니크라
+ * 같은 세트를 같은 회차로 두 번 넣을 수 없다.
+ *
+ * 연속·보호 숫자는 **seed를 돌리는 요일에 따라 달라진다**(주 경계가 월요일이다) — 그래서
+ * `verify-rls`에서 그 값을 등호로 단정하지 않는다.
+ */
+const DEMO_ATTEMPTS = [
+  { student: 'u_demo_student_1', setOldId: 'ct_gram_bank_spelling', agoDays: 1, wrong: 4, timeSec: 830 },
+  { student: 'u_demo_student_1', setOldId: 'ct_read_2', agoDays: 2, wrong: 2, timeSec: 505 },
+  { student: 'u_demo_student_1', setOldId: 'ct_lit_1', agoDays: 3, wrong: 2, timeSec: 480 },
+  { student: 'u_demo_student_1', setOldId: 'ct_gram_core', agoDays: 4, wrong: 6, timeSec: 1180 },
+  { student: 'u_demo_student_1', setOldId: 'ct_read_1', agoDays: 5, wrong: 3, timeSec: 512 },
+  { student: 'u_demo_student_1', setOldId: 'ct_lit_2', agoDays: 9, wrong: 3, timeSec: 470 },
+  { student: 'u_demo_student_1', setOldId: 'ct_gram_bank_spacing', agoDays: 12, wrong: 5, timeSec: 790 },
+  { student: 'u_demo_student_1', setOldId: 'ct_read_3', agoDays: 17, wrong: 4, timeSec: 610 },
+  { student: 'u_demo_student_1', setOldId: 'ct_lit_3', agoDays: 23, wrong: 3, timeSec: 590 },
+  { student: 'u_demo_student_1', setOldId: 'ct_gram_bank_honorific', agoDays: 31, wrong: 6, timeSec: 800 },
+  // 학생2는 가벼운 기록이다 — 같은 화면이 적은 데이터에서 어떻게 보이는지 확인하는 자리다.
+  { student: 'u_demo_student_2', setOldId: 'ct_gram_1', agoDays: 2, wrong: 5, timeSec: 500 },
+  { student: 'u_demo_student_2', setOldId: 'ct_read_1', agoDays: 6, wrong: 4, timeSec: 540 },
+  { student: 'u_demo_student_2', setOldId: 'ct_lit_1', agoDays: 14, wrong: 6, timeSec: 560 },
+] as const;
+
+/**
+ * 데모 학생의 오답노트. `SeededNote`와 같은 모양으로 만들어 `noteRows`에 붙이면 노트·복습 기록·
+ * 학습 시간 조각·활동 이벤트 삽입이 전부 따라온다.
+ *
+ * **`n`은 세트 안 문항 번호(1부터)다.** 문항 id를 직접 적지 않는 이유: `ct_gram_core`의 문항
+ * id는 `ct_gram_2_q1`처럼 세트 이름과 다르다(`WRONG_NOTES_SEED`도 번호로 고른다).
+ *
+ * 다섯 상태를 일부러 다 덮는다 — 졸업 · 오늘 볼 것 · 멈춘 것 · 정리 안 한 것 · 학원 출처.
+ * `stuck`은 `due_on`이 반드시 null이다(`wrong_notes_due_matches_state` 제약).
+ */
+const DEMO_NOTES = [
+  {
+    student: 'u_demo_student_1',
+    setOldId: 'ct_read_1',
+    n: 3,
+    source: 'personal' as const,
+    createdAgo: 2,
+    state: 'graduated' as const,
+    dueIn: 22,
+    streak: 3,
+    missStreak: 0,
+    dig: '글쓴이 주장과 근거를 갈라 읽지 않았다.',
+    reviews: [
+      { on: -20, correct: true },
+      { on: -13, correct: true },
+      { on: -6, correct: true },
+    ],
+  },
+  {
+    student: 'u_demo_student_1',
+    setOldId: 'ct_lit_1',
+    n: 2,
+    source: 'personal' as const,
+    createdAgo: 3,
+    state: 'queued' as const,
+    dueIn: 0,
+    streak: 1,
+    missStreak: 0,
+    dig: '화자의 태도를 인물의 감정과 섞어 읽었다.',
+    reviews: [{ on: -1, correct: true }],
+  },
+  {
+    // 멈춘 문항. `다른 길로 가 보기` 안내가 나오는 자리다(D-177).
+    student: 'u_demo_student_1',
+    setOldId: 'ct_gram_core',
+    n: 5,
+    source: 'personal' as const,
+    createdAgo: 8,
+    state: 'stuck' as const,
+    dueIn: null,
+    streak: 0,
+    missStreak: 3,
+    dig: '용언의 활용을 외워서 풀고 있다.',
+    reviews: [
+      { on: -5, correct: false },
+      { on: -3, correct: false },
+      { on: -1, correct: false },
+    ],
+  },
+  {
+    // 아직 정리하지 않은 오답(`dig`이 없다). 학생 화면이 그 상태를 어떻게 말하는지 보는 자리다.
+    student: 'u_demo_student_1',
+    setOldId: 'ct_gram_bank_spelling',
+    n: 7,
+    source: 'personal' as const,
+    createdAgo: 1,
+    state: 'queued' as const,
+    dueIn: 0,
+    streak: 0,
+    missStreak: 0,
+    dig: undefined,
+    reviews: [] as readonly { on: number; correct: boolean }[],
+  },
+  {
+    // 학원 배정에서 나온 오답 — `assignment_id`가 채워져 학원 열람 경계에 걸린다.
+    student: 'u_demo_student_1',
+    setOldId: 'ct_gram_1',
+    n: 4,
+    source: 'academy' as const,
+    assignmentKey: 'a_demo_1',
+    // 제출일(-11) 뒤여야 한다 — 담은 오답은 그 풀이에서 나온다.
+    createdAgo: 10,
+    state: 'queued' as const,
+    dueIn: 0,
+    streak: 0,
+    missStreak: 0,
+    dig: undefined,
+    reviews: [] as readonly { on: number; correct: boolean }[],
+  },
+  {
+    student: 'u_demo_student_2',
+    setOldId: 'ct_gram_1',
+    n: 2,
+    source: 'academy' as const,
+    assignmentKey: 'a_demo_1',
+    createdAgo: 9,
+    state: 'queued' as const,
+    dueIn: 0,
+    streak: 0,
+    missStreak: 0,
+    dig: undefined,
+    reviews: [] as readonly { on: number; correct: boolean }[],
+  },
+  {
+    student: 'u_demo_student_2',
+    setOldId: 'ct_read_1',
+    n: 6,
+    source: 'personal' as const,
+    createdAgo: 6,
+    state: 'queued' as const,
+    dueIn: 2,
+    streak: 1,
+    missStreak: 0,
+    dig: '선택지의 범위를 확인하지 않고 골랐다.',
+    reviews: [{ on: -4, correct: true }],
+  },
+] as const;
+
+/**
+ * 틀린 문항을 고르게 흩는다. 위 블록의 배정 제출이 쓰는 규칙과 같다 — 문항별 정오의 근거가
+ * 있어야 오답노트와 정답률이 서로 맞는다.
+ */
+function spreadWrong(ids: readonly string[], count: number): Set<string> {
+  const wrong = new Set<string>();
+  if (count <= 0) return wrong;
+  const step = Math.max(1, Math.floor(ids.length / count));
+  for (let i = 0; i < count; i += 1) wrong.add(ids[(i * step) % ids.length]);
+  return wrong;
+}
+
 
 w(`-- ── 학원 ────────────────────────────────────────────────────────────────`);
 w(`--`);
@@ -613,6 +1040,7 @@ w(`-- 0%도 아닌 값이 되어야 그 지표를 화면에서 확인할 수 있
 w(`-- 갱신일은 seed 실행일 기준으로 정한다. 고정 날짜를 박으면 곧 지난 날이 된다.`);
 w(`--`);
 w(`-- 두 번째 학원(${ACADEMY2_NAME})은 격리 실측용이다. 좌석도 재원생 ${ACADEMY2_STUDENTS.length}명보다 조금 많게 둔다.`);
+w(`-- 세 번째 학원(${DEMO_ACADEMY_NAME})은 데모 계정 6종이 맞물리는 곳이다(D-184).`);
 w(
   `insert into public.academies (id, name, contract_seats, renewal_date, status, created_at) values`,
 );
@@ -620,7 +1048,10 @@ w(
   `  (${q(uuidFor(ACADEMY_KEY))}, ${q(ACADEMY_NAME)}, ${academyStudents.length + 13}, current_date + 120, 'active', now() - interval '90 days'),`,
 );
 w(
-  `  (${q(uuidFor(ACADEMY2_KEY))}, ${q(ACADEMY2_NAME)}, ${ACADEMY2_STUDENTS.length + 3}, current_date + 200, 'active', now() - interval '60 days');`,
+  `  (${q(uuidFor(ACADEMY2_KEY))}, ${q(ACADEMY2_NAME)}, ${ACADEMY2_STUDENTS.length + 3}, current_date + 200, 'active', now() - interval '60 days'),`,
+);
+w(
+  `  (${q(uuidFor(DEMO_ACADEMY_KEY))}, ${q(DEMO_ACADEMY_NAME)}, ${demoStudents.length + 3}, current_date + 150, 'active', now() - interval '40 days');`,
 );
 w();
 
@@ -650,6 +1081,8 @@ w(
         `  (${q(uuidFor(c.id))}, ${q(uuidFor(ACADEMY_KEY))}, ${q(c.name)}, ${c.grade ?? 'null'}, ${q(uuidFor(c.teacherId))}, now() - interval '80 days')`,
     ),
     `  (${q(uuidFor(ACADEMY2_CLASS.key))}, ${q(uuidFor(ACADEMY2_KEY))}, ${q(ACADEMY2_CLASS.name)}, ${ACADEMY2_CLASS.grade}, ${q(uuidFor('u_saegil_teacher'))}, now() - interval '55 days')`,
+    // 데모 반의 담당은 데모 선생이다 — 그러지 않으면 그 계정의 반·학생 화면이 빈다.
+    `  (${q(uuidFor(DEMO_CLASS.key))}, ${q(uuidFor(DEMO_ACADEMY_KEY))}, ${q(DEMO_CLASS.name)}, ${DEMO_CLASS.grade}, ${q(uuidFor('u_demo_teacher'))}, now() - interval '35 days')`,
   ].join(',\n'),
 );
 w(`;`);
@@ -662,6 +1095,7 @@ w(
     ...ACADEMY2_STUDENTS.map(
       (s) => `  (${q(uuidFor(ACADEMY2_CLASS.key))}, ${q(uuidFor(s.key))})`,
     ),
+    ...demoStudents.map((key) => `  (${q(uuidFor(DEMO_CLASS.key))}, ${q(uuidFor(key))})`),
   ].join(',\n'),
 );
 w(`;`);
@@ -703,14 +1137,19 @@ w(`-- E2E는 이 파일에서 값을 읽는다(\`e2e/_seed.ts\`의 \`inviteToken
 w(`--`);
 w(`-- 새길학원 초대도 하나 둔다. **역할별 첫 토큰이 한빛학원 것이어야 한다** —`);
 w(`-- \`e2e/_seed.ts\`의 \`inviteToken(role)\`이 이 블록에서 역할별 첫 행을 읽는다.`);
+/*
+  **데모학원 초대는 만들지 않는다.** 데모 계정 여섯은 이미 소속이 있어서 초대가 필요 없고,
+  이 목록에 행을 더하면 `e2e/_seed.ts`의 역할별 첫 행 파싱이 흔들릴 위험만 생긴다(D-184).
+*/
+const inviteRows = [
+  [inviteTokenFor('INV-S-'), 'student', ACADEMY_KEY, 'u_academy_director'],
+  [inviteTokenFor('INV-P-'), 'parent', ACADEMY_KEY, 'u_academy_director'],
+  [inviteTokenFor('INV-T-'), 'teacher', ACADEMY_KEY, 'u_academy_director'],
+  [inviteTokenFor('INV-S-'), 'student', ACADEMY2_KEY, 'u_saegil_director'],
+];
 w(`insert into public.invites (token, academy_id, invitee_role, inviter_id) values`);
 w(
-  [
-    [inviteTokenFor('INV-S-'), 'student', ACADEMY_KEY, 'u_academy_director'],
-    [inviteTokenFor('INV-P-'), 'parent', ACADEMY_KEY, 'u_academy_director'],
-    [inviteTokenFor('INV-T-'), 'teacher', ACADEMY_KEY, 'u_academy_director'],
-    [inviteTokenFor('INV-S-'), 'student', ACADEMY2_KEY, 'u_saegil_director'],
-  ]
+  inviteRows
     .map(
       ([token, role, academy, inviter]) =>
         `  (${q(token)}, ${q(uuidFor(academy))}, ${q(role)}, ${q(uuidFor(inviter))})`,
@@ -840,6 +1279,10 @@ w(
       return `  (${q(uuidFor(a.id))}, ${q(uuidFor(a.classId))}, ${q(uuidFor(a.contentId!))}, ${q(a.title)}, ${day(a.dueDate!)}, ${day(a.dueDate!)}, ${q(uuidFor(cls.teacherId))}, now() - interval '20 days')`;
     }),
     `  (${q(uuidFor(ACADEMY2_ASSIGNMENT.key))}, ${q(uuidFor(ACADEMY2_CLASS.key))}, ${q(uuidFor(ACADEMY2_CONTENT.key))}, ${q(ACADEMY2_ASSIGNMENT.title)}, current_date + 7, current_date + 7, ${q(uuidFor('u_saegil_teacher'))}, now() - interval '10 days')`,
+    ...DEMO_ASSIGNMENTS.map(
+      (a) =>
+        `  (${q(uuidFor(a.key))}, ${q(uuidFor(DEMO_CLASS.key))}, ${q(uuidFor(a.setOldId))}, ${q(a.title)}, ${day(anchorAgo(-a.dueDays))}, ${day(anchorAgo(-a.dueDays))}, ${q(uuidFor('u_demo_teacher'))}, now() - interval '30 days')`,
+    ),
   ].join(',\n'),
 );
 w(`;`);
@@ -853,6 +1296,10 @@ w(
     ),
     ...ACADEMY2_STUDENTS.map(
       (s) => `  (${q(uuidFor(ACADEMY2_ASSIGNMENT.key))}, ${q(uuidFor(s.key))})`,
+    ),
+    /* 대상은 반 학생 전부다. 제출은 위 `attemptRows`가 잇는다 — 없으면 미제출이다. */
+    ...DEMO_ASSIGNMENTS.flatMap((a) =>
+      demoStudents.map((key) => `  (${q(uuidFor(a.key))}, ${q(uuidFor(key))})`),
     ),
   ].join(',\n'),
 );
@@ -942,6 +1389,58 @@ for (const [studentId, byItem] of Object.entries(ATTEMPTS_SEED)) {
   }
 }
 
+/*
+  데모학원의 배정 제출과 데모 학생의 개인 풀이. 위 두 루프와 같은 모양의 행을 만들어 넣으므로
+  `attempt_answers`·`study_activity`·`learning_events`·`assignment_targets` 연결이 전부 따라온다.
+*/
+for (const a of DEMO_ASSIGNMENTS) {
+  const set = sets.find((x) => x.id === a.setOldId)!;
+  const ids = set.questions.map((x) => x.id);
+  for (const [student, sub] of Object.entries(a.submissions)) {
+    const wrong = spreadWrong(ids, sub.wrong);
+    attemptRows.push({
+      key: `at_${a.key}_${student}`,
+      student,
+      setOldId: set.id,
+      source: 'academy',
+      assignmentOldId: a.key,
+      timeSec: sub.timeSec,
+      day: anchorAgo(sub.agoDays),
+      correct: ids.length - wrong.size,
+      total: ids.length,
+      /* 학원 제출은 고른 선지를 남기지 않는다 — 그 기록에 없는 사실이다(위 루프와 같은 이유). */
+      answers: ids.map((qOldId) => ({ qOldId, picked: null, correct: !wrong.has(qOldId) })),
+    });
+  }
+}
+
+for (const r of DEMO_ATTEMPTS) {
+  const set = sets.find((x) => x.id === r.setOldId)!;
+  const ids = set.questions.map((x) => x.id);
+  const wrong = spreadWrong(ids, r.wrong);
+  attemptRows.push({
+    key: `at_${r.student}_${r.setOldId}`,
+    student: r.student,
+    setOldId: r.setOldId,
+    source: 'personal',
+    timeSec: r.timeSec,
+    day: anchorAgo(r.agoDays),
+    correct: ids.length - wrong.size,
+    total: ids.length,
+    /* 개인 학습은 고른 선지가 남는다. 틀린 문항은 정답 다음 선지를 골랐다고 둔다. */
+    answers: set.questions.map((question) => {
+      const isWrong = wrong.has(question.id);
+      return {
+        qOldId: question.id,
+        picked: isWrong
+          ? (question.answerIndex + 1) % question.choices.length
+          : question.answerIndex,
+        correct: !isWrong,
+      };
+    }),
+  });
+}
+
 w(
   `insert into public.attempts (id, student_id, content_set_id, source, assignment_id, attempt_no, time_sec, submitted_on, correct_count, total_count) values`,
 );
@@ -978,9 +1477,54 @@ w();
 
 // ── 오답노트 ─────────────────────────────────────────────────────────────────
 
-const noteRows = Object.entries(WRONG_NOTES_SEED).flatMap(([studentId, notes]) =>
-  notes.map((n) => ({ studentId, note: n })),
-);
+const noteRows = [
+  ...Object.entries(WRONG_NOTES_SEED).flatMap(([studentId, notes]) =>
+    notes.map((n) => ({ studentId, note: n })),
+  ),
+  /*
+    데모 노트를 같은 모양으로 만들어 붙인다. 아래 삽입 블록과 복습 기록·학습 시간·활동 이벤트가
+    전부 이 배열에서 파생되므로, 여기 붙이는 것으로 다섯 표가 함께 채워진다.
+
+    `dueOn`·`reviews[].on`은 **실제 오늘** 기준이고(`dateFromToday`가 받는다) `createdAt`은
+    `ANCHOR` 기준이다(`day()`가 받는다) — 두 기준을 섞으면 몇 달씩 어긋난다.
+  */
+  ...DEMO_NOTES.map((n): { studentId: string; note: SeededNote } => {
+    const set = sets.find((x) => x.id === n.setOldId)!;
+    const question = set.questions[n.n - 1];
+    return {
+      studentId: n.student,
+      note: {
+        id: `wn_${question.id}`,
+        itemId: n.source === 'academy' ? n.assignmentKey! : `li_${set.id}`,
+        contentId: set.id,
+        source: n.source,
+        area: set.area as string,
+        title: set.title,
+        qId: question.id,
+        prompt: question.prompt,
+        choices: question.choices,
+        answerIndex: question.answerIndex,
+        dig: n.dig,
+        starred: false,
+        mastered: n.state === 'graduated',
+        createdAt: anchorAgo(n.createdAgo),
+        state: n.state,
+        dueOn: n.dueIn == null ? undefined : todayShift(n.dueIn),
+        streak: n.streak,
+        missStreak: n.missStreak,
+        /*
+          `SeededNote['reviews']`로 타입을 맞춘다 — 그러지 않으면 좁은 모양이 되어 아래 삽입
+          블록이 `r.evidence`·`r.recap`을 읽지 못한다(두 시드가 한 배열에 섞이기 때문이다).
+          데모 노트는 그 둘을 쓰지 않는다: 근거·요약은 학생이 화면에서 남기는 것이고, seed가
+          지어내면 `직접 정리한 것`이 아니게 된다.
+        */
+        reviews: n.reviews.map(
+          (r): SeededNote['reviews'][number] => ({ on: todayShift(r.on), correct: r.correct }),
+        ),
+      },
+    };
+  }),
+];
 
 w(`-- ── 오답노트 ${noteRows.length}건 ─────────────────────────────────────────────────`);
 w(`--`);
@@ -999,7 +1543,7 @@ w(`-- RPC 안에서는 절대 세션 범위로 세우지 않는다(PostgREST가 
 w(`-- 가드가 영구히 꺼진다).`);
 w(`select set_config('scody.note_schedule', 'on', false);`);
 w(
-  `insert into public.wrong_notes (id, student_id, question_id, content_set_id, source, assignment_id, picked_index, dig, starred, mastered, created_at, state, due_on, streak, miss_streak) values`,
+  `insert into public.wrong_notes (id, student_id, question_id, content_set_id, source, assignment_id, picked_index, dig, starred, mastered, created_at, state, due_on, streak, miss_streak, graduated_on) values`,
 );
 w(
   noteRows
@@ -1017,7 +1561,21 @@ w(
         직접 센다.
       */
       const dueSql = note.state === 'stuck' ? 'null' : dateFromToday(note.dueOn ?? todayISO());
-      return `  (${q(uuidFor(`wn_${studentId}_${note.id}`))}, ${q(uuidFor(studentId))}, ${q(uuidFor(note.qId))}, ${q(uuidFor(note.contentId))}, ${q(note.source)}, ${assignment}, ${picked}, ${qn(note.dig)}, ${note.starred ? 'true' : 'false'}, ${note.mastered ? 'true' : 'false'}, (${day(note.createdAt)})::timestamptz, ${q(note.state)}, ${dueSql}, ${note.streak}, ${note.missStreak})`;
+      /*
+        **익힘에 닿은 날도 seed가 직접 쓴다.** 0043의 트리거는 `graduated`로 들어오는 INSERT에
+        `today_kst()`를 넣는데, 그러면 몇 주 전에 익힌 오답이 **seed를 돌린 날 익힌 것**이 되어
+        `오늘 오답 1개 익힘`이 화면에 뜬다. 근거는 복습 기록의 마지막 정답일이다 — 0043의
+        백필이 지난 데이터에 쓴 것과 같은 규칙이다.
+      */
+      const gradSql =
+        note.state === 'graduated'
+          ? (() => {
+              const correct = note.reviews.filter((r) => r.correct).map((r) => r.on).sort();
+              const last = correct[correct.length - 1];
+              return last ? dateFromToday(last) : dateFromToday(todayISO());
+            })()
+          : 'null';
+      return `  (${q(uuidFor(`wn_${studentId}_${note.id}`))}, ${q(uuidFor(studentId))}, ${q(uuidFor(note.qId))}, ${q(uuidFor(note.contentId))}, ${q(note.source)}, ${assignment}, ${picked}, ${qn(note.dig)}, ${note.starred ? 'true' : 'false'}, ${note.mastered ? 'true' : 'false'}, (${day(note.createdAt)})::timestamptz, ${q(note.state)}, ${dueSql}, ${note.streak}, ${note.missStreak}, ${gradSql})`;
     })
     .join(',\n'),
 );
@@ -1059,6 +1617,63 @@ if (reviewRows.length > 0) {
   );
   w(`;`);
   w(`alter table public.note_reviews enable trigger note_reviews_event;`);
+  w();
+}
+
+// ── 학습 시간 ────────────────────────────────────────────────────────────────
+
+/*
+  **실제 학습 시간을 seed에도 넣는다.**
+
+  넣지 않으면 `실제 학습 시간`이 모든 화면에서 `0분`이다 — 학생 기록 화면과 학부모 학습 증명이
+  통째로 빈 것처럼 보이고, 그 상태로는 화면을 확인할 수 없다.
+
+  값은 **지어내지 않는다.** 풀이 기록에 이미 걸린 시간(`timeSec`)이 있으므로 그것을 그 날의
+  학습 시간으로 쓰고, 오답 복습은 카드 한 장에 `REVIEW_SEC`을 쓴다. 그러면 시간과 문항 수가
+  서로 모순되지 않는다.
+
+  **한 행의 상한이 900초다**(0043의 `check`). 그 이상은 조각으로 나눈다 — 실제 앱도 60초마다
+  보내므로 하루가 여러 조각인 것이 정상 모양이다.
+*/
+/** 오답 카드 한 장에 쓰는 시간. 지문을 다시 읽고 근거를 고르는 데 걸리는 정도. */
+const REVIEW_SEC = 90;
+/* 한 행의 상한은 `rpc_log_study_time`·`study_activity` 제약과 같은 값이다. 사본을 두지 않는다. */
+const TIME_CHUNK = STUDY_TIME_FLUSH_CAP_SEC;
+
+function chunks(total: number): number[] {
+  const out: number[] = [];
+  let left = Math.max(0, total);
+  while (left > 0) {
+    const take = Math.min(TIME_CHUNK, left);
+    out.push(take);
+    left -= take;
+  }
+  return out;
+}
+
+const timeRows = [
+  ...attemptRows.flatMap((r) =>
+    chunks(r.timeSec).map(
+      (sec) =>
+        `  (${q(uuidFor(r.student))}, ${day(r.day)}, 'solve', ${q(uuidFor(r.key))}, ${sec})`,
+    ),
+  ),
+  ...reviewRows.map(
+    ({ studentId, note, r }) =>
+      `  (${q(uuidFor(studentId))}, ${dateFromToday(r.on)}, 'review', ${q(uuidFor(`wn_${studentId}_${note.id}`))}, ${REVIEW_SEC})`,
+  ),
+];
+
+if (timeRows.length > 0) {
+  w(`-- ── 실제 학습 시간 ─────────────────────────────────────────────────────`);
+  w(`--`);
+  w(`-- 풀이에 걸린 시간과 오답 복습 시간을 그 날의 학습 시간으로 넣는다. 값을 지어내지`);
+  w(`-- 않으므로 문항 수와 시간이 서로 모순되지 않는다. 한 행의 상한(900초)에 맞춰 조각으로 나눈다.`);
+  w(
+    `insert into public.study_activity (student_id, occurred_on, kind, ref_id, active_sec) values`,
+  );
+  w(timeRows.join(',\n'));
+  w(`;`);
   w();
 }
 
@@ -1106,17 +1721,27 @@ w(`-- 앱에서 만들어 보는 것이 그 흐름의 검증이다.`);
 
 writeFileSync('supabase/seed.sql', `${out.join('\n')}\n`, 'utf8');
 
+/*
+  **`scripts/verify-rls.ts`가 등호로 단정하는 값을 그대로 내보낸다.** 예전에는 `학원`이 하드코딩
+  `2`이고 `복습 기록`·`초대`·`프로필 합계`가 아예 없어서, seed를 고친 사람이 그 값을 손으로 세어
+  검증기에 옮겨야 했다 — 옮겨 적기가 되도록 여기서 다 센다(D-184).
+*/
 const counts = {
   '계정(로그인 가능)': ACCOUNTS.length,
+  '  ├ 기존 등급': ACCOUNTS.filter((a) => a.tier !== 'demo').length,
+  '  └ 데모 등급': ACCOUNTS.filter((a) => a.tier === 'demo').length,
   '반 친구': peerCount,
   [`${ACADEMY2_NAME} 학생(로그인 없음)`]: ACADEMY2_STUDENTS.length,
-  학원: 2,
+  '프로필 합계': seedUserIds.length,
+  학원: 3,
   '콘텐츠 세트': sets.length + 1,
   문항: totalQuestions,
-  반: classes.length + 1,
-  배정: ASSIGNMENTS_SEED.length + 1,
+  반: classes.length + 2,
+  배정: ASSIGNMENTS_SEED.length + 1 + DEMO_ASSIGNMENTS.length,
   풀이: attemptRows.length,
   오답노트: noteRows.length,
+  '복습 기록': reviewRows.length,
+  초대: inviteRows.length,
 };
 console.log('supabase/seed.sql 생성');
 for (const [k, v] of Object.entries(counts)) console.log(`  ${k}: ${v}`);

@@ -13,28 +13,11 @@ export interface StudentItems {
 }
 
 /**
- * 표시용 날짜(`7월 24일`). ISO 문자열을 화면에 그대로 내보내지 않는다.
- * 학생·학부모·학원이 같은 형식을 쓰도록 한곳에 둔다.
+ * 표시용 날짜·소요 시간. **구현은 `clock.ts`에 있다** — 이 파일은 훅을 담아 react-native을
+ * 끌어오고, 그러면 검증 스크립트와 `features/records.ts`가 이 모듈을 지날 수 없다.
+ * 화면들이 쓰는 import 경로를 지키려고 다시 내보낸다.
  */
-export function formatDate(iso: string): string {
-  const [, m, d] = iso.split('-');
-  return `${Number(m)}월 ${Number(d)}일`;
-}
-
-/**
- * 표시용 소요 시간(`1시간 15분` · `12분 3초` · `48초`).
- *
- * **한 시간을 넘기면 분 단위로 접는다** — `75분 12초`는 학부모가 다시 계산해야 읽힌다.
- * 학부모 리포트·자세히 보기·학습 상세가 같은 값을 같은 형식으로 말하도록 한곳에 둔다
- * (예전에는 세 화면이 각자 `fmtTime`을 두었고 그중 하나만 시간 분기가 없어서, 같은 75분이
- * 상세에서 `1시간 15분`, 그 학습 상세에서 `75분 12초`였다).
- */
-export function formatDuration(sec: number): string {
-  if (sec >= 3600) return `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분`;
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return m > 0 ? `${m}분 ${s}초` : `${s}초`;
-}
+export { formatDate, formatDuration } from './clock';
 
 /**
  * 오늘 기준 마감 표시. 날짜만 비교하고 시각은 보지 않는다(로컬 자정 기준).

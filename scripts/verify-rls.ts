@@ -58,13 +58,13 @@ function check(label: string, ok: boolean, detail = '') {
 }
 
 /** 그 계정으로 로그인한 클라이언트. 각자 자기 JWT를 들고 있어야 정책이 갈린다. */
-async function signIn(scodyId: string): Promise<SupabaseClient> {
+async function signIn(scodyId: string, password: string = PASSWORD): Promise<SupabaseClient> {
   const client = createClient(URL_, KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const { error } = await client.auth.signInWithPassword({
     email: `${scodyId}@scody.test`,
-    password: PASSWORD,
+    password,
   });
   if (error) throw new Error(`${scodyId} 로그인 실패: ${error.message}`);
   return client;
@@ -145,6 +145,15 @@ async function ownerExec(sql: string, params: unknown[] = []): Promise<void> {
   await owner.query(sql, params);
 }
 
+/** 소유자 접속으로 읽는다. 같은 연결을 쓴다(`ownerExec`가 만든 것). */
+async function ownerRows<T extends Record<string, unknown>>(
+  sql: string,
+  params: unknown[] = [],
+): Promise<T[]> {
+  await ownerExec('select 1');
+  return (await owner!.query<T>(sql, params)).rows;
+}
+
 /** 등록의 **역순**으로 돈다 — 나중에 만든 것을 먼저 치운다. 한 단계가 던져도 나머지는 계속 돈다. */
 async function runCleanups() {
   console.log('\n[정리] 검증이 바꾼 것을 seed 상태로 되돌린다');
@@ -177,9 +186,20 @@ async function verify(anon: SupabaseClient) {
   /*
     seed에 **두 번째 학원**(새길학원)이 들어와 다섯 총계가 움직였다(M-DB-13). 값은 그대로 등호로
     단정한다 — `>=`로 바꾸면 "seed가 정확히 무엇을 넣는지"를 확인하는 이 단정의 목적이 없어진다.
+
+    **세 번째 학원**(스코디 데모학원)과 데모 계정 6종이 들어와 다시 움직였다(D-184). 값은
+    `gen-seed.ts`가 실행 끝에 출력하는 것을 옮겨 적었다 — 그 출력이 여기 등호로 단정하는 항목을
+    전부 내보내도록 함께 고쳤다.
+
+    등호를 지키는 것에는 두 번째 목적이 생겼다: 데모 계정은 약한 비밀번호를 쓰고 공개 사이트가
+    이 프로젝트를 가리키므로(M-DB-7), 누가 들어와 행을 만들면 **이 단정이 그 오염의 유일한
+    감지 수단**이다. `>=`로 풀면 보이지 않게 된다.
   */
-  check('계정 25개(로그인 11 + 반친구 12 + 새길학원 학생 2)', (await count(admin, 'profiles')) === 25);
-  check('학원 2곳(한빛·새길)', (await count(admin, 'academies')) === 2);
+  check(
+    '계정 31개(로그인 17 + 반친구 12 + 새길학원 학생 2)',
+    (await count(admin, 'profiles')) === 31,
+  );
+  check('학원 3곳(한빛·새길·데모)', (await count(admin, 'academies')) === 3);
   check('콘텐츠 14세트', (await count(admin, 'content_sets')) === 14);
   check('문항 192개', (await count(admin, 'questions')) === 192);
   /*
@@ -187,18 +207,63 @@ async function verify(anon: SupabaseClient) {
     치운 뒤 **같은 수로 돌아왔는지** 다시 단정한다. 등호로 단정하는 값 자체는 그대로 둔다.
   */
   const assignmentsAtSeed = await count(admin, 'assignments');
-  check('배정 5건', assignmentsAtSeed === 5);
+  check('배정 7건', assignmentsAtSeed === 7);
   const attemptsAtSeed = await count(admin, 'attempts');
-  check('풀이 32건', attemptsAtSeed === 32);
-  check('오답노트 11건', (await count(admin, 'wrong_notes')) === 11);
+  check('풀이 48건', attemptsAtSeed === 48);
+  check('오답노트 18건', (await count(admin, 'wrong_notes')) === 18);
   /*
     복습 기록. **상태를 주장하는 노트에는 근거 행이 있어야 한다** — `graduated · streak 3`이
     "서로 다른 날 세 번 맞혔다"는 주장이고 그 근거가 이 표다.
   */
-  check('복습 기록 6건', (await count(admin, 'note_reviews')) === 6);
-  check('반 3개', (await count(admin, 'classes')) === 3);
+  check('복습 기록 14건', (await count(admin, 'note_reviews')) === 14);
+  check('반 4개', (await count(admin, 'classes')) === 4);
   const invitesAtSeed = await count(admin, 'invites');
   check('초대 4건(한빛 3 + 새길 1)', invitesAtSeed === 4);
+
+  /*
+    ── 비밀번호가 두 등급으로 갈렸나 (D-184) ──────────────────────────────
+
+    데모 계정 6종은 사람이 타이핑할 수 있는 약한 비밀번호를 쓰고, 나머지는 16자 이상을 쓴다.
+    **이 단정이 그 설계의 안전 주장 전부다** — 그 전에는 어디에도 검사가 없어서, 누가
+    `gen-seed.ts`에서 `tier: 'demo'`를 admin에 붙여도 조용히 통과했다.
+
+    아래 두 방향을 함께 본다. 데모가 열리는 것만 보면 "두 값이 같아졌다"를 잡지 못한다.
+  */
+  const demoPassword = process.env.DEMO_LOGIN_PASSWORD ?? '';
+  if (!demoPassword) {
+    check('`.env`에 DEMO_LOGIN_PASSWORD가 있다', false, '없으면 데모 등급을 확인할 수 없다');
+  } else {
+    /*
+      **인증 엔드포인트로 확인하지 않는다.** 계정 여덟에 로그인을 시도하면 왕복이 여덟인데,
+      GoTrue의 요청 상한(M-DB-15)에 이 스크립트가 이미 가깝다 — 실측으로 확인했다: 이 단정을
+      로그인으로 만들었더니 뒤따르는 `yerin 로그인 실패: Request rate limit reached`로 검증이
+      중단됐다.
+
+      대신 **저장된 해시를 직접 본다.** `crypt(평문, 해시) = 해시`가 bcrypt 검증 관용구이고,
+      한 쿼리로 여덟 계정을 함께 판정한다. 단정은 오히려 강해진다 — 엔드포인트의 응답이 아니라
+      `auth.users`에 실제로 무엇이 들어갔는지를 본다.
+    */
+    const rows = await ownerRows<{ scody_id: string; opens: boolean }>(
+      `select p.scody_id, (u.encrypted_password = crypt($1, u.encrypted_password)) as opens
+         from auth.users u join public.profiles p on p.id = u.id
+        where p.scody_id = any($2)`,
+      [
+        demoPassword,
+        ['student1', 'student2', 'parent1', 'parent2', 'academy1', 'academy2', 'admin', 'hanbit.director'],
+      ],
+    );
+    const opens = new Map(rows.map((r) => [r.scody_id, r.opens]));
+    for (const id of ['student1', 'student2', 'parent1', 'parent2', 'academy1', 'academy2']) {
+      check(`데모 계정 ${id}이 데모 비밀번호로 열린다`, opens.get(id) === true);
+    }
+    /*
+      **반대 방향.** 운영자 계정이 데모 비밀번호로 열리면 D-157이 실측으로 닫은 구멍이
+      되살아난다(번들 자격 증명으로 `rpc_admin_overview`까지 불렸다). 데모가 열리는 것만 보면
+      "두 값이 같아졌다"를 잡지 못한다.
+    */
+    check('admin은 데모 비밀번호로 열리지 않는다', opens.get('admin') === false);
+    check('한빛 원장도 데모 비밀번호로 열리지 않는다', opens.get('hanbit.director') === false);
+  }
 
   /*
     검증이 **행을 남기는** 표의 seed 상태를 적어 둔다. seed는 칭찬·주간 요약·재풀이 요청·운영
@@ -1001,11 +1066,36 @@ async function verify(anon: SupabaseClient) {
     );
   }
 
+  /*
+    **데모학원도 이 검사에 넣는다**(D-184). 학원이 셋인데 격리를 둘만 보면 데모 유출은 검사 밖에
+    있고, 데모 계정은 하필 약한 비밀번호를 쓴다 — 가장 열릴 가능성이 높은 쪽을 검사에서 빼는 것은
+    거꾸로다. 데모 원장은 `DEMO_LOGIN_PASSWORD`로 로그인한다.
+  */
+  const demoDirector = await signIn('academy1', process.env.DEMO_LOGIN_PASSWORD ?? '');
+  const demoId = academyIdOf('스코디 데모학원');
   const sides = [
-    { who: '한빛 원장', client: director, mine: hanbitId, theirs: saegilId },
-    { who: '한빛 선생', client: teacher, mine: hanbitId, theirs: saegilId },
-    { who: '새길 원장', client: saegilDirector, mine: saegilId, theirs: hanbitId },
-    { who: '새길 선생', client: saegilTeacher, mine: saegilId, theirs: hanbitId },
+    { who: '한빛 원장', client: director, mine: hanbitId, theirs: saegilId, ownsContent: true },
+    { who: '한빛 선생', client: teacher, mine: hanbitId, theirs: saegilId, ownsContent: true },
+    {
+      who: '새길 원장',
+      client: saegilDirector,
+      mine: saegilId,
+      theirs: hanbitId,
+      ownsContent: true,
+    },
+    {
+      who: '새길 선생',
+      client: saegilTeacher,
+      mine: saegilId,
+      theirs: hanbitId,
+      ownsContent: true,
+    },
+    /*
+      **데모학원은 콘텐츠를 소유하지 않는다.** 기존 세트를 배정해서 쓰므로(D-184 — 그래야
+      `콘텐츠 14세트` 단정을 손대지 않는다) `owner_academy_id`가 자기인 행이 0이다. 유출 방향은
+      다른 학원과 똑같이 검사하고, `자기 것이 보인다`는 반·로스터로만 확인한다.
+    */
+    { who: '데모 원장', client: demoDirector, mine: demoId, theirs: hanbitId, ownsContent: false },
   ];
 
   /*
@@ -1090,8 +1180,10 @@ async function verify(anon: SupabaseClient) {
   */
   console.log('\n[학원 격리] 자기 학원 것은 보인다(위 단정이 공허하지 않다는 근거)');
   for (const side of sides) {
-    const ownSets = await count(side.client, 'content_sets', `owner_academy_id=${side.mine}`);
-    check(`${side.who}: 자기 학원 콘텐츠가 보인다 (${ownSets}세트)`, ownSets > 0);
+    if (side.ownsContent) {
+      const ownSets = await count(side.client, 'content_sets', `owner_academy_id=${side.mine}`);
+      check(`${side.who}: 자기 학원 콘텐츠가 보인다 (${ownSets}세트)`, ownSets > 0);
+    }
     const ownClasses = await count(side.client, 'classes', `academy_id=${side.mine}`);
     check(`${side.who}: 자기 학원 반이 보인다 (${ownClasses}개)`, ownClasses > 0);
     const ownRoster = await count(side.client, 'v_class_roster');

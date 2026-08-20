@@ -35,6 +35,17 @@ interface Props {
    * 아닌 자리다. 그 밖의 변형은 원래 내용폭이라 굳이 주지 않아도 된다.
    */
   hug?: boolean;
+  /**
+   * 알약 모양(D-185). **`hug` 폭에만 쓴다.**
+   *
+   * 조사한 사이트(Vercel·Linear)가 로그인 전 상단 바의 `로그인`·`회원가입` 쌍에 쓰는 모양이다.
+   * 쓰는 자리는 그 셋뿐이다(`landing-login`·`landing-signup`·`landing-mine`).
+   *
+   * **전폭 버튼에는 주지 않는다.** 999는 짧을 때 알약이고 길어지면 캡슐 배너가 된다 — §8이
+   * `control.trackRadius`에서 이미 같은 판단을 적어 뒀다(한 줄이면 알약, 두 줄이면 둥근 사각형).
+   * 실제 레퍼런스의 전폭 인증 버튼도 8~10px 라운드다. 아래 개발 가드가 그것을 지킨다.
+   */
+  shape?: 'pill';
   leading?: React.ReactNode;
   /** 라벨 뒤 아이콘. 다음 단계로 넘어가는 행동에 화살표를 둘 때 쓴다. */
   trailing?: React.ReactNode;
@@ -63,6 +74,7 @@ export const Button = forwardRef<View, Props>(function Button(
     tone = 'default',
     fullWidth,
     hug,
+    shape,
     leading,
     trailing,
     accessibilityLabel,
@@ -73,6 +85,16 @@ export const Button = forwardRef<View, Props>(function Button(
   },
   ref,
 ) {
+  /*
+    **규칙이 문서에만 있으면 다시 어긴다.** `pill`은 `hug` 폭 전용인데(§8 · D-185) 전폭에 주면
+    캡슐 배너가 된다 — `ActionBar`가 같은 이유로 같은 방식의 경고를 둔다.
+
+    `primary && !hug`도 잡는다: 그 조합은 아래에서 `styles.wide`(width 100%)가 붙어 전폭이 된다.
+  */
+  if (__DEV__ && shape === 'pill' && (fullWidth || (variant === 'primary' && !hug))) {
+    console.warn('Button: shape="pill"은 hug 폭에만 쓴다. 전폭 버튼은 radius.lg다(§8).');
+  }
+
   const textColor =
     variant === 'primary'
       ? colors.accentText
@@ -128,6 +150,8 @@ export const Button = forwardRef<View, Props>(function Button(
         styles.base,
         size === 'sm' && styles.sm,
         size === 'lg' && styles.lg,
+        // `size` 뒤에 온다 — `base`의 `radius.md`와 `lg`의 `radius.lg`를 덮어야 한다.
+        shape === 'pill' && styles.pill,
         stylesByVariant[variant],
         /*
           **주 행동은 좌우로 늘인다.** 강조색이 칠해진 버튼은 그 화면에서 할 일 그 자체라
@@ -174,6 +198,12 @@ const styles = StyleSheet.create({
   wide: { width: '100%' },
   sm: { height: 32, paddingHorizontal: spacing.md },
   lg: { height: 52, borderRadius: radius.lg },
+  /*
+    좌우 여백을 `lg`(16)에서 `xl`(24)로 함께 올린다 — 높이 44에 radius 999면 16으로는 글자가
+    곡선에 붙는다. 모양 결정을 호출부에 흩지 않기 위해 컴포넌트가 함께 정한다(§8: "화면마다
+    붙이면 같은 종류가 화면마다 다른 폭이 된다").
+  */
+  pill: { borderRadius: radius.pill, paddingHorizontal: spacing.xl },
   inner: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   label: { fontFamily: typeface.medium, fontSize: font.size.base },
   labelLg: { fontFamily: typeface.semibold, fontSize: font.size.md },
